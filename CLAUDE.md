@@ -55,6 +55,13 @@ file under `src-tauri/src/providers/` and port it by hand.
 - **OS credential stores are read-only.** `read_os_credential` never writes.
   On macOS the Claude provider reads the Keychain and never refreshes the
   token, because a refresh rotates it and would sign Claude Code out.
+- **The app writes to another tool's file in exactly one place: `crates/core/src/pin.rs`**
+  (pinning an unpinned MCP package), and only on an explicit click after a before/after
+  preview. The rules there are the contract: version from the LOCAL package cache (no
+  registry call), a byte-for-byte replacement of the one JSON string, a re-parse proving the
+  only difference is that string inside an `args` array, refusal if the file's size or mtime
+  moved since the preview, and a backup beside the file. Never "fix" a config by re-encoding
+  it: that reorders keys in a file its owner rewrites constantly.
 - **Never log or print a credential**, including in tests and error strings.
 - **Both platforms must keep compiling.** Windows-only code sits behind
   `#[cfg(windows)]` with a non-Windows counterpart beside it; Windows crates

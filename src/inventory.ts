@@ -14,6 +14,19 @@ interface McpServer {
   target: string;
   package: string | null;
   envCount: number;
+  /** What a one-click pin would write, when the package is unpinned and a version is cached locally. */
+  pinTo: string | null;
+}
+
+interface PinPlan {
+  file: string;
+  package: string;
+  installedVersion: string;
+  from: string;
+  to: string;
+  occurrences: number;
+  fileLen: number;
+  fileMtimeMs: number;
 }
 
 interface Definition {
@@ -78,6 +91,8 @@ const ALL_APPS = "__all__";
 let appFilter = ALL_APPS;
 let host: InventoryHost | null = null;
 let trust: TrustView | null = null;
+/** The pin being previewed, keyed by "client/name", and what happened to it. */
+let pin: { key: string; plan: PinPlan | null; note: string; done: boolean } | null = null;
 const openSections = new Set<string>(["opportunities", "mcp"]);
 
 function esc(s: string): string {
@@ -196,6 +211,27 @@ async function loadTrust(): Promise<void> {
   render();
 }
 
+function pinKey(s: McpServer): string {
+  return `${s.client}/${s.name}`;
+}
+
+function pinPanel(s: McpServer): string {
+  if (pin?.key !== pinKey(s)) return "";
+  if (pin.done) return `<div class="inv-pin"><p class="inv-pin-ok">${esc(pin.note)}</p></div>`;
+  if (!pin.plan) return `<div class="inv-pin"><p class="dt-caption">${esc(pin.note || "Working out the change…")}</p></div>`;
+  const p = pin.plan;
+  return `<div class="inv-pin">
+      <p class="dt-caption">In ${esc(p.file)}${p.occurrences > 1 ? `, ${p.occurrences} places` : ""}:</p>
+      <pre class="inv-diff"><span class="inv-del">- "${esc(p.from)}"</span>\n<span class="inv-add">+ "${esc(p.to)}"</span></pre>
+      <p class="dt-caption">${esc(p.installedVersion)} is what already runs here, read from the local package cache. Nothing else in the file changes, a backup is saved beside it, and the app that uses this server picks the pin up when it restarts.</p>
+      ${pin.note ? `<p class="lg-error" role="alert">${esc(pin.note)}</p>` : ""}
+      <div class="dt-rule-actions"><span class="spacer"></span>
+        <button class="inv-learn" data-pin-cancel>Cancel</button>
+        <button class="lg-save" data-pin-apply>Apply</button>
+      </div>
+    </div>`;
+}
+
 function renderMcp(list: McpServer[]): string {
   const rows = list
     .map((s) => {
@@ -210,8 +246,8 @@ function renderMcp(list: McpServer[]): string {
             <span class="inv-name">${esc(s.name)}</span>
             <span class="inv-sub" title="${esc(what)}">${esc(what)}</span>
           </div>
-          <div class="inv-row-meta">${facts.map((f) => `<span class="inv-fact">${esc(f)}</span>`).join("")}${trustChip(s)}${s.client === "Claude Code" ? scopeChip(s) : `<span class="inv-chip" title="Loaded by ${esc(s.client)}">${esc(s.client)}</span>`}</div>
-        </div>`;
+          <div class="inv-row-meta">${facts.map((f) => `<span class="inv-fact">${esc(f)}</span>`).join("")}${s.pinTo && pin?.key !== pinKey(s) ? `<button class="inv-chip inv-pin-btn" data-pin="${esc(pinKey(s))}" title="Pin to ${esc(s.pinTo)}. Shows the exact change first.">Pin…</button>` : ""}${trustChip(s)}${s.client === "Claude Code" ? scopeChip(s) : `<span class="inv-chip" title="Loaded by ${esc(s.client)}">${esc(s.client)}</span>`}</div>
+        </div>${pinPanel(s)}`;
     })
     .join("");
   const apps = [...new Set((inventory?.mcpServers ?? []).map((s) => s.client))];
@@ -393,6 +429,44 @@ export function setupViews(h: InventoryHost): void {
     const link = target.closest<HTMLElement>("[data-link]");
     if (link) {
       void invoke("open_link", { url: link.dataset.link }).catch(() => {});
+      return;
+    }
+    const pinBtn = target.closest<HTMLElement>("[data-pin]");
+    if (pinBtn) {
+      const server = inventory?.mcpServers.find((s) => pinKey(s) === pinBtn.dataset.pin);
+      if (!server) return;
+      const key = pinKey(server);
+      pin = { key, plan: null, note: "", done: false };
+      render();
+      void invoke<PinPlan>("pin_preview", { name: server.name, client: server.client }).then(
+        (plan) => { if (pin?.key === key) { pin.plan = plan; render(); } },
+        (err) => { if (pin?.key === key) { pin.note = String(err); render(); } },
+      );
+      return;
+    }
+    if (target.closest("[data-pin-cancel]")) {
+      pin = null;
+      render();
+      return;
+    }
+    if (target.closest("[data-pin-apply]") && pin?.plan) {
+      const current = pin;
+      const server = inventory?.mcpServers.find((s) => pinKey(s) === current.key);
+      if (!server) return;
+      const p = current.plan!;
+      void invoke<string>("pin_apply", {
+        name: server.name,
+        client: server.client,
+        seen: { file: p.file, to: p.to, fileLen: p.fileLen, fileMtimeMs: p.fileMtimeMs },
+      }).then(
+        (backup) => {
+          current.done = true;
+          current.note = `Pinned to ${p.to}. The original is saved as ${backup}.`;
+          render();
+          void load(); // the finding should now be gone
+        },
+        (err) => { current.note = String(err); render(); },
+      );
       return;
     }
     const toggle = target.closest<HTMLElement>("[data-toggle]");

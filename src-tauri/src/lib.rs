@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, clients, coaching, digest, forecast, history, httpapi, i18n, inventory, ledger, pricing, providers, spend, trust};
+pub(crate) use aitm_core::{alerts, clients, coaching, digest, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -283,6 +283,42 @@ fn export_table(app: tauri::AppHandle, name: String, headers: Vec<String>, rows:
     use tauri_plugin_opener::OpenerExt;
     let _ = app.opener().reveal_item_in_dir(&file);
     Ok(file.display().to_string())
+}
+
+fn pin_plan_for(name: &str, client: &str) -> Result<pin::PinPlan, String> {
+    let inv = inventory::scan();
+    let server = inv
+        .mcp_servers
+        .iter()
+        .find(|s| s.name == name && s.client == client && s.pin_to.is_some())
+        .ok_or("that server is not unpinned any more, or its version is not in the local cache")?;
+    let package = server.package.as_deref().ok_or("no package to pin")?;
+    let file = server.source_file.as_deref().ok_or("the config file is not known")?;
+    let installed = pin::installed_version(&server.target, package).ok_or("no installed version found locally")?;
+    pin::plan(std::path::Path::new(file), &server.target, package, &installed)
+}
+
+/// What pinning a server would change. Reads only.
+#[tauri::command]
+async fn pin_preview(name: String, client: String) -> Result<pin::PinPlan, String> {
+    tauri::async_runtime::spawn_blocking(move || pin_plan_for(&name, &client))
+        .await
+        .map_err(|e| format!("pin preview: {e}"))?
+}
+
+/// Applies the pin the user was shown. The plan is rebuilt here and must
+/// match what they saw, file size and modification time included.
+#[tauri::command]
+async fn pin_apply(name: String, client: String, seen: pin::PinPlanSeen) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let plan = pin_plan_for(&name, &client)?;
+        if plan.to != seen.to || plan.file != seen.file || plan.file_len != seen.file_len || plan.file_mtime_ms != seen.file_mtime_ms {
+            return Err("this is no longer the change you were shown. Preview again.".to_string());
+        }
+        pin::apply(&plan)
+    })
+    .await
+    .map_err(|e| format!("pin: {e}"))?
 }
 
 /// The sessions behind an area or a day, from the scan cache (no rescan).
@@ -3347,6 +3383,8 @@ pub fn run() {
             get_inventory,
             get_history,
             get_ledger,
+            pin_preview,
+            pin_apply,
             export_table,
             get_trust,
             get_forecast,

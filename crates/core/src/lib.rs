@@ -12,6 +12,7 @@ pub mod httpapi;
 pub mod i18n;
 pub mod inventory;
 pub mod ledger;
+pub mod pin;
 pub mod pricing;
 pub mod providers;
 pub mod rt;

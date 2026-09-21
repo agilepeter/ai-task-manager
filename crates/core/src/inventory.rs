@@ -35,6 +35,13 @@ pub struct McpServer {
     pub package: Option<String>,
     /// How many env vars the server is given. Never their names' values.
     pub env_count: usize,
+    /// When the package is unpinned and a version of it is in the local
+    /// package cache: the spec a one-click pin would write.
+    pub pin_to: Option<String>,
+    /// The config file this entry was read from. Stays inside the process
+    /// (the pin command needs it); never serialized to the UI or a report.
+    #[serde(skip)]
+    pub source_file: Option<String>,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -228,6 +235,8 @@ fn mcp_from_map_for(map: &Value, client: &str, scope: &str, project: Option<&str
                 target,
                 package,
                 env_count: cfg.get("env").and_then(Value::as_object).map_or(0, |e| e.len()),
+                pin_to: None,
+                source_file: None,
             }
         })
         .collect();
@@ -563,8 +572,13 @@ fn other_app_servers(home: &Path) -> Vec<McpServer> {
             Base::Home => Some(home.to_path_buf()),
             Base::AppData => app_data.clone(),
         };
-        if let Some(doc) = root.and_then(|r| read_json(&r.join(rel))) {
-            out.extend(mcp_from_app_json(&doc, client, key));
+        let Some(file) = root.map(|r| r.join(rel)) else { continue };
+        if let Some(doc) = read_json(&file) {
+            let from = Some(file.display().to_string());
+            out.extend(mcp_from_app_json(&doc, client, key).into_iter().map(|mut s| {
+                s.source_file = from.clone();
+                s
+            }));
         }
     }
     let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
@@ -644,12 +658,14 @@ pub fn scan() -> Inventory {
     let mut inv = Inventory::default();
 
     // ~/.claude.json sits beside ~/.claude, or inside a custom config dir.
-    let claude_json = [claude.join(".claude.json"), home.join(".claude.json")]
-        .into_iter()
-        .find_map(|p| read_json(&p));
+    let claude_json_path =
+        [claude.join(".claude.json"), home.join(".claude.json")].into_iter().find(|p| read_json(p).is_some());
+    let claude_json = claude_json_path.as_ref().and_then(|p| read_json(p));
     let mut project_dirs: Vec<String> = Vec::new();
     if let Some(doc) = &claude_json {
         inv.mcp_servers = mcp_from_claude_json(doc);
+        let from = claude_json_path.as_ref().map(|p| p.display().to_string());
+        inv.mcp_servers.iter_mut().for_each(|s| s.source_file = from.clone());
         if let Some(projects) = doc.get("projects").and_then(Value::as_object) {
             project_dirs = projects
                 .keys()
@@ -680,10 +696,19 @@ pub fn scan() -> Inventory {
         inv.skills.extend(definitions_in(&root.join(".claude/skills"), "project", p, true));
         if let Some(doc) = read_json(&root.join(".mcp.json")) {
             let servers = doc.get("mcpServers").unwrap_or(&Value::Null);
-            inv.mcp_servers.extend(mcp_from_map(servers, "project", p));
+            let from = Some(root.join(".mcp.json").display().to_string());
+            inv.mcp_servers.extend(mcp_from_map(servers, "project", p).into_iter().map(|mut s| {
+                s.source_file = from.clone();
+                s
+            }));
         }
     }
     inv.mcp_servers.extend(other_app_servers(&home));
+    for server in &mut inv.mcp_servers {
+        let Some(package) = server.package.as_deref().filter(|p| !is_pinned(p)) else { continue };
+        server.pin_to = crate::pin::installed_version(&server.target, package)
+            .and_then(|v| crate::pin::pin_spec(&server.target, package, &v));
+    }
     let path_dirs: Vec<PathBuf> =
         std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
     inv.tools = find_tools(&home, &path_dirs, &inv.mcp_servers);
@@ -824,6 +849,8 @@ mod tests {
             target: "npx".into(),
             package: package.map(str::to_string),
             env_count,
+            pin_to: None,
+            source_file: None,
         }
     }
 
