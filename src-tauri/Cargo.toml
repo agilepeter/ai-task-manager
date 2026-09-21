@@ -39,7 +39,6 @@ rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 toml = "0.8"
 regex = "1"
 prost = "0.13" # Grok GetRemainingResets protobuf codec
-getrandom = "0.2" # telemetry UUID entropy
 md-5 = "0.11.0"
 
 # Windows-only: WebView2 memory hints, Credential Manager, ACL hardening.

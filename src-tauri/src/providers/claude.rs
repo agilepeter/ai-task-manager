@@ -494,8 +494,19 @@ fn backup_credentials(path: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{identity_from, scoped_id_charset};
+    use super::{identity_from, keychain_token_usable, scoped_id_charset};
     use serde_json::json;
+
+    #[test]
+    fn keychain_token_is_usable_only_before_its_expiry() {
+        let now = 1_000_000;
+        assert!(keychain_token_usable("tok", now + 1, now));
+        // Inside the 60 s refresh margin is still usable: this source never refreshes.
+        assert!(keychain_token_usable("tok", now + 30_000, now));
+        assert!(!keychain_token_usable("tok", now, now));
+        assert!(!keychain_token_usable("tok", now - 1, now));
+        assert!(!keychain_token_usable("", now + 60_000, now));
+    }
 
     #[test]
     fn claude_identity_extraction() {
