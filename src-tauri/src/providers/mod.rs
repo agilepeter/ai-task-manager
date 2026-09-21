@@ -337,8 +337,10 @@ pub fn config_dir() -> PathBuf {
     .clone()
 }
 
-/// Reads a generic credential's blob from Windows Credential Manager.
-pub fn read_windows_credential(target: &str) -> Option<Vec<u8>> {
+/// Reads a generic credential's blob from the OS credential store:
+/// Windows Credential Manager, or the macOS login Keychain.
+#[cfg(windows)]
+pub fn read_os_credential(target: &str) -> Option<Vec<u8>> {
     use windows::core::PCWSTR;
     use windows::Win32::Security::Credentials::{
         CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC,
@@ -358,10 +360,38 @@ pub fn read_windows_credential(target: &str) -> Option<Vec<u8>> {
     }
 }
 
+/// macOS: a generic password looked up by service name. Goes through
+/// `/usr/bin/security` rather than the Security framework on purpose — CLIs
+/// like Claude Code write their Keychain items with that same tool, so the
+/// item's access list already trusts it and the read does not raise a
+/// Keychain prompt attributed to this app. Read-only; never writes.
+#[cfg(target_os = "macos")]
+pub fn read_os_credential(target: &str) -> Option<Vec<u8>> {
+    let out = std::process::Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", target, "-w"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let mut blob = out.stdout;
+    while blob.last().is_some_and(|b| *b == b'\n' || *b == b'\r') {
+        blob.pop();
+    }
+    (!blob.is_empty()).then_some(blob)
+}
+
+/// Other platforms: no OS credential store wired up yet.
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn read_os_credential(_target: &str) -> Option<Vec<u8>> {
+    None
+}
+
 /// Credential blob → text: UTF-8 or UTF-16 LE, unwrapping go-keyring's
 /// `go-keyring-base64:` prefix (used by Go CLIs like gh and Antigravity).
 pub fn credential_string(target: &str) -> Option<String> {
-    let blob = read_windows_credential(target)?;
+    let blob = read_os_credential(target)?;
     let text = String::from_utf8(blob.clone()).ok().or_else(|| {
         if blob.len() % 2 == 0 {
             let utf16: Vec<u16> = blob

@@ -156,7 +156,9 @@ pub async fn snapshot_at(dir: PathBuf, id: String, name: String) -> Snapshot {
 
 async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, String> {
     let path = dir.join(".credentials.json");
-    if !path.exists() {
+    // macOS Claude Code keeps its sign-in in the login Keychain, not on disk.
+    let keychain_raw = if path.exists() { None } else { keychain_credentials(dir) };
+    if !path.exists() && keychain_raw.is_none() {
         return Ok(Snapshot::no_credentials(
             id,
             name,
@@ -164,7 +166,10 @@ async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, 
         ));
     }
 
-    let raw = super::read_small_text(&path, MAX_CRED_BYTES, "credentials")?;
+    let raw = match &keychain_raw {
+        Some(raw) => raw.clone(),
+        None => super::read_small_text(&path, MAX_CRED_BYTES, "credentials")?,
+    };
     let mut doc: Value = serde_json::from_str(&raw).map_err(|e| format!("parse credentials: {e}"))?;
     let oauth = doc
         .get("claudeAiOauth")
@@ -189,7 +194,14 @@ async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, 
 
     // Tokens go stale; swap the refresh token for a fresh access token when needed.
     let now_ms = Utc::now().timestamp_millis();
-    if access.is_empty() || expires_at <= now_ms + 60_000 {
+    // The Keychain copy is read-only to us. Refreshing rotates the refresh
+    // token, and with no write-back the rotation would sign Claude Code out,
+    // so an expired Keychain token is reported instead of refreshed. Claude
+    // Code renews it on its next run.
+    if keychain_raw.is_some() && !keychain_token_usable(&access, expires_at, now_ms) {
+        return Err("Claude token expired. Open Claude Code once and it renews itself".into());
+    }
+    if keychain_raw.is_none() && (access.is_empty() || expires_at <= now_ms + 60_000) {
         if refresh.is_empty() {
             return Err("token expired and no refresh token present — run `claude` and log in again".into());
         }
@@ -363,6 +375,36 @@ async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, 
 }
 
 /// `resets_at` arrives as ISO-8601 or epoch (seconds when < 1e10, else ms).
+/// Keychain service name Claude Code uses for its default config dir.
+#[cfg(target_os = "macos")]
+const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+
+/// The credentials JSON from the macOS Keychain, default config dir only.
+/// (A custom CLAUDE_CONFIG_DIR gets a hash-suffixed service name; those
+/// extra accounts are not mapped yet.)
+#[cfg(target_os = "macos")]
+fn keychain_credentials(dir: &std::path::Path) -> Option<String> {
+    if dir != default_dir() {
+        return None;
+    }
+    let blob = super::read_os_credential(KEYCHAIN_SERVICE)?;
+    if blob.len() > MAX_CRED_BYTES as usize {
+        return None;
+    }
+    String::from_utf8(blob).ok()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_credentials(_dir: &std::path::Path) -> Option<String> {
+    None
+}
+
+/// A read-only token is usable until its stated expiry; there is no refresh
+/// margin to keep because this source is never refreshed.
+fn keychain_token_usable(access: &str, expires_at: i64, now_ms: i64) -> bool {
+    !access.is_empty() && expires_at > now_ms
+}
+
 fn parse_reset(v: Option<&Value>) -> Option<i64> {
     match v? {
         Value::String(s) => DateTime::parse_from_rfc3339(s).ok().map(|dt| dt.timestamp_millis()),

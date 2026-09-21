@@ -4,7 +4,6 @@ mod i18n;
 mod pricing;
 mod providers;
 mod spend;
-mod telemetry;
 mod tray_projection;
 
 use std::collections::{HashMap, HashSet};
@@ -1278,48 +1277,9 @@ where
     Ok(())
 }
 
-/// The provider family of a card id: "claude@ab12cd34" → "claude". The only
-/// spelling allowed to leave the machine in telemetry.
+/// The provider family of a card id: "claude@ab12cd34" → "claude".
 fn family_of(id: &str) -> String {
     id.split('@').next().unwrap_or(id).to_string()
-}
-
-/// Telemetry boundary for starred metrics: labels arrive from user config,
-/// but some providers build them from server data (claude formats
-/// "{display_name} weekly" from the usage API). Telemetry promises stable
-/// IDs only, so a label ships verbatim only with a conservative ID shape;
-/// anything else folds into one fixed "other" bucket.
-fn telemetry_starred_id(family: &str, label: &str) -> String {
-    if is_stable_metric_label(label) {
-        format!("{family}/{label}")
-    } else {
-        "other".to_string()
-    }
-}
-
-/// Conservative stable-ID shape: short ASCII (alnum, space, `. _ - %`), no
-/// version-like digit runs ("4.8"), no lowercase slug tokens with digits
-/// ("sonnet-4") — both are server-derived model names, not stable IDs.
-fn is_stable_metric_label(label: &str) -> bool {
-    if label.is_empty() || label.len() > 32 {
-        return false;
-    }
-    if !label
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b' ' | b'.' | b'_' | b'-' | b'%'))
-    {
-        return false;
-    }
-    for w in label.as_bytes().windows(3) {
-        if w[0].is_ascii_digit() && w[1] == b'.' && w[2].is_ascii_digit() {
-            return false;
-        }
-    }
-    !label.split_whitespace().any(|tok| {
-        tok.contains('-')
-            && tok.bytes().any(|b| b.is_ascii_digit())
-            && !tok.bytes().any(|b| b.is_ascii_uppercase())
-    })
 }
 
 fn is_managed_key_card(id: &str) -> bool {
@@ -1876,21 +1836,6 @@ async fn fetch_usage(
         .into_iter()
         .filter(|(id, _)| !card_is_disabled(id, &disabled))
         .collect();
-    // Telemetry never learns account-scoped ids — a claude@<hash8> would
-    // carry an account-derived hash off the machine. Report families,
-    // deduplicated, so a multi-account install looks like "claude" once.
-    // (family_of is applied at EVERY telemetry boundary: enabled ids here,
-    // refresh outcomes, and starred-metric prefixes.)
-    let mut enabled_ids: Vec<String> = {
-        let mut fams: Vec<String> = Vec::new();
-        for (id, _) in &futs {
-            let fam = family_of(id);
-            if fam != "sub2api" && !fams.contains(&fam) {
-                fams.push(fam);
-            }
-        }
-        fams
-    };
     let handles: Vec<_> = futs
         .into_iter()
         .map(|(_, fut)| tauri::async_runtime::spawn(fut))
@@ -1915,12 +1860,6 @@ async fn fetch_usage(
         &current_key_card_generations,
     );
     if !stale_key_card_ids.is_empty() {
-        if !all
-            .iter()
-            .any(|snapshot| family_of(&snapshot.id) == "onenewapi")
-        {
-            enabled_ids.retain(|id| id != "onenewapi");
-        }
         let mut failures = fail_state().lock().unwrap();
         for id in stale_key_card_ids {
             failures.remove(&id);
@@ -2119,12 +2058,6 @@ async fn fetch_usage(
         &current_key_card_generations,
     );
     if !stale_key_card_ids.is_empty() {
-        if !all
-            .iter()
-            .any(|snapshot| family_of(&snapshot.id) == "onenewapi")
-        {
-            enabled_ids.retain(|id| id != "onenewapi");
-        }
         let mut failures = fail_state().lock().unwrap();
         for id in stale_key_card_ids {
             failures.remove(&id);
@@ -2142,78 +2075,6 @@ async fn fetch_usage(
         .unwrap_or_default();
     all.retain(|snapshot| !card_is_disabled(&snapshot.id, &publish_disabled));
     httpapi::publish(&all);
-    // Anonymous daily-rollup telemetry — always on, no in-app switch.
-    // Fire-and-forget: it must never delay or fail a refresh.
-    {
-        let starred_metrics: Vec<String> = cfg
-            .pointer("/layout/providers")
-            .and_then(Value::as_object)
-            .map(|provs| {
-                provs
-                    .iter()
-                    .filter(|(pid, _)| family_of(pid) != "sub2api")
-                    .flat_map(|(pid, entry)| {
-                        entry
-                            .get("starred")
-                            .and_then(Value::as_array)
-                            .map(|a| {
-                                a.iter()
-                                    .filter_map(Value::as_str)
-                                    // Family prefix only — an account-scoped
-                                    // pid would ship an account-derived hash.
-                                    .map(|m| telemetry_starred_id(&family_of(pid), m))
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default()
-                    })
-                    .collect::<Vec<String>>()
-            })
-            .unwrap_or_default();
-        // Two accounts starring the same metric collapse to one entry.
-        let starred_metrics: Vec<String> = {
-            let mut out: Vec<String> = Vec::new();
-            for m in starred_metrics {
-                if !out.contains(&m) {
-                    out.push(m);
-                }
-            }
-            out
-        };
-        let snap = telemetry::ConfigSnapshot {
-            app_version: app.package_info().version.to_string(),
-            enabled_providers: enabled_ids,
-            starred_metrics,
-            appearance: cfg
-                .get("appearance")
-                .and_then(Value::as_str)
-                .unwrap_or("system")
-                .to_string(),
-            density: cfg
-                .get("density")
-                .and_then(Value::as_str)
-                .unwrap_or("regular")
-                .to_string(),
-            refresh_minutes: cfg
-                .get("refreshMinutes")
-                .and_then(Value::as_u64)
-                .unwrap_or(5),
-        };
-        let outcomes: Vec<telemetry::Outcome> = all
-            .iter()
-            .filter(|s| family_of(&s.id) != "sub2api")
-            .map(|s| telemetry::Outcome {
-                // Family only: account-scoped ids never leave the machine.
-                // Multiple accounts fold into one family row (accumulate
-                // sums same-key counters).
-                id: family_of(&s.id),
-                status: s.status.clone(),
-                stale: s.stale,
-                error: s.error.clone().or_else(|| s.warning.clone()),
-            })
-            .collect();
-        let outcomes = telemetry::collapse_onenewapi_outcomes(outcomes);
-        tauri::async_runtime::spawn(telemetry::record(true, snap, outcomes));
-    }
 
     for alert in alerts::evaluate(&all, &cfg) {
         use tauri_plugin_notification::NotificationExt;
@@ -2875,6 +2736,13 @@ async fn codex_redeem_credit(
     providers::codex::redeem_credit(&pid, &credit_id, redeem_request_id).await
 }
 
+/// Self-update is OFF in this fork. The endpoints and the signing pubkey in
+/// tauri.conf.json still belong to upstream Pane, so an enabled updater would
+/// replace this app with Pane. Before flipping this on: point
+/// `updater_endpoint_strings` at our own release feed AND replace the pubkey
+/// in tauri.conf.json with our own minisign key.
+const UPDATES_ENABLED: bool = false;
+
 /// Updater with the app version stamped into the endpoint by us. Tauri's
 /// `{{current_version}}` template arrives percent-encoded and never gets
 /// substituted in query strings, so 0.4.17 installs literally reported
@@ -2925,6 +2793,9 @@ fn build_updater_with(
 /// called from the frontend banner after check_for_update announced one.
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    if !UPDATES_ENABLED {
+        return Err("self-update is disabled in this build".into());
+    }
     let updater = build_updater_for_install(&app)?;
     match updater.check().await.map_err(|e| e.to_string())? {
         Some(update) => {
@@ -2942,6 +2813,9 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 async fn live_update_check(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    if !UPDATES_ENABLED {
+        return Ok(None);
+    }
     Ok(build_updater(app)?
         .check()
         .await
@@ -2997,6 +2871,7 @@ fn now_ms() -> u64 {
 /// Tells WebView2 to release memory while the popover is hidden and return
 /// to normal when it shows. Tauri doesn't expose wry's setter for this, so
 /// we make the same COM calls wry does (SetMemoryUsageTargetLevel).
+#[cfg(windows)]
 fn set_webview_memory_level(window: &tauri::WebviewWindow, low: bool) {
     let _ = window.with_webview(move |webview| unsafe {
         use webview2_com::Microsoft::Web::WebView2::Win32::{
@@ -3011,6 +2886,11 @@ fn set_webview_memory_level(window: &tauri::WebviewWindow, low: bool) {
         }
     });
 }
+
+/// WKWebView (macOS) and WebKitGTK expose no memory-target setter; the OS
+/// reclaims a hidden webview's memory on its own.
+#[cfg(not(windows))]
+fn set_webview_memory_level(_window: &tauri::WebviewWindow, _low: bool) {}
 
 /// Hide the dashboard without the tray-click reopen dance. Esc on the
 /// dashboard (and the hide half of the tray toggle) both land here so
@@ -3212,7 +3092,7 @@ mod tests {
         restore_kimi_wallet_rows,
         hydrate_fetch_time, restore_last_success_after_error,
         retain_current_key_card_results, strip_entry_application_order, strip_icon_ids_to_clear,
-        strip_is_active, strip_reset_ids, telemetry_starred_id, is_stable_metric_label,
+        strip_is_active, strip_reset_ids,
         updater_endpoint_strings, CachedSnap, FailState,
         KeyCardMutationGuard, StripEntry, SNAPSHOT_CACHE_MS, SNAPSHOT_CACHE_NEEDS_FLUSH,
         STALE_GRACE_MS, TEST_PERSIST_LAST_OK_FAIL,
@@ -5000,63 +4880,4 @@ mod tests {
         alerts::forget_snapshot("onenewapi@ticket07-b1");
     }
 
-    #[test]
-    fn starred_metric_ids_pass_stable_labels_verbatim() {
-        assert_eq!(telemetry_starred_id("claude", "Weekly"), "claude/Weekly");
-        assert_eq!(
-            telemetry_starred_id("claude", "Sonnet weekly"),
-            "claude/Sonnet weekly"
-        );
-        assert_eq!(
-            telemetry_starred_id("cursor", "On-demand"),
-            "cursor/On-demand"
-        );
-        assert_eq!(
-            telemetry_starred_id("qwen", "Requests this month"),
-            "qwen/Requests this month"
-        );
-    }
-
-    #[test]
-    fn starred_metric_ids_bucket_server_derived_labels() {
-        // claude builds "{display_name} weekly" from API data; model
-        // versions and slugs must not leave the machine.
-        assert_eq!(telemetry_starred_id("claude", "Sonnet 4.8 weekly"), "other");
-        assert_eq!(
-            telemetry_starred_id("claude", "claude-sonnet-4-8 weekly"),
-            "other"
-        );
-        assert_eq!(telemetry_starred_id("claude", "fable-4 weekly"), "other");
-    }
-
-    #[test]
-    fn starred_metric_ids_bucket_malformed_labels() {
-        assert_eq!(telemetry_starred_id("claude", ""), "other");
-        assert_eq!(telemetry_starred_id("claude", &"x".repeat(33)), "other");
-        // Non-ASCII and out-of-charset punctuation are not stable IDs.
-        assert_eq!(telemetry_starred_id("claude", "Panel · Prod"), "other");
-        assert_eq!(telemetry_starred_id("claude", "quota (usd)"), "other");
-        assert_eq!(telemetry_starred_id("claude", "a/b"), "other");
-    }
-
-    #[test]
-    fn stable_label_shape_matches_the_real_provider_labels() {
-        for label in [
-            "Session",
-            "Weekly",
-            "Sonnet weekly",
-            "Opus weekly",
-            "Usage",
-            "Balance",
-            "Credits",
-            "On-demand",
-            "Total usage",
-            "Requests this month",
-            "Kilo Pass",
-        ] {
-            assert!(is_stable_metric_label(label), "{label} is a stable ID");
-        }
-        assert!(!is_stable_metric_label("4.8"));
-        assert!(!is_stable_metric_label("sonnet-4"));
-    }
 }

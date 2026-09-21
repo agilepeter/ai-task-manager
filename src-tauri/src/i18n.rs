@@ -165,12 +165,33 @@ fn langid_is_ru(langid: u16) -> bool {
 
 /// Windows *display* language, not the regional-format locale.
 /// Same source the popover asks for via `system_ui_locale`.
+#[cfg(windows)]
 pub fn system_ui_locale() -> &'static str {
     use windows::Win32::Globalization::GetUserDefaultUILanguage;
     let langid = unsafe { GetUserDefaultUILanguage() };
     if langid_is_zh(langid) {
         "zh"
     } else if langid_is_ru(langid) {
+        "ru"
+    } else {
+        "en"
+    }
+}
+
+/// macOS / Linux: the first language tag in the usual locale env vars
+/// ("zh_CN.UTF-8" → "zh"). GUI launches often carry none of them, which
+/// lands on "en"; an explicit `locale` in config always wins over this.
+#[cfg(not(windows))]
+pub fn system_ui_locale() -> &'static str {
+    let tag = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .find(|v| !v.is_empty())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if tag.starts_with("zh") {
+        "zh"
+    } else if tag.starts_with("ru") {
         "ru"
     } else {
         "en"
