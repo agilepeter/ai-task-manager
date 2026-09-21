@@ -190,7 +190,7 @@ mod tests {
         let url = format!(
             "https://app.kilo.ai/api/trpc/user.getCreditBlocks,kiloPass.getState?batch=1&input={input}"
         );
-        let (status, body) = tauri::async_runtime::block_on(async {
+        let (status, body) = crate::rt::block_on(async {
             let r = super::http().get(&url).bearer_auth(&key).send().await.expect("request");
             (r.status().as_u16(), r.text().await.unwrap_or_default())
         });

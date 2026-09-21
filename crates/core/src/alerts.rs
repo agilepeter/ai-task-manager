@@ -305,7 +305,7 @@ pub fn forget_snapshot(id: &str) {
     map.retain(|k, _| !k.starts_with(&prefix));
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn insert_state_for_test(key: &str) {
     let Ok(mut map) = states().lock() else {
         return;
@@ -313,7 +313,7 @@ pub fn insert_state_for_test(key: &str) {
     map.insert(key.to_string(), MetricState::default());
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn has_state_for_test(key: &str) -> bool {
     states()
         .lock()

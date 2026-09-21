@@ -123,7 +123,7 @@ fn backfill_claimed() -> &'static Mutex<HashSet<(String, String)>> {
 
 /// One unauthenticated status backfill per stored site, off the refresh path.
 pub fn schedule_backfill_missing_display_units(path: PathBuf) {
-    tauri::async_runtime::spawn(async move {
+    crate::rt::spawn(async move {
         backfill_missing_display_units(&path).await;
     });
 }
@@ -332,7 +332,7 @@ mod tests {
         let key = "sk-live-quota";
         let (origin, join) =
             spawn_billing_server(2, move |origin, req| ok_billing(origin, req, &sub, &usage));
-        let snap = tauri::async_runtime::block_on(snapshot_key(card(&origin, key)));
+        let snap = crate::rt::block_on(snapshot_key(card(&origin, key)));
         let captured = join.join().unwrap();
         assert_eq!(snap.id, "onenewapi@keyidabcdefghijkAAA");
         assert_eq!(snap.name, "Panel · Key 1");
@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn public_http_is_rejected_before_bearer_request() {
-        let snap = tauri::async_runtime::block_on(snapshot_key(card(
+        let snap = crate::rt::block_on(snapshot_key(card(
             "http://example.com",
             "sk-must-not-send",
         )));
@@ -391,7 +391,7 @@ mod tests {
             }
             _ => tiny_http::Response::from_string("followed").with_status_code(200),
         });
-        let snap = tauri::async_runtime::block_on(snapshot_key(card(&origin, "sk-r")));
+        let snap = crate::rt::block_on(snapshot_key(card(&origin, "sk-r")));
         let captured = join.join().unwrap();
         assert_eq!(snap.status, "error");
         assert!(
@@ -417,7 +417,7 @@ mod tests {
             }
             _ => tiny_http::Response::from_string(usage.clone()).with_status_code(200),
         });
-        let snap = tauri::async_runtime::block_on(snapshot_key(card(&origin, key)));
+        let snap = crate::rt::block_on(snapshot_key(card(&origin, key)));
         let _ = join.join();
         assert_eq!(snap.status, "error");
         assert_eq!(snap.id, "onenewapi@keyidabcdefghijkAAA");
@@ -438,7 +438,7 @@ mod tests {
             }
             _ => tiny_http::Response::from_string("missing").with_status_code(404),
         });
-        let snap = tauri::async_runtime::block_on(snapshot_key(card(&origin, "sk-ok")));
+        let snap = crate::rt::block_on(snapshot_key(card(&origin, "sk-ok")));
         let _ = join.join();
         assert_eq!(snap.status, "ok");
         assert_eq!(snap.plan, None);
@@ -456,7 +456,7 @@ mod tests {
             }
             _ => tiny_http::Response::from_string("nope").with_status_code(500),
         });
-        let snap = tauri::async_runtime::block_on(snapshot_key(card(&origin, "sk-ok")));
+        let snap = crate::rt::block_on(snapshot_key(card(&origin, "sk-ok")));
         let _ = join.join();
         assert_eq!(snap.status, "error");
         assert!(
@@ -477,7 +477,7 @@ mod tests {
             }
             _ => tiny_http::Response::from_string("{not json").with_status_code(200),
         });
-        let snap = tauri::async_runtime::block_on(snapshot_key(card(&origin, "sk-ok")));
+        let snap = crate::rt::block_on(snapshot_key(card(&origin, "sk-ok")));
         let _ = join.join();
         assert_eq!(snap.status, "error");
         assert_eq!(snap.error.as_deref(), Some("usage parse"));
@@ -512,7 +512,7 @@ mod tests {
         });
         let a = card_at(&origin, "onenewapi@keyA", "Panel · A", "sk-a");
         let b = card_at(&origin, "onenewapi@keyB", "Panel · B", "sk-b");
-        let (snap_a, snap_b) = tauri::async_runtime::block_on(async {
+        let (snap_a, snap_b) = crate::rt::block_on(async {
             tokio::join!(snapshot_key(a), snapshot_key(b))
         });
         let captured = join.join().unwrap();
@@ -552,7 +552,7 @@ mod tests {
             spawn_billing_server(4, move |origin, req| ok_billing(origin, req, &sub, &usage));
         let a = card_at(&origin, "onenewapi@keyA", "Panel · A", "sk-a");
         let b = card_at(&origin, "onenewapi@keyB", "Panel · B", "sk-b");
-        let (snap_a, snap_b) = tauri::async_runtime::block_on(async {
+        let (snap_a, snap_b) = crate::rt::block_on(async {
             tokio::join!(snapshot_key(a), snapshot_key(b))
         });
         let _ = join.join();
@@ -596,10 +596,10 @@ mod tests {
                 )
             })
             .collect();
-        let snaps = tauri::async_runtime::block_on(async {
+        let snaps = crate::rt::block_on(async {
             let handles: Vec<_> = cards
                 .into_iter()
-                .map(|card| tauri::async_runtime::spawn(snapshot_key(card)))
+                .map(|card| crate::rt::spawn(snapshot_key(card)))
                 .collect();
             let mut out = Vec::new();
             for h in handles {
@@ -644,10 +644,10 @@ mod tests {
                 )
             })
             .collect();
-        let snaps = tauri::async_runtime::block_on(async {
+        let snaps = crate::rt::block_on(async {
             let handles: Vec<_> = cards
                 .into_iter()
-                .map(|card| tauri::async_runtime::spawn(snapshot_key(card)))
+                .map(|card| crate::rt::spawn(snapshot_key(card)))
                 .collect();
             let mut out = Vec::new();
             for h in handles {
@@ -679,7 +679,7 @@ mod tests {
         let usage = usage_body();
         let (origin, join) =
             spawn_billing_server(2, move |origin, req| ok_billing(origin, req, &sub, &usage));
-        let snap = tauri::async_runtime::block_on(snapshot_key(card_with_display(
+        let snap = crate::rt::block_on(snapshot_key(card_with_display(
             &origin,
             "sk-cny",
             DisplayUnit::Cny,
@@ -728,10 +728,10 @@ mod tests {
         .unwrap();
         let cards = key_cards_at(&tmp.path).unwrap();
         assert_eq!(cards[0].display, DisplayUnit::Usd);
-        tauri::async_runtime::block_on(backfill_missing_display_units(&tmp.path));
+        crate::rt::block_on(backfill_missing_display_units(&tmp.path));
         let cards = key_cards_at(&tmp.path).unwrap();
         assert_eq!(cards[0].display, DisplayUnit::Cny);
-        tauri::async_runtime::block_on(backfill_missing_display_units(&tmp.path));
+        crate::rt::block_on(backfill_missing_display_units(&tmp.path));
         let captured = join.join().unwrap();
         assert_eq!(status_hits.load(Ordering::SeqCst), 1);
         assert_eq!(captured.len(), 1);
@@ -784,7 +784,7 @@ mod tests {
         .unwrap();
         let path = tmp.path.clone();
         let backfill = std::thread::spawn(move || {
-            tauri::async_runtime::block_on(backfill_missing_display_units(&path));
+            crate::rt::block_on(backfill_missing_display_units(&path));
         });
         let deadline = Instant::now() + Duration::from_secs(3);
         while status_hits.load(Ordering::SeqCst) == 0 {
@@ -834,8 +834,8 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        tauri::async_runtime::block_on(backfill_missing_display_units(&tmp.path));
-        tauri::async_runtime::block_on(backfill_missing_display_units(&tmp.path));
+        crate::rt::block_on(backfill_missing_display_units(&tmp.path));
+        crate::rt::block_on(backfill_missing_display_units(&tmp.path));
         let captured = join.join().unwrap();
         assert_eq!(status_hits.load(Ordering::SeqCst), 1);
         assert_eq!(captured.len(), 1);

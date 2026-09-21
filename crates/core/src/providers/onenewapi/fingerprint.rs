@@ -332,7 +332,7 @@ mod tests {
         let (origin, join) = spawn_status_server(1, move |_origin, _req| {
             tiny_http::Response::from_string(body.clone()).with_status_code(200)
         });
-        tauri::async_runtime::block_on(probe(&origin)).unwrap();
+        crate::rt::block_on(probe(&origin)).unwrap();
         let captured = join.join().unwrap();
         assert_eq!(captured.len(), 1);
         assert_eq!(captured[0].url, "/api/status");
@@ -355,7 +355,7 @@ mod tests {
                 tiny_http::Response::from_string(body.clone()).with_status_code(200)
             }
         });
-        let result = tauri::async_runtime::block_on(probe(&origin));
+        let result = crate::rt::block_on(probe(&origin));
         assert!(result.is_err(), "redirected status must fail: {result:?}");
         let captured = join.join().unwrap();
         assert_eq!(captured.len(), 1);
@@ -368,7 +368,7 @@ mod tests {
         let (origin, join) = spawn_status_server(1, |_origin, _req| {
             tiny_http::Response::from_string("nope").with_status_code(500)
         });
-        let err = tauri::async_runtime::block_on(probe(&origin)).unwrap_err();
+        let err = crate::rt::block_on(probe(&origin)).unwrap_err();
         assert!(err.contains("HTTP 500"), "{err}");
         let _ = join.join();
     }
@@ -378,14 +378,14 @@ mod tests {
         let (origin, join) = spawn_status_server(1, |_origin, _req| {
             tiny_http::Response::from_string("404 page not found").with_status_code(404)
         });
-        let err = tauri::async_runtime::block_on(probe(&origin)).unwrap_err();
+        let err = crate::rt::block_on(probe(&origin)).unwrap_err();
         assert_eq!(err, "status fingerprint mismatch");
         let _ = join.join();
     }
 
     #[test]
     fn probe_rejects_public_http_before_transport() {
-        let err = tauri::async_runtime::block_on(probe("http://example.com")).unwrap_err();
+        let err = crate::rt::block_on(probe("http://example.com")).unwrap_err();
         assert_eq!(
             err,
             "plain HTTP is only allowed for private, loopback, or link-local IP addresses"
@@ -402,7 +402,7 @@ mod tests {
         let (origin, join) = spawn_status_server(1, move |_origin, _req| {
             tiny_http::Response::from_string(body.clone()).with_status_code(200)
         });
-        let unit = tauri::async_runtime::block_on(probe(&origin)).unwrap();
+        let unit = crate::rt::block_on(probe(&origin)).unwrap();
         assert_eq!(unit, DisplayUnit::Cny);
         let _ = join.join();
     }

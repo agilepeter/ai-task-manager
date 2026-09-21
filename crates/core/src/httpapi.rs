@@ -26,7 +26,7 @@ pub fn publish(snapshots: &[Snapshot]) {
     }
 }
 
-pub(crate) fn publish_restored_sub2api(snapshots: &[Snapshot]) {
+pub fn publish_restored_sub2api(snapshots: &[Snapshot]) {
     let fetched_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     if let Ok(mut published) = latest().lock() {
         if let Some(values) = published.as_array_mut() {
@@ -38,11 +38,11 @@ pub(crate) fn publish_restored_sub2api(snapshots: &[Snapshot]) {
 }
 
 /// Keep the already-published view in sync with successful local mutations.
-pub(crate) fn forget_snapshots(ids: &[String]) {
+pub fn forget_snapshots(ids: &[String]) {
     retain_published(|id| !ids.iter().any(|removed| removed == id));
 }
 
-pub(crate) fn forget_disabled_snapshots(disabled: &[String]) {
+pub fn forget_disabled_snapshots(disabled: &[String]) {
     retain_published(|id| !crate::card_is_disabled(id, disabled));
 }
 
@@ -54,7 +54,7 @@ fn retain_published(keep: impl Fn(&str) -> bool) {
     }
 }
 
-pub(crate) fn rename_snapshots(names: &std::collections::HashMap<String, String>) {
+pub fn rename_snapshots(names: &std::collections::HashMap<String, String>) {
     if let Ok(mut published) = latest().lock() {
         if let Some(snapshots) = published.as_array_mut() {
             for snapshot in snapshots {
@@ -66,7 +66,7 @@ pub(crate) fn rename_snapshots(names: &std::collections::HashMap<String, String>
     }
 }
 
-pub(crate) fn provider_json(s: &Snapshot, fetched_at: &str) -> Value {
+pub fn provider_json(s: &Snapshot, fetched_at: &str) -> Value {
     let lines: Vec<Value> = s
         .metrics
         .iter()

@@ -268,7 +268,7 @@ mod tests {
     #[test]
     #[ignore]
     fn live_probe() {
-        let snap = tauri::async_runtime::block_on(super::snapshot());
+        let snap = crate::rt::block_on(super::snapshot());
         eprintln!(
             "copilot: status={} plan={:?} error={:?} metrics={}",
             snap.status,

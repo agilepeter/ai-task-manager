@@ -100,13 +100,13 @@ pub async fn create_site_at(
     store::insert_site(path, &name, &normalized)
 }
 
-pub(crate) fn normalize_site_url(base_url: &str) -> Result<String, String> {
+pub fn normalize_site_url(base_url: &str) -> Result<String, String> {
     Ok(url::normalize_base_url(base_url)?.origin)
 }
 
 /// Commits a locally validated site edit,
 /// then applies its derived-state cleanup before exposing success.
-pub(crate) fn update_site_consistently<Cleanup>(
+pub fn update_site_consistently<Cleanup>(
     id: String,
     name: Option<String>,
     base_url: Option<String>,
@@ -141,7 +141,7 @@ async fn update_site_at(
     store::update_site(path, id, name, normalized)
 }
 
-pub(crate) fn delete_site_consistently<Cleanup>(id: String, cleanup: Cleanup) -> Result<(), String>
+pub fn delete_site_consistently<Cleanup>(id: String, cleanup: Cleanup) -> Result<(), String>
 where
     Cleanup: FnOnce() -> Result<(), String>,
 {
@@ -164,7 +164,7 @@ pub fn create_key(site_id: String, label: String, api_key: String) -> Result<Cre
     store::create_key(&store_path(), &site_id, &label, &api_key)
 }
 
-pub(crate) fn update_key_consistently<Cleanup>(
+pub fn update_key_consistently<Cleanup>(
     site_id: String,
     key_id: String,
     label: Option<String>,
@@ -181,7 +181,7 @@ where
     )
 }
 
-pub(crate) fn delete_key_consistently<Cleanup>(
+pub fn delete_key_consistently<Cleanup>(
     site_id: String,
     key_id: String,
     cleanup: Cleanup,

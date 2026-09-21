@@ -4343,7 +4343,7 @@ mod tests {
     fn live_probe() {
         // Real export data is echoed here — cap every dump at 200 chars.
         let clip = |s: String| s.chars().take(200).collect::<String>();
-        let csv = tauri::async_runtime::block_on(crate::providers::cursor::fetch_usage_csv());
+        let csv = crate::rt::block_on(crate::providers::cursor::fetch_usage_csv());
         eprintln!("cursor csv: {} bytes", csv.as_deref().map(str::len).unwrap_or(0));
         if let Some(c) = &csv {
             eprintln!("{}", clip(format!("csv header: {}", c.lines().next().unwrap_or(""))));

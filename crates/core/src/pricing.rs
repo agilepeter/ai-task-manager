@@ -572,7 +572,7 @@ pub fn ensure_fresh() {
         }
         let etag = entry.get("etag").and_then(Value::as_str).unwrap_or("").to_string();
 
-        let result = tauri::async_runtime::block_on(async {
+        let result = crate::rt::block_on(async {
             let mut req = providers::http().get(url);
             if !etag.is_empty() {
                 req = req.header("If-None-Match", etag.clone());

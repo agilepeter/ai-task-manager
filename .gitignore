@@ -13,6 +13,7 @@ dist-ssr
 *.local
 
 # Rust build output
+/target
 src-tauri/target
 src-tauri/gen
 

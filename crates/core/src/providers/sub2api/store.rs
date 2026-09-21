@@ -7,14 +7,14 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct StoreFile {
+pub struct StoreFile {
     pub version: u32,
     pub sites: Vec<SiteRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SiteRecord {
+pub struct SiteRecord {
     pub id: String,
     pub name: String,
     pub base_url: String,
@@ -24,7 +24,7 @@ pub(crate) struct SiteRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct KeyRecord {
+pub struct KeyRecord {
     pub id: String,
     pub label: String,
     pub api_key: String,

@@ -11,10 +11,10 @@ use std::time::Duration;
 use super::{Metric, Snapshot};
 
 #[cfg(test)]
-pub(crate) const MAX_TEMP_SNAPSHOT_BYTES: u64 = super::MAX_TEMP_SQLITE_BYTES;
+pub const MAX_TEMP_SNAPSHOT_BYTES: u64 = super::MAX_TEMP_SQLITE_BYTES;
 
 #[cfg(test)]
-pub(crate) fn temp_snapshot_allowed(src_len: u64) -> bool {
+pub fn temp_snapshot_allowed(src_len: u64) -> bool {
     src_len <= MAX_TEMP_SNAPSHOT_BYTES
 }
 
@@ -637,7 +637,7 @@ fn bump_tier_cache_generation() {
 /// Moves the remembered tier aside ahead of a key change. Returns whether
 /// anything was stashed; a failure leaves the cache (and the old key) in
 /// place so the retry still sees a rotation.
-pub(crate) fn stash_remembered_tier_in(dir: &Path) -> Result<bool, String> {
+pub fn stash_remembered_tier_in(dir: &Path) -> Result<bool, String> {
     let _guard = tier_cache_guard();
     bump_tier_cache_generation();
     // Clear litter from a crash between stash and discard/restore.
@@ -650,7 +650,7 @@ pub(crate) fn stash_remembered_tier_in(dir: &Path) -> Result<bool, String> {
 }
 
 /// The key write failed: put the stashed tier back (best effort, logged).
-pub(crate) fn restore_stashed_tier_in(dir: &Path) {
+pub fn restore_stashed_tier_in(dir: &Path) {
     let _guard = tier_cache_guard();
     bump_tier_cache_generation();
     if let Err(e) = std::fs::rename(plan_stash_path(dir), plan_cache_path(dir)) {
@@ -661,7 +661,7 @@ pub(crate) fn restore_stashed_tier_in(dir: &Path) {
 }
 
 /// The key write succeeded: the old account's tier is gone for good.
-pub(crate) fn discard_stashed_tier_in(dir: &Path) {
+pub fn discard_stashed_tier_in(dir: &Path) {
     let _guard = tier_cache_guard();
     bump_tier_cache_generation();
     match std::fs::remove_file(plan_stash_path(dir)) {
@@ -676,7 +676,7 @@ pub(crate) fn discard_stashed_tier_in(dir: &Path) {
 /// Drops the remembered tier — called when the MiniMax key is changed or
 /// cleared so a pasted key never inherits another account's tier. A
 /// leftover stash from a crashed change goes too.
-pub(crate) fn forget_remembered_tier_in(dir: &Path) -> Result<(), String> {
+pub fn forget_remembered_tier_in(dir: &Path) -> Result<(), String> {
     let _guard = tier_cache_guard();
     bump_tier_cache_generation();
     let stash_err = match std::fs::remove_file(plan_stash_path(dir)) {
@@ -696,7 +696,7 @@ pub(crate) fn forget_remembered_tier_in(dir: &Path) -> Result<(), String> {
     }
 }
 
-pub(crate) fn remembered_tier_exists_in(dir: &Path) -> bool {
+pub fn remembered_tier_exists_in(dir: &Path) -> bool {
     plan_cache_path(dir).exists()
 }
 
@@ -807,9 +807,9 @@ fn runtime_db_path() -> Option<PathBuf> {
     })
 }
 
-pub(crate) type FileStamp = (std::time::SystemTime, u64);
+pub type FileStamp = (std::time::SystemTime, u64);
 
-pub(crate) fn file_stamp(path: &Path) -> FileStamp {
+pub fn file_stamp(path: &Path) -> FileStamp {
     std::fs::metadata(path)
         .map(|m| (m.modified().unwrap_or(std::time::UNIX_EPOCH), m.len()))
         .unwrap_or((std::time::UNIX_EPOCH, 0))
@@ -883,7 +883,7 @@ fn collect_cached(
 /// ledger into Temp. Kept so we can still prove leftover WAL files are
 /// wiped and oversized sources are refused.
 #[cfg(test)]
-pub(crate) fn snapshot_db(src_path: &std::path::Path, dst_path: &std::path::Path) -> Result<(), String> {
+pub fn snapshot_db(src_path: &std::path::Path, dst_path: &std::path::Path) -> Result<(), String> {
     if !super::temp_sqlite_copy_allowed(src_path) {
         let src_len = std::fs::metadata(src_path).map(|m| m.len()).unwrap_or(0);
         return Err(format!(
@@ -1591,7 +1591,7 @@ mod tests {
     #[test]
     #[ignore]
     fn live_probe() {
-        let snap = tauri::async_runtime::block_on(super::snapshot());
+        let snap = crate::rt::block_on(super::snapshot());
         eprintln!(
             "minimax: status={} plan={:?} error={:?} metrics={}",
             snap.status,
@@ -1614,7 +1614,7 @@ mod tests {
     #[test]
     #[ignore]
     fn live_probe_mcode() {
-        tauri::async_runtime::block_on(async {
+        crate::rt::block_on(async {
             let Some(login) = super::mcode_login() else {
                 eprintln!("mcode login: none usable (auth.json missing or token expired)");
                 return;

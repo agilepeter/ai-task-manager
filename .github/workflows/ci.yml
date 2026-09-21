@@ -1,0 +1,43 @@
+# Windows is the platform the dev machine cannot build, so CI covers it.
+# macOS is built and tested locally: a macOS runner bills at 10x on a private
+# repo, and a Tauri build is about ten minutes. Add a macOS job only if Mac
+# stops being the daily driver.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "src-tauri/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # tauri::generate_context! embeds the built frontend at compile time.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Core builds without Tauri
+        run: cargo check -p aitm-core
+      - name: Tests
+        run: cargo test --workspace --locked

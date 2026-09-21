@@ -1,11 +1,9 @@
-mod alerts;
-mod httpapi;
-mod inventory;
-mod i18n;
-mod pricing;
-mod providers;
-mod spend;
 mod tray_projection;
+
+// The data layer lives in the core crate; these keep the `alerts::…`,
+// `providers::…` paths used throughout this file and by `tray_projection`.
+pub(crate) use aitm_core::{alerts, httpapi, i18n, inventory, pricing, providers, spend};
+use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -1287,15 +1285,6 @@ where
     Ok(())
 }
 
-/// The provider family of a card id: "claude@ab12cd34" → "claude".
-fn family_of(id: &str) -> String {
-    id.split('@').next().unwrap_or(id).to_string()
-}
-
-fn is_managed_key_card(id: &str) -> bool {
-    matches!(family_of(id).as_str(), "onenewapi" | "sub2api")
-}
-
 /// The plain API-key providers set_api_key accepts, in
 /// %APPDATA%\Pane\<provider>.json. Single source of truth for both the
 /// save command's validation and the credential-context bookkeeping below.
@@ -1342,15 +1331,6 @@ fn api_key_snapshot_ids(provider: &str) -> Vec<String> {
 /// do not share a pot — rotating Kimi must not zero Moonshot's meter.
 fn api_key_baseline_ids(provider: &str) -> Vec<String> {
     vec![provider.to_string()]
-}
-
-/// Managed API families disable all their key cards together.
-/// Claude/Codex extra accounts stay independent of the bare family id.
-fn card_is_disabled(id: &str, disabled: &[String]) -> bool {
-    if disabled.iter().any(|d| d == id) {
-        return true;
-    }
-    is_managed_key_card(id) && disabled.iter().any(|d| d == &family_of(id))
 }
 
 // Owned id/name so dynamically discovered account cards (claude@<hash>)
@@ -3806,18 +3786,42 @@ mod tests {
         assert_eq!(snapshots[0].id, "claude");
     }
 
-    struct SnapCacheGuard(String);
+    /// Owns one id in the process-wide snapshot caches for a test: removes it
+    /// on drop, and holds `SNAP_CACHE_SERIAL` so tests that share an id cannot
+    /// run side by side. Without the lock, one test's drop deleted the entry
+    /// another test was asserting on (about 3 runs in 10 failed).
+    struct SnapCacheGuard {
+        id: String,
+        _serial: Option<std::sync::MutexGuard<'static, ()>>,
+    }
+
+    static SNAP_CACHE_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    thread_local! {
+        /// Guards alive on this thread. Only the first takes the lock, so a
+        /// test may hold several ids without deadlocking on itself.
+        static SNAP_GUARD_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
 
     impl SnapCacheGuard {
         fn new(id: &str) -> Self {
-            Self(id.to_string())
+            let first = SNAP_GUARD_DEPTH.with(|d| {
+                let depth = d.get();
+                d.set(depth + 1);
+                depth == 0
+            });
+            // A test that panicked while holding it must not fail the rest.
+            let serial = first.then(|| SNAP_CACHE_SERIAL.lock().unwrap_or_else(|p| p.into_inner()));
+            Self { id: id.to_string(), _serial: serial }
         }
     }
 
     impl Drop for SnapCacheGuard {
         fn drop(&mut self) {
-            fail_state().lock().unwrap().remove(&self.0);
-            last_ok().lock().unwrap().remove(&self.0);
+            // into_inner: cleanup still has to run after a failed assertion
+            // poisoned these locks, or the next test inherits the entry.
+            fail_state().lock().unwrap_or_else(|p| p.into_inner()).remove(&self.id);
+            last_ok().lock().unwrap_or_else(|p| p.into_inner()).remove(&self.id);
+            SNAP_GUARD_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
         }
     }
 

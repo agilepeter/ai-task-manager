@@ -18,6 +18,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-task-manager"
+version = "0.4.52"
+dependencies = [
+ "aitm-core",
+ "arboard",
+ "base64 0.22.1",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-process",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tokio",
+ "webview2-com",
+ "windows-core 0.61.2",
+]
+
+[[package]]
+name = "aitm-core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "dirs 6.0.0",
+ "md-5",
+ "prost",
+ "regex",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tiny_http",
+ "tokio",
+ "toml 0.8.2",
+ "windows",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2751,38 +2795,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "pane"
-version = "0.4.52"
-dependencies = [
- "arboard",
- "base64 0.22.1",
- "chrono",
- "dirs 6.0.0",
- "md-5",
- "prost",
- "regex",
- "reqwest 0.12.28",
- "rusqlite",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-process",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tiny_http",
- "tokio",
- "toml 0.8.2",
- "webview2-com",
- "windows",
- "windows-core 0.61.2",
 ]
 
 [[package]]

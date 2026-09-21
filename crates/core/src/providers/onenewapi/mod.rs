@@ -2,7 +2,7 @@ mod billing;
 mod fingerprint;
 pub(super) mod ids;
 mod snapshot;
-pub(crate) mod store;
+pub mod store;
 pub(super) mod url;
 
 use serde::Serialize;
@@ -91,7 +91,7 @@ pub async fn probe_site(base_url: String) -> Result<ProbeDto, String> {
     Ok(probe_site_url(&base_url).await?.0)
 }
 
-pub(crate) async fn probe_site_display(
+pub async fn probe_site_display(
     base_url: String,
 ) -> Result<(ProbeDto, fingerprint::DisplayUnit), String> {
     probe_site_url(&base_url).await
@@ -135,13 +135,13 @@ pub async fn create_site_at(
     store::insert_site(path, &name, &normalized, display)
 }
 
-pub(crate) fn normalize_site_url(base_url: &str) -> Result<String, String> {
+pub fn normalize_site_url(base_url: &str) -> Result<String, String> {
     Ok(url::normalize_base_url(base_url)?.origin)
 }
 
 /// Commits a site edit after the caller has fingerprinted a changed origin,
 /// then applies its derived-state cleanup before exposing success.
-pub(crate) fn update_site_consistently<Cleanup>(
+pub fn update_site_consistently<Cleanup>(
     id: String,
     name: Option<String>,
     base_url: Option<String>,
@@ -191,7 +191,7 @@ pub async fn update_site_at(
     store::update_site(path, id, name, new_url, display)
 }
 
-pub(crate) fn delete_site_consistently<Cleanup>(id: String, cleanup: Cleanup) -> Result<(), String>
+pub fn delete_site_consistently<Cleanup>(id: String, cleanup: Cleanup) -> Result<(), String>
 where
     Cleanup: FnOnce() -> Result<(), String>,
 {
@@ -214,7 +214,7 @@ pub fn create_key(site_id: String, label: String, api_key: String) -> Result<Cre
     store::create_key(&store_path(), &site_id, &label, &api_key)
 }
 
-pub(crate) fn update_key_consistently<Cleanup>(
+pub fn update_key_consistently<Cleanup>(
     site_id: String,
     key_id: String,
     label: Option<String>,
@@ -231,7 +231,7 @@ where
     )
 }
 
-pub(crate) fn delete_key_consistently<Cleanup>(
+pub fn delete_key_consistently<Cleanup>(
     site_id: String,
     key_id: String,
     cleanup: Cleanup,
@@ -360,7 +360,7 @@ mod tests {
     fn create_site_probes_then_saves_and_duplicate_returns_id() {
         let tmp = TempStore::new();
         let (origin, join) = spawn_ok_server(1);
-        let created = tauri::async_runtime::block_on(create_site_at(
+        let created = crate::rt::block_on(create_site_at(
             &tmp.path,
             "  ".into(),
             format!("{origin}/v1"),
@@ -372,7 +372,7 @@ mod tests {
         assert_eq!(site.base_url, origin);
         assert_eq!(site.name, "127.0.0.1");
         assert!(site.keys.is_empty());
-        let dup = tauri::async_runtime::block_on(create_site_at(
+        let dup = crate::rt::block_on(create_site_at(
             &tmp.path,
             "Ignored".into(),
             format!("{origin}/"),
@@ -401,7 +401,7 @@ mod tests {
         .to_string();
         let (origin, join) = spawn_status_server(1, 200, body);
         let created =
-            tauri::async_runtime::block_on(create_site_at(&tmp.path, "Panel".into(), origin))
+            crate::rt::block_on(create_site_at(&tmp.path, "Panel".into(), origin))
                 .unwrap();
         let CreateSiteResult::Created { site } = created else {
             panic!("expected created");
@@ -418,7 +418,7 @@ mod tests {
     fn probe_site_returns_plaintext_flag_without_saving() {
         let tmp = TempStore::new();
         let (origin, join) = spawn_ok_server(1);
-        let (dto, display) = tauri::async_runtime::block_on(probe_site_url(&origin)).unwrap();
+        let (dto, display) = crate::rt::block_on(probe_site_url(&origin)).unwrap();
         assert_eq!(dto.base_url, origin);
         assert_eq!(display, fingerprint::DisplayUnit::Usd);
         assert_eq!(dto.hostname, "127.0.0.1");
@@ -432,14 +432,14 @@ mod tests {
         let tmp = TempStore::new();
         let (origin_a, join_a) = spawn_ok_server(1);
         let created =
-            tauri::async_runtime::block_on(create_site_at(&tmp.path, "A".into(), origin_a.clone()))
+            crate::rt::block_on(create_site_at(&tmp.path, "A".into(), origin_a.clone()))
                 .unwrap();
         let CreateSiteResult::Created { site } = created else {
             panic!("expected created");
         };
         let _ = join_a.join();
         let (origin_b, join_b) = spawn_ok_server(1);
-        let updated = tauri::async_runtime::block_on(update_site_at(
+        let updated = crate::rt::block_on(update_site_at(
             &tmp.path,
             &site.id,
             None,
@@ -458,7 +458,7 @@ mod tests {
         let tmp = TempStore::new();
         let (origin_a, join_a) = spawn_ok_server(1);
         let created =
-            tauri::async_runtime::block_on(create_site_at(&tmp.path, "A".into(), origin_a.clone()))
+            crate::rt::block_on(create_site_at(&tmp.path, "A".into(), origin_a.clone()))
                 .unwrap();
         let CreateSiteResult::Created { site } = created else {
             panic!("expected created");
@@ -478,7 +478,7 @@ mod tests {
         };
         let other_key = store::create_key(&tmp.path, &other_site.id, "One", "sk-other").unwrap();
         let (origin_b, join_b) = spawn_ok_server(1);
-        let updated = tauri::async_runtime::block_on(update_site_at(
+        let updated = crate::rt::block_on(update_site_at(
             &tmp.path,
             &site.id,
             None,
@@ -503,7 +503,7 @@ mod tests {
         let tmp = TempStore::new();
         let (origin, join) = spawn_ok_server(1);
         let created =
-            tauri::async_runtime::block_on(create_site_at(&tmp.path, "A".into(), origin.clone()))
+            crate::rt::block_on(create_site_at(&tmp.path, "A".into(), origin.clone()))
                 .unwrap();
         let CreateSiteResult::Created { site } = created else {
             panic!("expected created");
@@ -511,7 +511,7 @@ mod tests {
         let _ = join.join();
         let k1 = store::create_key(&tmp.path, &site.id, "One", "sk-1").unwrap();
         let (bad, join_bad) = spawn_fail_server(1);
-        let err = tauri::async_runtime::block_on(update_site_at(
+        let err = crate::rt::block_on(update_site_at(
             &tmp.path,
             &site.id,
             Some("Renamed".into()),
@@ -534,12 +534,12 @@ mod tests {
         let tmp = TempStore::new();
         let (origin, join) = spawn_ok_server(1);
         let created =
-            tauri::async_runtime::block_on(create_site_at(&tmp.path, "Old".into(), origin.clone()))
+            crate::rt::block_on(create_site_at(&tmp.path, "Old".into(), origin.clone()))
                 .unwrap();
         let CreateSiteResult::Created { site } = created else {
             panic!("expected created");
         };
-        let updated = tauri::async_runtime::block_on(update_site_at(
+        let updated = crate::rt::block_on(update_site_at(
             &tmp.path,
             &site.id,
             Some("New".into()),

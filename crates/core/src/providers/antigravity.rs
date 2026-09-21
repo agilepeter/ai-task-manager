@@ -26,7 +26,7 @@ const GOOGLE_CLIENT_SECRET: &str = "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";
 
 pub async fn snapshot() -> Snapshot {
     // Process discovery + netstat are blocking child-process calls.
-    let servers = tauri::async_runtime::spawn_blocking(discover_language_servers)
+    let servers = crate::rt::spawn_blocking(discover_language_servers)
         .await
         .unwrap_or_default();
 
@@ -565,7 +565,7 @@ mod tests {
     #[test]
     #[ignore]
     fn live_probe() {
-        let snap = tauri::async_runtime::block_on(super::snapshot());
+        let snap = crate::rt::block_on(super::snapshot());
         eprintln!(
             "antigravity: status={} plan={:?} error={:?} metrics={}",
             snap.status,

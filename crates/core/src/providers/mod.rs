@@ -256,7 +256,7 @@ pub fn http_no_redirect() -> reqwest::Client {
 /// present, is only an early-reject shortcut. Transport errors are
 /// stripped of their URL: vendor origins (One/New API panels especially)
 /// stay out of error text.
-pub(crate) async fn read_body_bounded(
+pub async fn read_body_bounded(
     resp: &mut reqwest::Response,
     max_bytes: usize,
     what: &str,
@@ -281,7 +281,7 @@ pub(crate) async fn read_body_bounded(
 /// JSON bodies from vendor APIs are tiny (quota + token responses). Cap
 /// before parse so a huge payload can't stall a refresh or blow RAM —
 /// same idea as the share-card decode bound.
-pub(crate) async fn json_body(
+pub async fn json_body(
     resp: reqwest::Response,
     max_bytes: usize,
     what: &str,
@@ -291,7 +291,7 @@ pub(crate) async fn json_body(
     serde_json::from_slice(&bytes).map_err(|e| format!("{what} parse: {e}"))
 }
 
-pub(crate) fn read_small_text(
+pub fn read_small_text(
     path: &std::path::Path,
     max_bytes: u64,
     what: &str,
@@ -316,7 +316,7 @@ pub(crate) fn read_small_text(
 /// Where desktop apps keep per-user data: `%APPDATA%` on Windows,
 /// `~/Library/Application Support` on macOS, `~/.config` on Linux. VS Code
 /// family apps (Cursor, Windsurf) use the same layout under it everywhere.
-pub(crate) fn app_data_dir() -> Option<PathBuf> {
+pub fn app_data_dir() -> Option<PathBuf> {
     std::env::var_os("APPDATA")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
@@ -327,7 +327,7 @@ pub(crate) fn app_data_dir() -> Option<PathBuf> {
 /// clock alone is not enough. macOS reports it in whole microseconds, so two
 /// threads asking in the same microsecond get the same value, and temp paths
 /// built from it collide (parallel tests deleted each other's directories).
-pub(crate) fn unique_stamp() -> String {
+pub fn unique_stamp() -> String {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -632,7 +632,7 @@ pub fn credit_baselines_contain(dir: &Path, ids: &[String]) -> bool {
 /// dot-folders in the home directory plus dirs under ~/.config — the
 /// places CLAUDE_CONFIG_DIR / CODEX_HOME setups conventionally point.
 /// Shared by every provider family that supports multi-account discovery.
-pub(crate) fn account_scan_roots() -> Vec<std::path::PathBuf> {
+pub fn account_scan_roots() -> Vec<std::path::PathBuf> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
     };
@@ -702,25 +702,25 @@ pub fn stored_api_key(provider: &str, env_vars: &[&str]) -> Option<String> {
 
 /// Hard cap for any leftover temp copy path. Multi-GB ledgers (Devin) must
 /// never be cloned onto C:.
-pub(crate) const MAX_TEMP_SQLITE_BYTES: u64 = 64 * 1024 * 1024;
+pub const MAX_TEMP_SQLITE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Row cap for full-table ledger reads (Hermes, MiniMax, OpenCode). Real
 /// ledgers never get near it; a runaway vendor db must not materialize an
 /// unbounded Vec.
-pub(crate) const MAX_LEDGER_ROWS: u64 = 2_000_000;
+pub const MAX_LEDGER_ROWS: u64 = 2_000_000;
 
 // Test-only: production callers enforce the cap on the copy as it is
 // written — a size pre-check races the copy. Minimax's test-only snapshot
 // helper still uses this.
 #[cfg(test)]
-pub(crate) fn temp_sqlite_copy_allowed(path: &std::path::Path) -> bool {
+pub fn temp_sqlite_copy_allowed(path: &std::path::Path) -> bool {
     std::fs::metadata(path)
         .map(|m| m.len())
         .unwrap_or(u64::MAX)
         <= MAX_TEMP_SQLITE_BYTES
 }
 
-pub(crate) fn open_readonly_sqlite(
+pub fn open_readonly_sqlite(
     path: &std::path::Path,
 ) -> Result<rusqlite::Connection, String> {
     let conn = rusqlite::Connection::open_with_flags(
@@ -737,7 +737,7 @@ pub(crate) fn open_readonly_sqlite(
 /// opening a reused temp destination — removing only the `.db` leaves the
 /// journal, and the next backup appends another full copy to it.
 #[cfg(test)]
-pub(crate) fn remove_sqlite_files(db_path: &std::path::Path) {
+pub fn remove_sqlite_files(db_path: &std::path::Path) {
     let _ = std::fs::remove_file(db_path);
     let mut wal = db_path.as_os_str().to_os_string();
     wal.push("-wal");
@@ -778,7 +778,7 @@ fn is_pane_temp_sqlite(name: &str, prefix: &str) -> bool {
         && stem.chars().any(|c| c.is_ascii_digit())
 }
 
-pub(crate) fn sweep_temp_sqlite_prefix(prefix: &str) {
+pub fn sweep_temp_sqlite_prefix(prefix: &str) {
     sweep_temp_dir(std::env::temp_dir(), |name| is_pane_temp_sqlite(name, prefix));
 }
 

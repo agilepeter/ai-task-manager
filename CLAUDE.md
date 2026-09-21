@@ -1,7 +1,14 @@
 # CLAUDE.md — ai-task-manager
 
 Cross-platform (macOS + Windows) tray app that shows AI subscription usage,
-limits, and spend. Tauri v2: Rust core in `src-tauri/`, vanilla TS UI in `src/`.
+limits, spend, and the local AI setup. Cargo workspace:
+
+- `crates/core` (`aitm-core`): providers, spend, pricing, inventory, alerts, i18n, the
+  local HTTP API, and `rt` (a tokio shim). **No Tauri, no UI.** A future headless
+  per-seat agent is meant to reuse it as is. `cargo tree -p aitm-core` must never list tauri.
+- `src-tauri` (`ai-task-manager`): the Tauri v2 tray app. Re-exports the core modules at
+  its root so `providers::…` / `alerts::…` paths work unchanged.
+- `src/`: vanilla TS UI.
 
 ## Provenance
 
@@ -28,7 +35,6 @@ file under `src-tauri/src/providers/` and port it by hand.
 
 ## Known gaps (macOS)
 
-- Internal crate is still named `pane` / `pane_lib`; rename during the core split.
 - Antigravity discovery shells out to PowerShell/netstat: compiles, finds nothing on macOS.
 - Claude extra accounts via `CLAUDE_CONFIG_DIR` (hash-suffixed Keychain service) are not mapped.
 - Log prefix is still `[pane]`. About 10 user-facing strings (x3 languages in `src/i18n.ts`,
@@ -68,4 +74,18 @@ would let this app and upstream Pane overwrite each other.
 Needs Rust (rustup, official installer: Homebrew has no bottle for Intel macOS 26 and
 builds LLVM from source) and Node. `npm install`, then `npm run tauri dev`.
 Local API for checking real numbers: `curl http://127.0.0.1:6736/v1/usage`.
-Rust tests: `cd src-tauri && cargo test`.
+Rust tests: `cargo test --workspace` from the repo root (468 on macOS).
+
+## Tests share process-wide state: serialize, never assume order
+
+Several app tests mutate global caches (`last_ok()`, `fail_state()`). `SnapCacheGuard` holds
+a lock for its lifetime so tests sharing an id cannot overlap; use it for any new test that
+touches those caches. Name temp paths with `providers::unique_stamp()`, never the clock alone
+(macOS reports whole microseconds). A test that fails 1 run in 10 is a real bug: run the
+suite 20 to 30 times before calling a concurrency fix done.
+
+## CI
+
+`.github/workflows/ci.yml` is Windows only, on purpose (see the comment in the file):
+macOS runners bill at 10x on private repos and Mac is built locally. It runs on pushes
+touching Rust or manifests, and on manual dispatch.

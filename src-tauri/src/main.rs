@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    pane_lib::run()
+    ai_task_manager_lib::run()
 }

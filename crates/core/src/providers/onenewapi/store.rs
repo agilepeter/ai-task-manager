@@ -8,14 +8,14 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct StoreFile {
+pub struct StoreFile {
     pub version: u32,
     pub sites: Vec<SiteRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SiteRecord {
+pub struct SiteRecord {
     pub id: String,
     pub name: String,
     pub base_url: String,
@@ -44,7 +44,7 @@ impl SiteRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct KeyRecord {
+pub struct KeyRecord {
     pub id: String,
     pub label: String,
     pub api_key: String,
@@ -103,7 +103,7 @@ pub fn save(path: &Path, doc: &StoreFile) -> Result<(), String> {
     atomic_write(path, &raw)
 }
 
-pub(crate) fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
+pub fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
     let dir = path
         .parent()
         .ok_or_else(|| "credential file path is missing a directory".to_string())?;
@@ -152,7 +152,7 @@ fn create_empty(path: &Path) -> Result<(), String> {
     }
 }
 
-pub(crate) fn restrict_owner_only(path: &Path) -> Result<(), String> {
+pub fn restrict_owner_only(path: &Path) -> Result<(), String> {
     #[cfg(windows)]
     {
         let sid = current_user_sid()?;
