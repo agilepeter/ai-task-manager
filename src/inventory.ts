@@ -7,6 +7,7 @@ import { showLedger } from "./ledger";
 
 interface McpServer {
   name: string;
+  client: string;
   scope: "user" | "project";
   project: string | null;
   transport: string;
@@ -38,6 +39,7 @@ interface Inventory {
   permissions: { defaultMode: string | null; allow: number; ask: number; deny: number };
   model: string | null;
   projects: number;
+  tools: { name: string; kind: "app" | "cli"; mcpServers: number }[];
   opportunities: Opportunity[];
 }
 
@@ -51,6 +53,8 @@ let inventory: Inventory | null = null;
 let loadError = "";
 let scopeFilter = ALL_SCOPES;
 let kindFilter: KindFilter = "all";
+const ALL_APPS = "__all__";
+let appFilter = ALL_APPS;
 const openSections = new Set<string>(["opportunities", "mcp"]);
 
 function esc(s: string): string {
@@ -148,11 +152,37 @@ function renderMcp(list: McpServer[]): string {
             <span class="inv-name">${esc(s.name)}</span>
             <span class="inv-sub" title="${esc(what)}">${esc(what)}</span>
           </div>
-          <div class="inv-row-meta">${facts.map((f) => `<span class="inv-fact">${esc(f)}</span>`).join("")}${scopeChip(s)}</div>
+          <div class="inv-row-meta">${facts.map((f) => `<span class="inv-fact">${esc(f)}</span>`).join("")}${s.client === "Claude Code" ? scopeChip(s) : `<span class="inv-chip" title="Loaded by ${esc(s.client)}">${esc(s.client)}</span>`}</div>
         </div>`;
     })
     .join("");
-  return section("mcp", "MCP servers", list.length, rows, "No MCP servers configured for this scope.");
+  const apps = [...new Set((inventory?.mcpServers ?? []).map((s) => s.client))];
+  const lead =
+    apps.length > 1
+      ? `<label class="inv-filter">App
+          <select id="inv-app">
+            <option value="${ALL_APPS}"${appFilter === ALL_APPS ? " selected" : ""}>All apps</option>
+            ${apps.map((a) => `<option value="${esc(a)}"${appFilter === a ? " selected" : ""}>${esc(a)}</option>`).join("")}
+          </select>
+        </label>`
+      : "";
+  return section("mcp", "MCP servers", list.length, rows, "No MCP servers configured for this scope.", { lead });
+}
+
+function renderTools(inv: Inventory): string {
+  const rows = inv.tools
+    .map(
+      (t) => `
+      <div class="inv-row">
+        <div class="inv-row-main"><span class="inv-name">${esc(t.name)}</span></div>
+        <div class="inv-row-meta">
+          ${t.mcpServers ? `<span class="inv-fact">${t.mcpServers} MCP server${t.mcpServers === 1 ? "" : "s"}</span>` : ""}
+          <span class="inv-chip" title="${t.kind === "app" ? "Its settings folder exists" : "Its command is on the PATH"}">${t.kind === "app" ? "set up" : "command"}</span>
+        </div>
+      </div>`,
+    )
+    .join("");
+  return section("tools", "AI tools on this computer", inv.tools.length, rows, "None of the AI tools this app knows were found.");
 }
 
 function renderDefinitions(id: string, title: string, list: Definition[], hint: string): string {
@@ -217,7 +247,8 @@ function render(): void {
     return;
   }
   const inv = inventory;
-  const mcp = inv.mcpServers.filter(inScope);
+  if (appFilter !== ALL_APPS && !inv.mcpServers.some((s) => s.client === appFilter)) appFilter = ALL_APPS;
+  const mcp = inv.mcpServers.filter(inScope).filter((s) => appFilter === ALL_APPS || s.client === appFilter);
   const agents = inv.agents.filter(inScope);
   const skills = inv.skills.filter(inScope);
   el.innerHTML = `
@@ -229,6 +260,7 @@ function render(): void {
     </div>
     <p class="inv-note">Read from this machine only. Names and counts, never keys or prompts. ${inv.projects} project${inv.projects === 1 ? "" : "s"} scanned.</p>
     ${renderOpportunities(inv.opportunities)}
+    ${renderTools(inv)}
     ${renderMcp(mcp)}
     ${renderDefinitions("agents", "Agents", agents, "No custom agents in this scope.")}
     ${renderDefinitions("skills", "Skills", skills, "No skills in this scope.")}
@@ -299,6 +331,7 @@ export function setupViews(): void {
   el.addEventListener("change", (e) => {
     const target = e.target as HTMLSelectElement;
     if (target.id === "inv-scope") scopeFilter = target.value;
+    else if (target.id === "inv-app") appFilter = target.value;
     else if (target.id === "inv-kind") kindFilter = target.value as KindFilter;
     else return;
     render();

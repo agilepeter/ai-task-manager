@@ -21,6 +21,8 @@ const MAX_DEF_BYTES: u64 = 256 * 1024;
 #[serde(rename_all = "camelCase")]
 pub struct McpServer {
     pub name: String,
+    /// The app that loads this server: "Claude Code", "Claude Desktop", …
+    pub client: String,
     /// "user" | "project"
     pub scope: String,
     /// The project directory for project-scoped servers.
@@ -74,8 +76,20 @@ pub struct Inventory {
     pub model: Option<String>,
     /// Projects Claude Code knows about that still exist on disk.
     pub projects: usize,
+    /// AI tools found on this machine, by name. Presence only.
+    pub tools: Vec<AiTool>,
     /// What this setup suggests learning or tightening next.
     pub opportunities: Vec<Opportunity>,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTool {
+    pub name: String,
+    /// "app" (a config folder exists) | "cli" (a command is on PATH)
+    pub kind: String,
+    /// MCP servers this tool is configured with, across every file read.
+    pub mcp_servers: usize,
 }
 
 /// One observation about the setup, paired with why it matters. Every one is
@@ -172,6 +186,13 @@ fn host_of(url: &str) -> String {
 
 /// One `mcpServers` object → entries. `scope`/`project` are stamped on each.
 fn mcp_from_map(map: &Value, scope: &str, project: Option<&str>) -> Vec<McpServer> {
+    mcp_from_map_for(map, "Claude Code", scope, project)
+}
+
+/// Every MCP-capable app keeps the same entry shape (command/args/env, or
+/// url/headers), so one reader serves them all and the same never-copy-a-
+/// value rule covers them all.
+fn mcp_from_map_for(map: &Value, client: &str, scope: &str, project: Option<&str>) -> Vec<McpServer> {
     let Some(map) = map.as_object() else {
         return Vec::new();
     };
@@ -200,6 +221,7 @@ fn mcp_from_map(map: &Value, scope: &str, project: Option<&str>) -> Vec<McpServe
             };
             McpServer {
                 name: name.clone(),
+                client: client.to_string(),
                 scope: scope.to_string(),
                 project: project.map(str::to_string),
                 transport,
@@ -266,7 +288,13 @@ const MCP_TRUST_INDEX: &str = "https://staas.fund/mcp/";
 const CLASSROOM: &str = "https://staas.fund/classroom/";
 
 fn names(list: &[&McpServer]) -> String {
-    let mut n: Vec<&str> = list.iter().map(|s| s.name.as_str()).collect();
+    let mut n: Vec<String> = list
+        .iter()
+        .map(|s| match s.client.as_str() {
+            "Claude Code" => s.name.clone(),
+            other => format!("{} ({other})", s.name),
+        })
+        .collect();
     n.dedup();
     n.join(", ")
 }
@@ -499,6 +527,101 @@ fn claude_dir() -> PathBuf {
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".claude"))
 }
 
+/// Where another app keeps its MCP servers: (app name, file, key holding the
+/// server map). Paths are relative to the home or app-data folder.
+enum Base {
+    Home,
+    AppData,
+}
+
+const OTHER_MCP_FILES: &[(&str, Base, &str, &str)] = &[
+    ("Claude Desktop", Base::AppData, "Claude/claude_desktop_config.json", "mcpServers"),
+    ("VS Code", Base::AppData, "Code/User/mcp.json", "servers"),
+    ("Cursor", Base::Home, ".cursor/mcp.json", "mcpServers"),
+    ("Windsurf", Base::Home, ".codeium/windsurf/mcp_config.json", "mcpServers"),
+    ("Gemini CLI", Base::Home, ".gemini/settings.json", "mcpServers"),
+];
+
+/// Codex keeps its servers in TOML (`[mcp_servers.<name>]`); same fields.
+pub fn mcp_from_codex_toml(raw: &str) -> Vec<McpServer> {
+    toml::from_str::<toml::Value>(raw)
+        .ok()
+        .and_then(|doc| serde_json::to_value(doc).ok())
+        .map(|doc| mcp_from_map_for(doc.get("mcp_servers").unwrap_or(&Value::Null), "Codex", "user", None))
+        .unwrap_or_default()
+}
+
+pub fn mcp_from_app_json(doc: &Value, client: &str, key: &str) -> Vec<McpServer> {
+    mcp_from_map_for(doc.get(key).unwrap_or(&Value::Null), client, "user", None)
+}
+
+fn other_app_servers(home: &Path) -> Vec<McpServer> {
+    let app_data = crate::providers::app_data_dir();
+    let mut out = Vec::new();
+    for (client, base, rel, key) in OTHER_MCP_FILES {
+        let root = match base {
+            Base::Home => Some(home.to_path_buf()),
+            Base::AppData => app_data.clone(),
+        };
+        if let Some(doc) = root.and_then(|r| read_json(&r.join(rel))) {
+            out.extend(mcp_from_app_json(&doc, client, key));
+        }
+    }
+    let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
+    if let Some(raw) = read_capped(&codex_home.join("config.toml"), MAX_CONFIG_BYTES) {
+        out.extend(mcp_from_codex_toml(&raw));
+    }
+    out
+}
+
+/// Known AI tools: (name, config folder under home or app data, command).
+const KNOWN_TOOLS: &[(&str, Option<(Base, &str)>, Option<&str>)] = &[
+    ("Claude Code", Some((Base::Home, ".claude")), Some("claude")),
+    ("Claude Desktop", Some((Base::AppData, "Claude")), None),
+    ("Codex", Some((Base::Home, ".codex")), Some("codex")),
+    ("Cursor", Some((Base::Home, ".cursor")), Some("cursor-agent")),
+    ("Windsurf", Some((Base::Home, ".codeium/windsurf")), None),
+    ("VS Code", Some((Base::AppData, "Code/User")), Some("code")),
+    ("Gemini CLI", Some((Base::Home, ".gemini")), Some("gemini")),
+    ("GitHub Copilot", Some((Base::Home, ".config/github-copilot")), None),
+    ("Aider", None, Some("aider")),
+    ("OpenCode", Some((Base::Home, ".config/opencode")), Some("opencode")),
+    ("Ollama", Some((Base::Home, ".ollama")), Some("ollama")),
+    ("Goose", Some((Base::Home, ".config/goose")), Some("goose")),
+];
+
+/// Is `command` an executable file in one of `dirs`? Looks, never runs.
+fn on_path(command: &str, dirs: &[PathBuf]) -> bool {
+    let names: Vec<String> = if cfg!(windows) {
+        ["", ".exe", ".cmd", ".bat"].iter().map(|ext| format!("{command}{ext}")).collect()
+    } else {
+        vec![command.to_string()]
+    };
+    dirs.iter().any(|d| names.iter().any(|n| d.join(n).is_file()))
+}
+
+fn find_tools(home: &Path, path_dirs: &[PathBuf], servers: &[McpServer]) -> Vec<AiTool> {
+    let app_data = crate::providers::app_data_dir();
+    KNOWN_TOOLS
+        .iter()
+        .filter_map(|(name, folder, command)| {
+            let has_folder = folder.as_ref().is_some_and(|(base, rel)| {
+                match base {
+                    Base::Home => Some(home.to_path_buf()),
+                    Base::AppData => app_data.clone(),
+                }
+                .is_some_and(|r| r.join(rel).is_dir())
+            });
+            let has_cli = command.is_some_and(|c| on_path(c, path_dirs));
+            (has_folder || has_cli).then(|| AiTool {
+                name: name.to_string(),
+                kind: if has_folder { "app" } else { "cli" }.to_string(),
+                mcp_servers: servers.iter().filter(|s| s.client == *name).count(),
+            })
+        })
+        .collect()
+}
+
 /// Project paths Claude Code has on record (`~/.claude.json`), whether or not
 /// they still exist. Used to turn a log folder name back into a path.
 pub fn known_project_paths() -> Vec<String> {
@@ -560,6 +683,10 @@ pub fn scan() -> Inventory {
             inv.mcp_servers.extend(mcp_from_map(servers, "project", p));
         }
     }
+    inv.mcp_servers.extend(other_app_servers(&home));
+    let path_dirs: Vec<PathBuf> =
+        std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    inv.tools = find_tools(&home, &path_dirs, &inv.mcp_servers);
     inv.opportunities = opportunities_for(&inv);
     inv
 }
@@ -690,6 +817,7 @@ mod tests {
     fn server(name: &str, package: Option<&str>, transport: &str, env_count: usize) -> McpServer {
         McpServer {
             name: name.into(),
+            client: "Claude Code".into(),
             scope: "user".into(),
             project: None,
             transport: transport.into(),
@@ -701,6 +829,71 @@ mod tests {
 
     fn ids(inv: &Inventory) -> Vec<String> {
         opportunities_for(inv).into_iter().map(|o| o.id).collect()
+    }
+
+    #[test]
+    fn other_apps_are_read_with_the_same_no_values_rule() {
+        let desktop = json!({"mcpServers": {"files": {
+            "command": "npx", "args": ["-y", "some-files-mcp", "--token", "ghp_SECRETARGTOKEN"],
+            "env": {"KEY": "sk-live-SECRETENVVALUE"}}}});
+        let vscode = json!({"servers": {"remote": {"type": "http",
+            "url": "https://mcp.example.com/SECRETPATHKEY?key=SECRETQUERYKEY",
+            "headers": {"Authorization": "Bearer SECRETHEADER"}}}});
+        let codex = r#"
+            model = "whatever"
+            [mcp_servers.docs]
+            command = "uvx"
+            args = ["docs-mcp@2", "--api-key", "hunter2"]
+            [mcp_servers.docs.env]
+            TOKEN = "sk-live-SECRETENVVALUE"
+        "#;
+        let mut all = mcp_from_app_json(&desktop, "Claude Desktop", "mcpServers");
+        all.extend(mcp_from_app_json(&vscode, "VS Code", "servers"));
+        all.extend(mcp_from_codex_toml(codex));
+        let wire = serde_json::to_string(&all).unwrap();
+        for secret in SECRETS {
+            assert!(!wire.contains(secret), "{secret} leaked into {wire}");
+        }
+        let by = |n: &str| all.iter().find(|s| s.name == n).unwrap().clone();
+        assert_eq!((by("files").client.as_str(), by("files").package.as_deref(), by("files").env_count),
+                   ("Claude Desktop", Some("some-files-mcp"), 1));
+        assert_eq!((by("remote").client.as_str(), by("remote").target.as_str()), ("VS Code", "mcp.example.com"));
+        assert_eq!((by("docs").client.as_str(), by("docs").package.as_deref(), by("docs").env_count),
+                   ("Codex", Some("docs-mcp@2"), 1));
+        assert!(mcp_from_codex_toml("this is [not toml").is_empty());
+        assert!(mcp_from_app_json(&json!({}), "Cursor", "mcpServers").is_empty());
+    }
+
+    #[test]
+    fn tools_are_found_by_a_folder_or_a_command_without_running_anything() {
+        let root = std::env::temp_dir().join(format!("aitm-tools-{}", crate::providers::unique_stamp()));
+        let home = root.join("home");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join(if cfg!(windows) { "aider.exe" } else { "aider" }), "").unwrap();
+        std::fs::create_dir_all(bin.join("ollama")).unwrap(); // a folder is not a command
+        let servers = vec![McpServer { client: "Codex".into(), ..server("docs", None, "stdio", 0) }];
+        let found = find_tools(&home, &[bin.clone()], &servers);
+        let by = |n: &str| found.iter().find(|t| t.name == n).cloned();
+        assert_eq!(by("Codex"), Some(AiTool { name: "Codex".into(), kind: "app".into(), mcp_servers: 1 }));
+        assert_eq!(by("Aider"), Some(AiTool { name: "Aider".into(), kind: "cli".into(), mcp_servers: 0 }));
+        assert_eq!(by("Ollama"), None);
+        assert_eq!(by("Cursor"), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn findings_name_the_app_when_it_is_not_claude_code() {
+        let inv = Inventory {
+            mcp_servers: vec![
+                server("local", Some("a-mcp"), "stdio", 0),
+                McpServer { client: "Claude Desktop".into(), ..server("files", Some("b-mcp"), "stdio", 0) },
+            ],
+            ..Inventory::default()
+        };
+        let found = opportunities_for(&inv);
+        assert!(found[0].detail.starts_with("local, files (Claude Desktop) fetch "), "{}", found[0].detail);
     }
 
     #[test]

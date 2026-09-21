@@ -107,6 +107,12 @@ and computed Opportunities). Usage stays the default view.
   The saved choice is applied by `applySavedWide()` after the config loads, not in setup.
 - **Popover anchoring is per platform** (`popover_origin`): above the click for a bottom
   taskbar, below it for the macOS menu bar.
+- **Inventory covers every MCP-capable app it knows**, not just Claude Code: Claude Desktop,
+  VS Code (`servers` key), Cursor, Windsurf, Gemini CLI and Codex (TOML), all through
+  `mcp_from_map_for`, so the never-copy-a-value rule and its leak test cover them. AI tools
+  are detected by a settings folder or a command on the PATH; commands are looked for, never
+  run. Only Claude Code and Claude Desktop have been checked against real files; the other
+  formats are fixture-tested.
 - **Inventory reads names, shapes and counts only.** Claude config files hold API keys in
   `env`, `args`, `headers`, URL paths and query strings. Nothing may copy a value out of
   those. The `never_leaks_*` test plants secrets in every such field; extend it when adding
