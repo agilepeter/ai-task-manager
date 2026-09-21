@@ -3093,6 +3093,13 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
 #[cfg(test)]
 mod tests {
 
+    /// Prints this machine's real spend. `cargo test -p aitm-core live_spend -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_spend() {
+        println!("{}", serde_json::to_string(&collect(None)).unwrap());
+    }
+
     #[test]
     fn project_dirs_resolve_to_known_paths_and_fall_back_to_the_folder_name() {
         let known = vec!["/Users/me/work/acme-site".to_string(), "/Users/me/.dotfiles".to_string()];

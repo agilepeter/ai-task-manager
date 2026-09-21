@@ -51,6 +51,13 @@ One product, tabs at the top: **Usage** (default; limits, pace, spend) and **Inv
 (`src/inventory.ts` + `src-tauri/src/inventory.rs`: MCP servers, agents, skills, guardrails,
 and computed Opportunities). Usage stays the default view.
 
+- **Detail view** (`src/detail.ts`): click a card's name. Same window, slide-in page like
+  Settings; Esc backs out before it hides the window. Limits over time come from
+  `crates/core/src/history.rs` (local SQLite, readings only, 90 days); spend groups by
+  Model / Project / Day. Charts follow the dataviz rules noted at the top of the file;
+  the `--viz-*` colours were validated per theme, so re-run the validator if they change.
+  Project = the folder Claude Code was started in, matched against paths it still knows
+  (folder names are lossy and cannot be decoded).
 - **Inventory reads names, shapes and counts only.** Claude config files hold API keys in
   `env`, `args`, `headers`, URL paths and query strings. Nothing may copy a value out of
   those. The `never_leaks_*` test plants secrets in every such field; extend it when adding

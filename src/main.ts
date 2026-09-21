@@ -1,4 +1,5 @@
 import { setupViews } from "./inventory";
+import { refreshDetail, setupDetail } from "./detail";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -2697,6 +2698,7 @@ function renderAll(): void {
   resetsPopover.onRender();
   if (customizeOpen) renderDrawerBody();
   rebuildTrail();
+  refreshDetail();
 }
 
 function renderDrawerBody(): void {
@@ -5067,6 +5069,10 @@ window.addEventListener("DOMContentLoaded", () => {
   setupTrailFisheye();
   setupTooltips();
   setupViews();
+  setupDetail({
+    snapshot: (id) => lastSnapshots.find((s) => s.id === id),
+    spend: (id) => lastSpend.find((s) => s.id === id),
+  });
   // No lens init here: applyGlass() (via initSettings, after the saved
   // config arrives) owns it — a fixed timer raced the config load and
   // built the maps even for users who turned glass off.
