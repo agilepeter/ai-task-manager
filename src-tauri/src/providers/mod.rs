@@ -313,6 +313,16 @@ pub(crate) fn read_small_text(
     Ok(text)
 }
 
+/// Where desktop apps keep per-user data: `%APPDATA%` on Windows,
+/// `~/Library/Application Support` on macOS, `~/.config` on Linux. VS Code
+/// family apps (Cursor, Windsurf) use the same layout under it everywhere.
+pub(crate) fn app_data_dir() -> Option<PathBuf> {
+    std::env::var_os("APPDATA")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::config_dir)
+}
+
 /// A name suffix unique within this process: the clock plus a counter. The
 /// clock alone is not enough. macOS reports it in whole microseconds, so two
 /// threads asking in the same microsecond get the same value, and temp paths

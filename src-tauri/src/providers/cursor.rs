@@ -6,13 +6,18 @@ use std::time::Duration;
 const ID: &str = "cursor";
 const NAME: &str = "Cursor";
 
-fn state_db_path() -> Option<PathBuf> {
-    let appdata = std::env::var("APPDATA").ok()?;
-    let p = PathBuf::from(appdata)
+/// Cursor's state DB under an app-data root. Same relative layout on every
+/// platform; only the root differs.
+fn state_db_in(app_data: &std::path::Path) -> PathBuf {
+    app_data
         .join("Cursor")
         .join("User")
         .join("globalStorage")
-        .join("state.vscdb");
+        .join("state.vscdb")
+}
+
+fn state_db_path() -> Option<PathBuf> {
+    let p = state_db_in(&super::app_data_dir()?);
     p.exists().then_some(p)
 }
 
@@ -1000,6 +1005,17 @@ fn legacy_snapshot(usage: &Value, plan: Option<String>) -> Result<Snapshot, Stri
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn state_db_sits_under_the_platform_app_data_root() {
+        let mac = std::path::Path::new("/Users/me/Library/Application Support");
+        assert_eq!(
+            super::state_db_in(mac),
+            mac.join("Cursor").join("User").join("globalStorage").join("state.vscdb")
+        );
+        // The root itself resolves on this platform (it was None off Windows).
+        assert!(crate::providers::app_data_dir().is_some());
+    }
+
     use super::*;
     use serde_json::json;
 
