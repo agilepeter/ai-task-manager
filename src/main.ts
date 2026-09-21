@@ -212,6 +212,8 @@ interface Config {
   wideMode: boolean;
   /** Days before a renewal to send its one reminder; 0 = off. */
   renewalReminderDays: number;
+  /** Opt-in: fetch the public MCP Trust Index list. Off by default. */
+  trustLookup: boolean;
   spendTab: SpendTab;
   spendMetric: "cost" | "tokens" | "mtok";
   showUsed: boolean;
@@ -250,6 +252,7 @@ const FRONTEND_CONFIG_KEYS = [
   "dailySpendAlert",
   "wideMode",
   "renewalReminderDays",
+  "trustLookup",
   "spendTab",
   "spendMetric",
   "showUsed",
@@ -443,6 +446,7 @@ let config: Config = {
   dailySpendAlert: 0,
   wideMode: false,
   renewalReminderDays: 3,
+  trustLookup: false,
   spendTab: "today",
   spendMetric: "cost",
   showUsed: false,
@@ -5081,7 +5085,10 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#theme-btn")!.addEventListener("click", toggleTheme);
   setupTrailFisheye();
   setupTooltips();
-  setupViews();
+  setupViews({
+    trustLookup: () => config.trustLookup === true,
+    setTrustLookup: (trustLookup) => patchConfig({ trustLookup }),
+  });
   setupLedger({
     usage30: () => Object.fromEntries(lastSpend.map((s) => [s.id, s.last30.cost])),
     tools: () =>

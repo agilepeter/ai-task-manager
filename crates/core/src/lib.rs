@@ -15,6 +15,7 @@ pub mod pricing;
 pub mod providers;
 pub mod rt;
 pub mod spend;
+pub mod trust;
 
 /// The provider family of a card id: "claude@ab12cd34" → "claude".
 pub fn family_of(id: &str) -> String {

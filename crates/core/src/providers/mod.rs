@@ -216,7 +216,8 @@ fn proxy_url() -> Option<&'static str> {
 
 fn http_builder() -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
-        .user_agent("Pane-Windows/0.3")
+        // The same string for everyone: it names the app, never the install.
+        .user_agent(concat!("ai-task-manager/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(20))
         // At boot the network is often still coming up; without a connect
         // cap every request rides the full 20 s, and the UI's first paint

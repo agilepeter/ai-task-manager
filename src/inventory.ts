@@ -43,6 +43,27 @@ interface Inventory {
   opportunities: Opportunity[];
 }
 
+interface Rating {
+  package: string;
+  listedAs: string | null;
+  tier: string | null;
+  score: number | null;
+}
+
+interface TrustView {
+  enabled: boolean;
+  fetchedAt: number | null;
+  listed: number;
+  ratings: Rating[];
+  error: string | null;
+}
+
+/// Config lives in main.ts; the Inventory tab only needs this one switch.
+export interface InventoryHost {
+  trustLookup(): boolean;
+  setTrustLookup(on: boolean): Promise<void>;
+}
+
 type View = "usage" | "inventory" | "ledger";
 type KindFilter = "all" | "tighten" | "learn";
 
@@ -55,6 +76,8 @@ let scopeFilter = ALL_SCOPES;
 let kindFilter: KindFilter = "all";
 const ALL_APPS = "__all__";
 let appFilter = ALL_APPS;
+let host: InventoryHost | null = null;
+let trust: TrustView | null = null;
 const openSections = new Set<string>(["opportunities", "mcp"]);
 
 function esc(s: string): string {
@@ -138,6 +161,41 @@ function renderOpportunities(list: Opportunity[]): string {
   );
 }
 
+const TIER_LABEL: Record<string, string> = {
+  "enterprise-verified": "Enterprise Verified",
+  recommended: "Recommended",
+  emerging: "Emerging",
+};
+
+function bareName(spec: string): string {
+  const at = spec.startsWith("@") ? spec.indexOf("@", 1) : spec.indexOf("@");
+  return (at === -1 ? spec : spec.slice(0, at)).toLowerCase();
+}
+
+/// The rating chip for a server, when ratings are on. Only packages can be
+/// matched: a remote server or a local binary has no package to look up.
+function trustChip(s: McpServer): string {
+  if (!trust?.enabled || !trust.ratings.length || !s.package) return "";
+  const r = trust.ratings.find((x) => bareName(x.package) === bareName(s.package!));
+  if (!r) return "";
+  if (!r.tier) return `<span class="inv-chip inv-trust-none" title="Not on the MCP Trust Index. That is not a verdict: most servers have not been reviewed.">Not rated</span>`;
+  return `<span class="inv-chip inv-trust" title="MCP Trust Index: ${esc(r.listedAs ?? "")}, ${esc(TIER_LABEL[r.tier] ?? r.tier)}, score ${r.score ?? "?"} of 100">${esc(TIER_LABEL[r.tier] ?? r.tier)} ${r.score ?? ""}</span>`;
+}
+
+async function loadTrust(): Promise<void> {
+  if (!inventory || !host?.trustLookup()) {
+    trust = null;
+    return;
+  }
+  const packages = inventory.mcpServers.map((s) => s.package).filter((p): p is string => !!p);
+  try {
+    trust = await invoke<TrustView>("get_trust", { packages });
+  } catch {
+    trust = null;
+  }
+  render();
+}
+
 function renderMcp(list: McpServer[]): string {
   const rows = list
     .map((s) => {
@@ -152,20 +210,36 @@ function renderMcp(list: McpServer[]): string {
             <span class="inv-name">${esc(s.name)}</span>
             <span class="inv-sub" title="${esc(what)}">${esc(what)}</span>
           </div>
-          <div class="inv-row-meta">${facts.map((f) => `<span class="inv-fact">${esc(f)}</span>`).join("")}${s.client === "Claude Code" ? scopeChip(s) : `<span class="inv-chip" title="Loaded by ${esc(s.client)}">${esc(s.client)}</span>`}</div>
+          <div class="inv-row-meta">${facts.map((f) => `<span class="inv-fact">${esc(f)}</span>`).join("")}${trustChip(s)}${s.client === "Claude Code" ? scopeChip(s) : `<span class="inv-chip" title="Loaded by ${esc(s.client)}">${esc(s.client)}</span>`}</div>
         </div>`;
     })
     .join("");
   const apps = [...new Set((inventory?.mcpServers ?? []).map((s) => s.client))];
+  const on = host?.trustLookup() === true;
+  const status = !on
+    ? "Off. Turning it on downloads the public list from staas.fund once a day and matches it on this computer. Nothing about your setup is sent."
+    : trust?.error
+      ? `Could not fetch the list: ${trust.error}`
+      : trust?.fetchedAt
+        ? `${trust.listed} servers listed · updated ${new Date(trust.fetchedAt).toLocaleDateString([], { month: "short", day: "numeric" })} · matched on this computer`
+        : "Loading…";
+  const trustLead = `<label class="inv-filter">Trust ratings
+      <select id="inv-trust">
+        <option value="off"${on ? "" : " selected"}>Off</option>
+        <option value="on"${on ? " selected" : ""}>On</option>
+      </select>
+      <button class="lg-link" data-link="https://staas.fund/mcp/">About the index</button>
+    </label><p class="dt-caption inv-trust-note">${esc(status)}</p>`;
   const lead =
-    apps.length > 1
+    trustLead +
+    (apps.length > 1
       ? `<label class="inv-filter">App
           <select id="inv-app">
             <option value="${ALL_APPS}"${appFilter === ALL_APPS ? " selected" : ""}>All apps</option>
             ${apps.map((a) => `<option value="${esc(a)}"${appFilter === a ? " selected" : ""}>${esc(a)}</option>`).join("")}
           </select>
         </label>`
-      : "";
+      : "");
   return section("mcp", "MCP servers", list.length, rows, "No MCP servers configured for this scope.", { lead });
 }
 
@@ -282,6 +356,7 @@ async function load(): Promise<void> {
     loadError = String(err);
   }
   render();
+  void loadTrust();
 }
 
 function show(view: View): void {
@@ -304,7 +379,8 @@ function show(view: View): void {
 
 /// Wires the Usage / Inventory switch. Usage is the default view every time
 /// the popover opens; Inventory loads on first visit and on Rescan.
-export function setupViews(): void {
+export function setupViews(h: InventoryHost): void {
+  host = h;
   document.querySelector("#view-tabs")?.addEventListener("click", (e) => {
     const tab = (e.target as HTMLElement).closest<HTMLElement>("[data-view]");
     if (tab) show(tab.dataset.view as View);
@@ -330,6 +406,15 @@ export function setupViews(): void {
   });
   el.addEventListener("change", (e) => {
     const target = e.target as HTMLSelectElement;
+    if (target.id === "inv-trust") {
+      const on = target.value === "on";
+      void host?.setTrustLookup(on).then(() => {
+        if (!on) trust = null;
+        render();
+        return loadTrust();
+      });
+      return;
+    }
     if (target.id === "inv-scope") scopeFilter = target.value;
     else if (target.id === "inv-app") appFilter = target.value;
     else if (target.id === "inv-kind") kindFilter = target.value as KindFilter;

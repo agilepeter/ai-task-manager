@@ -19,9 +19,13 @@ file under `src-tauri/src/providers/` and port it by hand.
 
 ## Hard rules
 
-- **No telemetry, no phone-home.** Upstream's PostHog module was removed. The
-  only outbound traffic allowed is each provider's own vendor API. Anything
-  new that leaves the machine needs an explicit, documented decision.
+- **No telemetry, no phone-home.** Upstream's PostHog module was removed. Outbound traffic
+  is each provider's own vendor API, plus exactly one documented exception the owner approved
+  on 2026-09-21: the **Trust Index lookup** (`crates/core/src/trust.rs`). It is OFF by default
+  (`trustLookup`), and when on it sends NOTHING about the machine: one parameterless GET of
+  the public list, at most daily, matched locally. Never turn that into a per-package query.
+  Anything else that would leave the machine needs the same explicit, documented decision.
+- The HTTP user-agent is `ai-task-manager/<version>`: the same for every install, never an id.
 - **Self-update is off** (`UPDATES_ENABLED` in `src-tauri/src/lib.rs`). The
   pubkey left in `tauri.conf.json` is upstream's. Never enable updates without
   replacing both the endpoints and the pubkey with our own.

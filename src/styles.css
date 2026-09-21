@@ -3650,3 +3650,22 @@ body.wide #ledger {
 .dt-forecast p.dt-forecast-hit {
   color: #eab308;
 }
+
+/* ------------------------------------------------------------ trust ratings */
+.inv-trust {
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px var(--viz-3);
+  background: transparent;
+  max-width: none;
+}
+.inv-trust-none {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--muted-foreground);
+}
+.inv-trust-note {
+  margin: 0 0 8px;
+}
+.inv-filter .lg-link {
+  margin-left: 4px;
+}

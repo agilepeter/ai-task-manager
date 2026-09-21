@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, clients, coaching, forecast, history, httpapi, i18n, inventory, ledger, pricing, providers, spend};
+pub(crate) use aitm_core::{alerts, clients, coaching, forecast, history, httpapi, i18n, inventory, ledger, pricing, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -117,6 +117,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // minutes (0 = off). Spend: dollars in one local day (0 = off; there is
     // no universal default for what a day should cost).
     obj.entry("wideMode").or_insert(json!(false));
+    // Off by default: the only request to a non-provider server.
+    obj.entry("trustLookup").or_insert(json!(false));
     // Days before a renewal to send its one reminder (0 = off).
     obj.entry("renewalReminderDays").or_insert(json!(3));
     obj.entry("burnAlertPoints").or_insert(json!(15));
@@ -250,6 +252,17 @@ async fn get_forecast(provider_id: String, metrics: Vec<LiveMetric>) -> Result<V
     .map_err(|e| format!("forecast: {e}"))
 }
 
+/// Trust Index ratings for the given packages. Does nothing unless the user
+/// turned `trustLookup` on; see `trust.rs` for what the request carries (nothing).
+#[tauri::command]
+async fn get_trust(packages: Vec<String>) -> trust::TrustView {
+    let enabled = config_with_defaults(load_config())
+        .get("trustLookup")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    trust::view(enabled, &packages, chrono::Utc::now().timestamp_millis()).await
+}
+
 /// The sessions behind an area or a day, from the scan cache (no rescan).
 #[tauri::command]
 async fn get_sessions(area: Option<String>, day: Option<String>) -> Result<Vec<spend::SessionSpend>, String> {
@@ -311,6 +324,7 @@ const CONFIG_KEYS: &[&str] = &[
     "burnAlertPoints",
     "dailySpendAlert",
     "wideMode",
+    "trustLookup",
     "renewalReminderDays",
     "spendMetric",
     "spendTab",
@@ -3173,6 +3187,7 @@ pub fn run() {
             get_inventory,
             get_history,
             get_ledger,
+            get_trust,
             get_forecast,
             get_sessions,
             client_rollup,
