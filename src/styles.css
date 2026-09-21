@@ -3724,3 +3724,41 @@ body.wide #ledger {
   color: var(--secondary-foreground);
   overflow-wrap: anywhere;
 }
+
+/* ------------------------------------------------------------ week heatmap */
+.dt-heat-grid {
+  display: grid;
+  grid-template-columns: 26px repeat(24, minmax(0, 1fr));
+  gap: 2px;
+  align-items: center;
+}
+.dt-heat-day,
+.dt-heat-hour {
+  font-size: 9.5px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.dt-heat {
+  aspect-ratio: 1;
+  border-radius: 2px;
+  /* One hue, more of it for more burn; an empty hour is the track colour. */
+  background: color-mix(in srgb, var(--viz-1) calc(var(--level) * 100%), var(--muted));
+}
+.dt-heat-reset {
+  box-shadow: 0 0 0 1.5px var(--foreground);
+}
+.dt-heat-key {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  margin-top: 6px;
+  font-size: 9.5px;
+  color: var(--muted-foreground);
+}
+.dt-heat-key i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--viz-1) calc(var(--level) * 100%), var(--muted));
+}

@@ -106,6 +106,10 @@ and computed Opportunities). Usage stays the default view.
   a real client name in code, tests, fixtures or commit messages**: use "Acme"/"Client A".
   The detail page redraws on data refresh; `render(true)` reads the rules editor back first
   so typing survives, but click handlers must call plain `render()`.
+- **Your week** (detail page; `history::burn_profile_from`): a 7 x 24 heatmap of when a limit
+  gets used, in local time, with the next reset outlined. A rise is booked to an hour only
+  when the two readings are within 90 minutes; across a longer gap nobody knows when the
+  usage happened, so it is skipped rather than guessed. One hue, more of it for more burn.
 - **Usage coaching** (`crates/core/src/coaching.rs`): Opportunities from how the tools were
   used (top-heavy model mix, long-lived costly sessions, a large unsorted share). Same
   contract as the setup ones: computed, states its own numbers, absent when there is nothing

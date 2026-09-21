@@ -19,6 +19,12 @@ interface Metric {
   period_ms?: number | null;
 }
 
+interface BurnProfile {
+  metric: string;
+  cells: number[][];
+  daysObserved: number;
+}
+
 interface Forecast {
   metric: string;
   basis: "recent" | "period";
@@ -154,6 +160,9 @@ let clientNote = "";
 let lastTable: { name: string; headers: string[]; rows: string[][] } | null = null;
 /** Forecasts per card, refreshed with the history. */
 const forecasts = new Map<string, Forecast[]>();
+let burn: BurnProfile[] = [];
+let burnFor = "";
+let burnMetric = "";
 /** The drill-down in view: sessions behind an area or a day. */
 let drill: { title: string; area?: string; day?: string; sessions: SessionSpend[] | null } | null = null;
 /** Wide mode: the window is twice as wide and this page is a fixed right column. */
@@ -372,6 +381,65 @@ function forecastSection(id: string): string {
   return `<div class="dt-forecast">${lines
     .map((l) => `<p class="${l.f.hitsLimitAt !== null ? "dt-forecast-hit" : ""}">${esc(l.text)}</p>`)
     .join("")}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Your week: when the limit gets used, and when it resets
+// ---------------------------------------------------------------------------
+
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function hourLabel(h: number): string {
+  return new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric" });
+}
+
+function weekSection(snap: Snapshot): string {
+  const usable = burn.filter((b) => b.cells.some((row) => row.some((v) => v > 0)));
+  if (!usable.length) {
+    return `<p class="dt-empty">This fills in as the app watches you work: after a few days it shows which hours of the week use a limit hardest, so heavy work can be planned around the reset.</p>`;
+  }
+  if (!usable.some((b) => b.metric === burnMetric)) {
+    // The longest window is the one worth planning a week around.
+    burnMetric = (usable.find((b) => /week/i.test(b.metric)) ?? usable[0]).metric;
+  }
+  const profile = usable.find((b) => b.metric === burnMetric)!;
+  const max = Math.max(...profile.cells.flat(), 0.0001);
+  const live = snap.metrics.find((m) => m.label === profile.metric);
+  const reset = live?.resets_at ? new Date(live.resets_at) : null;
+  const resetDay = reset ? (reset.getDay() + 6) % 7 : -1;
+  const resetHour = reset ? reset.getHours() : -1;
+
+  const rows = profile.cells
+    .map((row, d) => {
+      const cells = row
+        .map((v, h) => {
+          // Sequential, one hue: more burn is more of the same blue.
+          const level = v <= 0 ? 0 : Math.max(0.16, v / max);
+          const isReset = d === resetDay && h === resetHour;
+          const tip = `${DAYS[d]} ${hourLabel(h)}: ${v > 0 ? `${v.toFixed(v < 10 ? 1 : 0)} points of ${profile.metric}` : "nothing recorded"}${isReset ? ". Resets here" : ""}`;
+          return `<span class="dt-heat${isReset ? " dt-heat-reset" : ""}" style="--level:${level.toFixed(3)}" title="${esc(tip)}"></span>`;
+        })
+        .join("");
+      return `<span class="dt-heat-day">${DAYS[d]}</span>${cells}`;
+    })
+    .join("");
+  const busiest = profile.cells
+    .flatMap((row, d) => row.map((v, h) => ({ v, d, h })))
+    .sort((a, b) => b.v - a.v)[0];
+  const note =
+    busiest && busiest.v > 0
+      ? `Hardest hour so far: ${DAYS[busiest.d]} around ${hourLabel(busiest.h)}.${reset ? ` Next reset: ${DAYS[resetDay]} ${hourLabel(resetHour)}, outlined.` : ""}`
+      : "";
+  return `
+    <div class="dt-controls">
+      ${usable.length > 1 ? `<label>Limit ${select("dt-burn-metric", usable.map((b): [string, string] => [b.metric, b.metric]), burnMetric)}</label>` : ""}
+    </div>
+    <div class="dt-heat-grid" role="img" aria-label="Points of ${esc(profile.metric)} used in each hour of the week">
+      <span></span>${[0, 6, 12, 18].map((h) => `<span class="dt-heat-hour" style="grid-column:${h + 2} / span 6">${esc(hourLabel(h))}</span>`).join("")}
+      ${rows}
+    </div>
+    <div class="dt-heat-key"><span>less</span><i style="--level:0.16"></i><i style="--level:0.45"></i><i style="--level:0.75"></i><i style="--level:1"></i><span>more</span></div>
+    <p class="dt-caption">${esc(note)} From ${profile.daysObserved} day${profile.daysObserved === 1 ? "" : "s"} of readings on this computer, over the last four weeks at most.</p>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -784,6 +852,10 @@ function render(fromRefresh = false): void {
       ${forecastSection(openId)}
     </section>
     <section class="dt-section">
+      <h3>Your week</h3>
+      ${burnFor === openId ? weekSection(snap) : `<p class="dt-empty">Loading…</p>`}
+    </section>
+    <section class="dt-section">
       <h3>Spend</h3>
       ${spendSection(source.spend(openId))}
     </section>
@@ -800,8 +872,14 @@ async function loadHistory(): Promise<void> {
   loading = true;
   lastLoad = Date.now();
   try {
-    const [got] = await Promise.all([invoke<Series[]>("get_history", { providerId: id, hours }), loadForecast(id)]);
+    const [got, week] = await Promise.all([
+      invoke<Series[]>("get_history", { providerId: id, hours }),
+      invoke<BurnProfile[]>("get_burn_profile", { providerId: id }).catch(() => [] as BurnProfile[]),
+      loadForecast(id),
+    ]);
     if (openId !== id) return;
+    burn = week;
+    burnFor = id;
     history = got;
     historyFor = id;
   } catch {
@@ -922,7 +1000,8 @@ export function setupDetail(src: DetailSource): void {
       return;
     }
     clientNote = "";
-    if (t.id === "dt-depth") areaDepth = t.value as "1" | "2";
+    if (t.id === "dt-burn-metric") burnMetric = t.value;
+    else if (t.id === "dt-depth") areaDepth = t.value as "1" | "2";
     else if (t.id === "dt-metric") metricFilter = t.value;
     else if (t.id === "dt-window") windowKey = t.value as WindowKey;
     else if (t.id === "dt-group") groupKey = t.value as GroupKey;

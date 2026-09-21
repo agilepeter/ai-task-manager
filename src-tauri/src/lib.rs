@@ -323,6 +323,17 @@ async fn pin_apply(name: String, client: String, seen: pin::PinPlanSeen) -> Resu
     .map_err(|e| format!("pin: {e}"))?
 }
 
+/// When in the week each of a card's limits gets used, over the last 28
+/// days, bucketed in local time.
+#[tauri::command]
+async fn get_burn_profile(provider_id: String) -> Result<Vec<history::BurnProfile>, String> {
+    let offset_ms = i64::from(chrono::Local::now().offset().local_minus_utc()) * 1000;
+    let since = chrono::Utc::now().timestamp_millis() - 28 * 24 * 3_600_000;
+    tauri::async_runtime::spawn_blocking(move || history::burn_profiles(&provider_id, since, offset_ms))
+        .await
+        .map_err(|e| format!("burn profile: {e}"))
+}
+
 /// The sessions behind an area or a day, from the scan cache (no rescan).
 #[tauri::command]
 async fn get_sessions(area: Option<String>, day: Option<String>) -> Result<Vec<spend::SessionSpend>, String> {
@@ -3421,6 +3432,7 @@ pub fn run() {
             get_inventory,
             get_history,
             get_ledger,
+            get_burn_profile,
             pin_preview,
             pin_apply,
             export_table,

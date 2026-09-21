@@ -94,6 +94,15 @@ pub fn prune_at(conn: &Connection, now: i64) -> rusqlite::Result<usize> {
 /// first. Long ranges are thinned evenly to `MAX_POINTS`, always keeping the
 /// newest reading.
 pub fn series_at(conn: &Connection, provider: &str, since: i64) -> rusqlite::Result<Vec<Series>> {
+    let mut out = raw_series(conn, provider, since)?;
+    for series in &mut out {
+        thin(&mut series.points);
+    }
+    Ok(out)
+}
+
+/// Every reading, unthinned: the burn profile works on consecutive pairs.
+fn raw_series(conn: &Connection, provider: &str, since: i64) -> rusqlite::Result<Vec<Series>> {
     let mut stmt = conn.prepare(
         "SELECT metric, at, used FROM samples WHERE provider = ?1 AND at >= ?2 ORDER BY metric, at",
     )?;
@@ -108,10 +117,59 @@ pub fn series_at(conn: &Connection, provider: &str, since: i64) -> rusqlite::Res
             _ => out.push(Series { metric, points: vec![Point { at, used }] }),
         }
     }
-    for series in &mut out {
-        thin(&mut series.points);
-    }
     Ok(out)
+}
+
+/// When in the week a limit gets used: points of the limit burned in each
+/// (weekday, hour) cell, Monday first, in the user's local time.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BurnProfile {
+    pub metric: String,
+    /// `cells[weekday][hour]`, weekday 0 = Monday.
+    pub cells: Vec<Vec<f64>>,
+    /// Distinct local days with at least one usable reading pair.
+    pub days_observed: usize,
+}
+
+/// A rise between two readings is booked to the hour of the later one, but
+/// only when they are this close: across a longer gap (the app was off, the
+/// machine asleep) nobody knows which hour the usage happened in.
+const MAX_BURN_GAP_MS: i64 = 90 * 60_000;
+
+/// `offset_ms` is local time minus UTC, passed in so the hour bucketing is
+/// testable anywhere.
+pub fn burn_profile_from(metric: &str, points: &[Point], offset_ms: i64) -> BurnProfile {
+    let mut cells = vec![vec![0.0; 24]; 7];
+    let mut days = std::collections::HashSet::new();
+    for pair in points.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        let rise = b.used - a.used;
+        let gap = b.at - a.at;
+        // Only rises count: a fall is the window rolling over, not negative use.
+        if gap <= 0 || gap > MAX_BURN_GAP_MS || rise <= 0.0 {
+            continue;
+        }
+        let local = b.at + offset_ms;
+        let day_index = local.div_euclid(86_400_000);
+        // 1970-01-01 was a Thursday: shift so that Monday is 0.
+        let weekday = (day_index + 3).rem_euclid(7) as usize;
+        let hour = (local.rem_euclid(86_400_000) / 3_600_000) as usize;
+        cells[weekday][hour] += rise;
+        days.insert(day_index);
+    }
+    BurnProfile { metric: metric.to_string(), cells, days_observed: days.len() }
+}
+
+pub fn burn_profiles(provider: &str, since: i64, offset_ms: i64) -> Vec<BurnProfile> {
+    store()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().and_then(|conn| raw_series(conn, provider, since).ok()))
+        .unwrap_or_default()
+        .iter()
+        .map(|s| burn_profile_from(&s.metric, &s.points, offset_ms))
+        .collect()
 }
 
 fn thin(points: &mut Vec<Point>) {
@@ -240,6 +298,35 @@ mod tests {
         record_at(&conn, &[snap("claude", 20.0)], RETENTION_MS + 10 * MIN).unwrap();
         assert_eq!(prune_at(&conn, RETENTION_MS + 10 * MIN).unwrap(), 2);
         assert_eq!(values(&conn, "claude"), [20.0]);
+    }
+
+    #[test]
+    fn burn_is_booked_to_the_local_hour_it_was_seen_in() {
+        const H: i64 = 3_600_000;
+        // 2026-09-21 is a Monday. 14:00 UTC.
+        let mon_14 = 1_790_000_000_000 - (1_790_000_000_000 % 86_400_000) + 14 * H;
+        let monday = |h: i64, m: i64| mon_14 - 14 * H + h * H + m * MIN;
+        let weekday_of_base = ((mon_14.div_euclid(86_400_000)) + 3).rem_euclid(7);
+        let points = [
+            Point { at: monday(14, 0), used: 10.0 },
+            Point { at: monday(14, 30), used: 16.0 }, // +6 in the 14:00 hour
+            Point { at: monday(15, 10), used: 20.0 }, // +4 in the 15:00 hour
+            Point { at: monday(20, 0), used: 50.0 },  // a 5-hour gap: timing unknown, skipped
+            Point { at: monday(20, 30), used: 3.0 },  // a reset, not negative use
+            Point { at: monday(21, 0), used: 9.0 },   // +6 in the 21:00 hour
+        ];
+        let utc = burn_profile_from("Weekly", &points, 0);
+        let row = &utc.cells[weekday_of_base as usize];
+        assert_eq!((row[14], row[15], row[20], row[21]), (6.0, 4.0, 0.0, 6.0));
+        assert_eq!(utc.cells.iter().flatten().sum::<f64>(), 16.0, "nothing booked anywhere else");
+        assert_eq!(utc.days_observed, 1);
+        // Four hours west: 14:30 UTC is 10:30 local, same weekday.
+        let west = burn_profile_from("Weekly", &points, -4 * H);
+        assert_eq!(west.cells[weekday_of_base as usize][10], 6.0);
+        // Eleven hours east pushes 21:00 into the next day's 08:00.
+        let east = burn_profile_from("Weekly", &points, 11 * H);
+        assert_eq!(east.cells[((weekday_of_base + 1) % 7) as usize][8], 6.0);
+        assert_eq!(burn_profile_from("x", &[], 0).days_observed, 0);
     }
 
     #[test]
