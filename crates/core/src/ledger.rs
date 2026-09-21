@@ -71,6 +71,21 @@ pub struct ItemView {
     pub value_ratio: Option<f64>,
     /// Linked to a tool that showed almost no usage in 30 days.
     pub idle: bool,
+    /// The counterfactual, when it is worth saying: what the same work would
+    /// have cost pay-as-you-go, against what the plan costs.
+    pub what_if: Option<WhatIf>,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WhatIf {
+    /// "plan-wins": the plan is far cheaper than the API would have been.
+    /// "plan-loses": pay-as-you-go would have cost clearly less this month.
+    pub kind: String,
+    pub api_cost: f64,
+    pub plan_cost: f64,
+    /// What switching would have saved (plan-loses) or the plan did save.
+    pub difference: f64,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -123,6 +138,25 @@ pub fn monthly_cost(sub: &Subscription) -> f64 {
     }
 }
 
+/// Only say something when the gap is clear. Usage is an estimate priced at
+/// list API rates over a rolling 30 days, and a month varies, so a plan has to
+/// be beaten by half before "switch" is worth suggesting, and has to win
+/// outright before it is called a win. In between, silence.
+fn what_if(usage30: Option<f64>, monthly: f64) -> Option<WhatIf> {
+    let usage = usage30.filter(|u| u.is_finite())?;
+    if monthly <= 0.0 || usage < IDLE_BELOW {
+        return None; // free, or idle: the idle flag already covers that case
+    }
+    let kind = if usage >= monthly {
+        "plan-wins"
+    } else if usage < monthly * 0.5 {
+        "plan-loses"
+    } else {
+        return None;
+    };
+    Some(WhatIf { kind: kind.into(), api_cost: usage, plan_cost: monthly, difference: (usage - monthly).abs() })
+}
+
 /// `usage30` maps a card id to its API-equivalent spend over 30 days.
 pub fn view(items: &[Subscription], today: NaiveDate, usage30: &HashMap<String, f64>) -> LedgerView {
     let mut rows: Vec<ItemView> = items
@@ -145,6 +179,7 @@ pub fn view(items: &[Subscription], today: NaiveDate, usage30: &HashMap<String, 
                 usage30: usage,
                 value_ratio: usage.filter(|_| monthly > 0.0).map(|u| u / monthly),
                 idle: usage.is_some_and(|u| u < IDLE_BELOW) && monthly > 0.0,
+                what_if: what_if(usage, monthly),
             }
         })
         .collect();
@@ -367,6 +402,33 @@ mod tests {
         assert!(!by("Unknown").idle, "no measurement is not the same as no usage");
         assert!(!by("Unlinked").idle);
         assert_eq!(v.idle_monthly, 10.0);
+    }
+
+    #[test]
+    fn the_counterfactual_speaks_only_when_the_gap_is_clear() {
+        let items = [
+            sub("Heavy", 200.0, Cycle::Monthly, None, Some("claude")),
+            sub("Light", 100.0, Cycle::Monthly, None, Some("cursor")),
+            sub("Fair", 100.0, Cycle::Monthly, None, Some("codex")),
+            sub("Idle", 10.0, Cycle::Monthly, None, Some("copilot")),
+            sub("Yearly", 1200.0, Cycle::Yearly, None, Some("gemini")),
+            sub("Unlinked", 50.0, Cycle::Monthly, None, None),
+        ];
+        let usage = HashMap::from([
+            ("claude".to_string(), 2074.0),
+            ("cursor".to_string(), 12.0),
+            ("codex".to_string(), 70.0),
+            ("copilot".to_string(), 0.2),
+            ("gemini".to_string(), 30.0),
+        ]);
+        let v = view(&items, d("2026-09-21"), &usage);
+        let by = |n: &str| v.items.iter().find(|i| i.subscription.name == n).unwrap().what_if.clone();
+        assert_eq!(by("Heavy"), Some(WhatIf { kind: "plan-wins".into(), api_cost: 2074.0, plan_cost: 200.0, difference: 1874.0 }));
+        assert_eq!(by("Light"), Some(WhatIf { kind: "plan-loses".into(), api_cost: 12.0, plan_cost: 100.0, difference: 88.0 }));
+        assert_eq!(by("Fair"), None, "70 of 100 is within a normal month's swing");
+        assert_eq!(by("Idle"), None, "the idle flag speaks for this one");
+        assert_eq!(by("Yearly").unwrap().plan_cost, 100.0, "a yearly plan is judged per month");
+        assert_eq!(by("Unlinked"), None);
     }
 
     #[test]

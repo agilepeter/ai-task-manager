@@ -23,6 +23,7 @@ interface ItemView extends Subscription {
   usage30: number | null;
   valueRatio: number | null;
   idle: boolean;
+  whatIf: { kind: "plan-wins" | "plan-loses"; apiCost: number; planCost: number; difference: number } | null;
 }
 
 interface LedgerView {
@@ -73,6 +74,14 @@ function renewalText(item: ItemView): string {
 function valueLine(item: ItemView): string {
   if (item.idle) {
     return `<p class="lg-flag lg-flag-idle">No measured usage in 30 days. Cancelling saves ${money(item.monthlyCost)} a month.</p>`;
+  }
+  if (item.whatIf?.kind === "plan-wins") {
+    const w = item.whatIf;
+    return `<p class="lg-flag">Pay-as-you-go, the last 30 days would have cost about ${money(w.apiCost)}. The plan is ${money(w.planCost)} a month: about ${money(w.difference)} saved.</p>`;
+  }
+  if (item.whatIf?.kind === "plan-loses") {
+    const w = item.whatIf;
+    return `<p class="lg-flag lg-flag-idle">About ${money(w.apiCost)} of work in 30 days on a ${money(w.planCost)} a month plan. Pay-as-you-go, or a smaller plan, would have cost about ${money(w.difference)} less.</p>`;
   }
   if (item.usage30 === null || item.valueRatio === null) return "";
   const times = item.valueRatio >= 10 ? item.valueRatio.toFixed(0) : item.valueRatio.toFixed(1);
