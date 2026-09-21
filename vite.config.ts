@@ -4,7 +4,12 @@ import { defineConfig } from "vite";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(async () => ({
+// `vite build --mode demo` builds the browser demo (demo.html, a fictional
+// backend, relative asset paths so it can be hosted in any folder).
+export default defineConfig(async ({ mode }) => ({
+  ...(mode === "demo"
+    ? { base: "./", build: { outDir: "dist-demo", target: "es2022", rollupOptions: { input: "demo.html" } } }
+    : {}),
   // Build stamp for the footer, e.g. "0707.1432" (MMDD.HHmm).
   define: {
     __BUILD_STAMP__: JSON.stringify(

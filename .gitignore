@@ -38,3 +38,6 @@ pane.md
 
 # Per-chair agent config (Cursor rules) — local like pane.md
 .cursor/
+
+# Browser demo build output
+dist-demo

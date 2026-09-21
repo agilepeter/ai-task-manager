@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:demo": "tsc && vite build --mode demo",
+    "fixture:demo": "python3 scripts/make-demo-fixture.py",
     "preview": "vite preview",
     "tauri": "tauri"
   },

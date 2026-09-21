@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Builds the demo's data by running the REAL engine against a FICTIONAL machine.
+
+Creates a throwaway home folder for an invented freelancer ("Dana"): a Claude
+Code config with MCP servers, settings, agents, skills, and a month of
+generated session logs across invented client folders. Then runs the core's
+ignored live tests with HOME pointed at it and saves what they print. Nothing
+here reads the real user's files, and every name is made up.
+
+    python3 scripts/make-demo-fixture.py        # writes src/demo-fixture.json
+"""
+import json, os, random, shutil, subprocess, sys, tempfile, datetime, uuid, pathlib
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+random.seed(20260921)
+# realpath: macOS temp folders sit behind a symlink (/var -> /private/var),
+# and the log walker will not follow symlinked paths.
+home = pathlib.Path(os.path.realpath(tempfile.mkdtemp(prefix="aitm-demo-home-")))
+work = home / "work"
+claude = home / ".claude"
+
+def compact(obj):
+    """Claude Code writes compact JSON, and the engine's fast pre-check for
+    assistant lines relies on it: no spaces after ':' or ','."""
+    return json.dumps(obj, separators=(",", ":"))
+
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+# --- Claude Code config -----------------------------------------------------
+write(home / ".claude.json", json.dumps({
+    "mcpServers": {
+        "context7": {"command": "npx", "args": ["-y", "@upstash/context7-mcp@1"]},
+        "playwright": {"command": "npx", "args": ["-y", "@playwright/mcp@latest"]},
+        "github": {"type": "http", "url": "https://api.githubcopilot.com/mcp/"},
+        "postgres": {"command": "npx", "args": ["-y", "pg-readonly-mcp"], "env": {"DATABASE_URL": "demo-only"}},
+    },
+    "projects": {str(work): {"mcpServers": {"figma": {"command": "npx", "args": ["-y", "figma-context-mcp@2"], "env": {"FIGMA_KEY": "demo-only"}}}}},
+}, indent=2))
+write(claude / "settings.json", json.dumps({
+    "model": "claude-sonnet-5",
+    "permissions": {"allow": ["Bash(git status)", "Bash(npm test)"], "deny": ["Read(./.env)", "Bash(git push --force*)", "Bash(rm -rf*)"]},
+    "hooks": {"SessionEnd": [{"hooks": [{"type": "command", "command": "true"}]}]},
+}, indent=2))
+write(claude / "agents" / "reviewer.md", "---\nname: reviewer\nmodel: sonnet\n---\nReviews diffs.\n")
+write(claude / "agents" / "researcher.md", "---\nname: researcher\n---\nFinds things.\n")
+for skill in ["deploy", "release-notes", "invoice"]:
+    write(claude / "skills" / skill / "SKILL.md", f"---\nname: {skill}\n---\n")
+for folder in ["acme-portal/web", "acme-portal/api", "northwind-api", "internal-tools", "blog"]:
+    (work / folder).mkdir(parents=True, exist_ok=True)
+write(home / "Library/Application Support/Claude/claude_desktop_config.json",
+      json.dumps({"mcpServers": {"notes": {"command": "uvx", "args": ["notes-mcp"]}}}))
+
+# --- a month of session logs ------------------------------------------------
+project_dir = claude / "projects" / "".join(c if c.isalnum() else "-" for c in str(work))
+now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+AREAS = [("acme-portal/web", 0.34), ("acme-portal/api", 0.18), ("northwind-api", 0.24), ("internal-tools", 0.14), ("blog", 0.04), ("", 0.06)]
+MODELS = [("claude-opus-5", 0.46, 1.9), ("claude-sonnet-5", 0.44, 0.5), ("claude-haiku-4-5-20251001", 0.10, 0.06)]
+
+def pick(options):
+    r, acc = random.random(), 0.0
+    for name, weight, *rest in options:
+        acc += weight
+        if r <= acc:
+            return (name, *rest)
+    return (options[-1][0], *options[-1][2:])
+
+def session(start, turns, sticky_area=None):
+    sid = str(uuid.uuid4()); lines = []; t = start
+    area = sticky_area if sticky_area is not None else pick(AREAS)[0]
+    for i in range(turns):
+        if i and random.random() < 0.08 and sticky_area is None:
+            area = pick(AREAS)[0]
+        model, unit = pick(MODELS)
+        cost = round(unit * random.uniform(0.2, 1.6), 4)
+        t += datetime.timedelta(minutes=random.uniform(1, 9))
+        if t > now:
+            break
+        lines.append(compact({
+            "type": "assistant", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": sid,
+            "cwd": str(work / area) if area else str(work), "requestId": f"req_{uuid.uuid4().hex[:12]}", "costUSD": cost,
+            "message": {"id": f"msg_{uuid.uuid4().hex[:16]}", "model": model, "content": [{"type": "text", "text": "."}],
+                        "usage": {"input_tokens": random.randint(800, 9000), "output_tokens": random.randint(150, 2200),
+                                  "cache_read_input_tokens": random.randint(20000, 160000)}},
+        }))
+    if lines:
+        # The first line of a session is logged at the project root.
+        first = json.loads(lines[0]); first["cwd"] = str(work); lines[0] = compact(first)
+        write(project_dir / f"{sid}.jsonl", "\n".join(lines) + "\n")
+
+for day in range(29, -1, -1):
+    date = now - datetime.timedelta(days=day)
+    if date.weekday() >= 5 and random.random() < 0.7:
+        continue
+    for _ in range(random.randint(1, 4)):
+        start = date.replace(hour=random.randint(13, 21), minute=random.randint(0, 59))
+        session(start, random.randint(6, 40))
+# One session left open for weeks: the pattern the coaching is there to catch.
+long_start = now - datetime.timedelta(days=19)
+sid = str(uuid.uuid4()); lines = []; t = long_start
+while t < now:
+    t += datetime.timedelta(hours=random.uniform(5, 16))
+    if t >= now: break
+    lines.append(compact({"type": "assistant", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": sid,
+        "cwd": str(work / "northwind-api"), "requestId": f"req_{uuid.uuid4().hex[:12]}", "costUSD": round(random.uniform(0.9, 3.4), 4),
+        "message": {"id": f"msg_{uuid.uuid4().hex[:16]}", "model": "claude-opus-5", "content": [{"type": "text", "text": "."}],
+                    "usage": {"input_tokens": 4000, "output_tokens": 900, "cache_read_input_tokens": 380000}}}))
+first = json.loads(lines[0]); first["cwd"] = str(work); lines[0] = compact(first)
+write(project_dir / f"{sid}.jsonl", "\n".join(lines) + "\n")
+
+# --- run the real engine against it -----------------------------------------
+env = dict(os.environ, HOME=str(home), CLAUDE_CONFIG_DIR="", XDG_CONFIG_HOME="", AITM_AREA="northwind-api")
+env.pop("CLAUDE_CONFIG_DIR"); env.pop("XDG_CONFIG_HOME")
+env["PATH"] = f"{os.path.expanduser('~')}/.cargo/bin:" + env["PATH"]
+env["CARGO_HOME"] = os.path.expanduser("~/.cargo"); env["RUSTUP_HOME"] = os.path.expanduser("~/.rustup")
+
+def live(test, marker):
+    out = subprocess.run(["cargo", "test", "-p", "aitm-core", "--lib", "--release", test, "--", "--ignored", "--nocapture"],
+                         cwd=ROOT, env=env, capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        if line.startswith(marker):
+            return json.loads(line)
+    # live_scan pretty-prints: its JSON starts on a line that is exactly "{".
+    lines = out.splitlines()
+    if "{" in lines:
+        start = lines.index("{")
+        end = len(lines) - 1 - lines[::-1].index("}")
+        return json.loads("\n".join(lines[start:end + 1]))
+    sys.exit(f"{test} printed no JSON. Last output:\n" + "\n".join(lines[-8:]))
+
+fixture = {
+    "inventory": live("live_scan", "\x00"),
+    "spend": live("live_spend", "[{"),
+    "sessions": live("live_sessions", '{"area"'),
+    "audit": live("live_audit", '{"generatedAt"'),
+}
+# The fictional home's path must not leak a real one, and reads better short.
+text = json.dumps(fixture).replace(str(home), "/Users/dana")
+assert os.path.expanduser("~") not in text, "the real home directory leaked into the fixture"
+write(ROOT / "src" / "demo-fixture.json", json.dumps(json.loads(text), indent=1))
+shutil.rmtree(home, ignore_errors=True)
+f = json.loads(text)
+print("fixture written: %d MCP servers, %d tools, spend 30d $%.0f, %d areas, audit %s/100" % (
+    len(f["inventory"]["mcpServers"]), len(f["inventory"]["tools"]), f["spend"][0]["last30"]["cost"],
+    len(f["spend"][0]["projects"][0]["areas"]), f["audit"]["score"]))
