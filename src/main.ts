@@ -1,5 +1,5 @@
 import { setupViews } from "./inventory";
-import { refreshDetail, setupDetail } from "./detail";
+import { applySavedWide, refreshDetail, setupDetail } from "./detail";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -207,6 +207,8 @@ interface Config {
   burnAlertPoints: number;
   /** Dollars in one local day; 0 = off. */
   dailySpendAlert: number;
+  /** Window grown to show the list and the detail page side by side. */
+  wideMode: boolean;
   spendTab: SpendTab;
   spendMetric: "cost" | "tokens" | "mtok";
   showUsed: boolean;
@@ -243,6 +245,7 @@ const FRONTEND_CONFIG_KEYS = [
   "notifyReset",
   "burnAlertPoints",
   "dailySpendAlert",
+  "wideMode",
   "spendTab",
   "spendMetric",
   "showUsed",
@@ -434,6 +437,7 @@ let config: Config = {
   notifyReset: false,
   burnAlertPoints: 15,
   dailySpendAlert: 0,
+  wideMode: false,
   spendTab: "today",
   spendMetric: "cost",
   showUsed: false,
@@ -5072,6 +5076,9 @@ window.addEventListener("DOMContentLoaded", () => {
   setupDetail({
     snapshot: (id) => lastSnapshots.find((s) => s.id === id),
     spend: (id) => lastSpend.find((s) => s.id === id),
+    firstId: () => orderedSnapshots().find((s) => s.status === "ok")?.id,
+    wide: () => config.wideMode === true,
+    saveWide: (wideMode) => void patchConfig({ wideMode }),
   });
   // No lens init here: applyGlass() (via initSettings, after the saved
   // config arrives) owns it — a fixed timer raced the config load and
@@ -5394,6 +5401,7 @@ window.addEventListener("DOMContentLoaded", () => {
     void refresh();
   });
   void initSettings().then(() => {
+    applySavedWide();
     scheduleAutoRefresh();
     void paintCachedSnapshots();
     void refresh(true);

@@ -116,6 +116,7 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // Budget guard. Burn: points of a weekly-or-longer quota inside 30
     // minutes (0 = off). Spend: dollars in one local day (0 = off; there is
     // no universal default for what a day should cost).
+    obj.entry("wideMode").or_insert(json!(false));
     obj.entry("burnAlertPoints").or_insert(json!(15));
     obj.entry("dailySpendAlert").or_insert(json!(0));
     obj.entry("spendTab").or_insert(json!("today"));
@@ -199,6 +200,7 @@ const CONFIG_KEYS: &[&str] = &[
     "notifyReset",
     "burnAlertPoints",
     "dailySpendAlert",
+    "wideMode",
     "spendMetric",
     "spendTab",
     "showUsed",
@@ -2929,6 +2931,59 @@ fn hide_popover(app: tauri::AppHandle) {
     }
 }
 
+/// Where the popover's top-left corner goes for a tray click. Its right edge
+/// lines up with the click either way. Windows and Linux trays sit in a bar
+/// along the bottom, so the window hangs above the click; the macOS menu bar
+/// is along the top, so it drops below (the click lands inside a bar about
+/// 24 pt tall, hence the clearance).
+fn popover_origin(
+    click: tauri::PhysicalPosition<f64>,
+    size: tauri::PhysicalSize<u32>,
+    menu_bar_on_top: bool,
+) -> (f64, f64) {
+    let x = (click.x - f64::from(size.width)).max(0.0);
+    let y = if menu_bar_on_top {
+        click.y + 18.0
+    } else {
+        (click.y - f64::from(size.height) - 8.0).max(0.0)
+    };
+    (x, y)
+}
+
+/// Popover widths in logical pixels: the single column, and wide mode's list
+/// plus detail side by side.
+const NARROW_WIDTH: f64 = 380.0;
+const WIDE_WIDTH: f64 = 760.0;
+const POPOVER_HEIGHT: f64 = 600.0;
+
+/// New left edge when the window changes width: the right edge stays where
+/// it is (that is the side anchored to the tray), without leaving the screen.
+fn resized_left(old_left: i32, old_width: u32, new_width: u32) -> i32 {
+    (old_left + old_width as i32 - new_width as i32).max(0)
+}
+
+/// Wide mode: the same window grown to fit the detail view beside the list.
+/// Not a second window. The choice is saved by the frontend as `wideMode`.
+#[tauri::command]
+fn set_wide(app: tauri::AppHandle, wide: bool) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("no main window")?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let width = if wide { WIDE_WIDTH } else { NARROW_WIDTH };
+    let new_width = (width * scale).round() as u32;
+    let old = window.outer_size().map_err(|e| e.to_string())?;
+    if old.width == new_width {
+        return Ok(());
+    }
+    let position = window.outer_position().map_err(|e| e.to_string())?;
+    window
+        .set_size(tauri::LogicalSize::new(width, POPOVER_HEIGHT))
+        .map_err(|e| e.to_string())?;
+    let left = resized_left(position.x, old.width, new_width);
+    window
+        .set_position(tauri::PhysicalPosition::new(left, position.y))
+        .map_err(|e| e.to_string())
+}
+
 fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -2946,13 +3001,10 @@ fn toggle_popover(app: &tauri::AppHandle, click: tauri::PhysicalPosition<f64>) {
 
     set_webview_memory_level(&window, false);
 
-    // Anchor the popover's bottom-right corner near the tray click,
-    // which sits next to the clock on a standard bottom taskbar.
     let size = window
         .outer_size()
         .unwrap_or(tauri::PhysicalSize::new(380, 600));
-    let x = (click.x - f64::from(size.width)).max(0.0);
-    let y = (click.y - f64::from(size.height) - 8.0).max(0.0);
+    let (x, y) = popover_origin(click, size, cfg!(target_os = "macos"));
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     let _ = window.show();
     let _ = window.set_focus();
@@ -2983,6 +3035,7 @@ pub fn run() {
             fetch_usage,
             get_inventory,
             get_history,
+            set_wide,
             cached_usage,
             fetch_spend,
             set_api_key,
@@ -3102,6 +3155,26 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn popover_hangs_above_a_bottom_tray_and_drops_below_a_top_menu_bar() {
+        let size = tauri::PhysicalSize::new(380, 600);
+        let taskbar = tauri::PhysicalPosition::new(1900.0, 1060.0);
+        assert_eq!(super::popover_origin(taskbar, size, false), (1520.0, 452.0));
+        let menu_bar = tauri::PhysicalPosition::new(1400.0, 12.0);
+        let (x, y) = super::popover_origin(menu_bar, size, true);
+        assert_eq!(x, 1020.0);
+        assert!(y > 24.0, "clears the menu bar, was {y}");
+        // A click near the left edge never pushes the window off screen.
+        assert_eq!(super::popover_origin(tauri::PhysicalPosition::new(100.0, 12.0), size, true).0, 0.0);
+    }
+
+    #[test]
+    fn widening_keeps_the_right_edge_and_stays_on_screen() {
+        assert_eq!(super::resized_left(1000, 380, 760), 620, "right edge 1380 before and after");
+        assert_eq!(super::resized_left(620, 760, 380), 1000, "and back");
+        assert_eq!(super::resized_left(200, 380, 760), 0, "clamped at the screen edge");
+    }
+
     use super::{
         current_credential_scoped_generations, guarded, is_credential_scoped_card,
         is_plain_api_key_provider, set_api_key_in, stored_pane_api_key,

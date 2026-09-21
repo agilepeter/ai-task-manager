@@ -58,6 +58,13 @@ and computed Opportunities). Usage stays the default view.
   the `--viz-*` colours were validated per theme, so re-run the validator if they change.
   Project = the folder Claude Code was started in, matched against paths it still knows
   (folder names are lossy and cannot be decoded).
+- **Wide mode** (`wideMode`, the Wide / Narrow button): the SAME window grown from 380 to
+  760, list left, detail right. Never a second window. `set_wide` keeps the right edge fixed
+  (the tray side). Full-window panels keep to the left column, and a closed Settings parks
+  off the LEFT in wide mode, because its usual park position lands inside a 760 window.
+  The saved choice is applied by `applySavedWide()` after the config loads, not in setup.
+- **Popover anchoring is per platform** (`popover_origin`): above the click for a bottom
+  taskbar, below it for the macOS menu bar.
 - **Inventory reads names, shapes and counts only.** Claude config files hold API keys in
   `env`, `args`, `headers`, URL paths and query strings. Nothing may copy a value out of
   those. The `never_leaks_*` test plants secrets in every such field; extend it when adding

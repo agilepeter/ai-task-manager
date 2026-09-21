@@ -49,6 +49,11 @@ interface Series {
 export interface DetailSource {
   snapshot(id: string): Snapshot | undefined;
   spend(id: string): ProviderSpend | undefined;
+  /** The card to show when wide mode opens with nothing picked yet. */
+  firstId(): string | undefined;
+  /** Saved wide-mode choice, and how to save a new one. */
+  wide(): boolean;
+  saveWide(wide: boolean): void;
 }
 
 type WindowKey = "today" | "yesterday" | "last30";
@@ -78,6 +83,8 @@ let history: Series[] = [];
 let historyFor = "";
 let loading = false;
 let lastLoad = 0;
+/** Wide mode: the window is twice as wide and this page is a fixed right column. */
+let wide = false;
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -386,25 +393,72 @@ async function loadHistory(): Promise<void> {
   render();
 }
 
+function markSelected(): void {
+  document.querySelectorAll<HTMLElement>("#providers [data-provider]").forEach((card) => {
+    card.classList.toggle("dt-selected", wide && card.dataset.provider === openId);
+  });
+}
+
 function open(id: string): void {
   openId = id;
   if (historyFor !== id) history = [];
   document.body.classList.add("detail-open");
+  markSelected();
   render();
   void loadHistory();
 }
 
 function close(): void {
+  // In wide mode the column is permanent: there is nothing to go back to.
+  if (wide) return;
   openId = null;
   document.body.classList.remove("detail-open");
+}
+
+/// Grows or shrinks the one window. The native resize comes first so the
+/// page never lays out for a width the window does not have yet.
+async function setWide(next: boolean, save: boolean): Promise<void> {
+  try {
+    await invoke("set_wide", { wide: next });
+  } catch {
+    return; // the window did not change, so neither does the layout
+  }
+  wide = next;
+  document.body.classList.toggle("wide", wide);
+  const btn = document.querySelector<HTMLElement>("#detail-wide");
+  if (btn) {
+    btn.textContent = wide ? "Narrow" : "Wide";
+    btn.setAttribute("aria-pressed", String(wide));
+  }
+  if (save) source?.saveWide(wide);
+  if (wide && !openId) {
+    const first = source?.firstId();
+    if (first) open(first);
+  } else {
+    markSelected();
+    if (openId) render();
+  }
 }
 
 /// Keeps an open detail page current. The app re-renders on a timer as well
 /// as on new data, so reloads are spaced out: redrawing under the pointer
 /// would keep wiping the crosshair.
 export function refreshDetail(): void {
+  // Cards were just re-rendered, so the selection mark has to go back on.
+  markSelected();
+  if (wide && !openId) {
+    const first = source?.firstId();
+    if (first) open(first);
+    return;
+  }
   if (!openId || Date.now() - lastLoad < 60_000) return;
   void loadHistory();
+}
+
+/// Restores the saved wide-mode choice. Call once the config has loaded:
+/// `setupDetail` runs before that, when the choice still reads as its default.
+export function applySavedWide(): void {
+  if (source?.wide()) void setWide(true, false);
 }
 
 export function setupDetail(src: DetailSource): void {
@@ -416,11 +470,14 @@ export function setupDetail(src: DetailSource): void {
     if (card?.dataset.provider) open(card.dataset.provider);
   });
   document.querySelector("#detail-close")?.addEventListener("click", close);
+  document.querySelector("#detail-wide")?.addEventListener("click", () => void setWide(!wide, true));
+  document.querySelector("#wide-btn")?.addEventListener("click", () => void setWide(!wide, true));
   // Esc backs out of the page before it is allowed to hide the whole window.
   document.addEventListener(
     "keydown",
     (e) => {
-      if (e.key === "Escape" && openId) {
+      // Wide mode has no page to back out of, so Esc keeps its usual job.
+      if (e.key === "Escape" && openId && !wide) {
         e.stopImmediatePropagation();
         e.preventDefault();
         close();

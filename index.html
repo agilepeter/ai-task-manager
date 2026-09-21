@@ -96,6 +96,7 @@
           <div class="sidebar-buttons">
             <button id="theme-btn" title="Light / dark mode" data-i18n-title="sidebar.theme">&#9728;</button>
             <button id="refresh" title="Refresh now" data-i18n-title="sidebar.refresh">&#10227;</button>
+            <button id="wide-btn" title="Wide view: list and details side by side">&#8596;</button>
             <button id="customize-btn" title="Customize" data-i18n-title="sidebar.customize">&#9776;</button>
             <button id="settings-btn" title="Settings" data-i18n-title="sidebar.settings">&#9881;</button>
           </div>
@@ -113,6 +114,7 @@
       <div class="panel-head glass-bar">
         <button class="mini-btn" id="detail-close">&#8592; Back</button>
         <span class="panel-title" id="detail-title"></span>
+        <button class="mini-btn" id="detail-wide" aria-pressed="false" title="Show the list and this page side by side">Wide</button>
       </div>
       <div id="detail-body"></div>
     </aside>
@@ -141,7 +143,7 @@
             <input id="interval" type="number" min="1" max="120" value="5" /> <span class="unit" data-i18n="settings.min">min</span>
           </div>
           <div class="setting-row">
-            <label class="toggle"><input id="autostart" type="checkbox" /> <span data-i18n="settings.startWithWindows">Start with Windows</span></label>
+            <label class="toggle"><input id="autostart" type="checkbox" /> <span data-i18n="settings.startWithWindows">Start at login</span></label>
           </div>
           <div class="setting-row">
             <label class="toggle"><input id="pacing" type="checkbox" /> <span data-i18n="settings.pacing">Always show pacing</span></label>

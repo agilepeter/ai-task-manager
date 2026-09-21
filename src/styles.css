@@ -3290,3 +3290,46 @@ body.reduce-anim #detail {
   font-size: 11.5px;
   margin: 2px 0;
 }
+
+/* ---------------------------------------------------------------- wide mode */
+/* One window, twice as wide: the usual column on the left, the detail page
+   as a permanent column on the right. Full-window panels keep to the left
+   column so Settings never stretches across both. */
+body.wide main.popover {
+  width: 380px;
+}
+body.wide #detail {
+  left: 380px;
+  transform: none;
+  transition: none;
+  border-left: 1px solid var(--border);
+}
+body.wide #detail .panel-head {
+  left: 380px;
+}
+body.wide #detail-close {
+  display: none;
+}
+body.wide #settings,
+body.wide #drawer {
+  right: auto;
+  width: 380px;
+}
+/* Closed, Settings parks 103% of its own width to the right. At 380 wide
+   that is off screen; in a 760 window it would land on top of the detail
+   column, so in wide mode it parks off the left edge instead. */
+body.wide:not(.settings-open) #settings {
+  transform: translateX(-103%);
+}
+body.wide #settings .panel-head,
+body.wide #drawer .panel-head {
+  right: auto;
+  width: 380px;
+}
+/* Back on the left, Wide on the right: the title needs no optical offset. */
+#detail .panel-head.glass-bar .panel-title {
+  margin-right: 0;
+}
+.provider.dt-selected .card-panel {
+  box-shadow: inset 0 0 0 1px var(--viz-1);
+}
