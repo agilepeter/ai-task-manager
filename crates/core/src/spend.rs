@@ -316,7 +316,7 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 7; // bump on cache format *or* parser-logic changes
+const PERSIST_VERSION: u32 = 8; // bump on cache format *or* parser-logic changes
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1496,6 +1496,11 @@ struct ClaudeFileState {
     /// The work area in force. Sticky: it changes when the session moves.
     #[serde(default)]
     area: Option<String>,
+    /// First and last counted message, epoch milliseconds: the session's span.
+    #[serde(default)]
+    first_ms: Option<i64>,
+    #[serde(default)]
+    last_ms: Option<i64>,
 }
 
 /// Parse one Claude Code session-log line into spend events. Persisted
@@ -1621,6 +1626,9 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
     // the one that carried its cost, and that later line is a "duplicate".
     claude_area(st, &v, data);
     let Some(ts) = parse_ts(v.get("timestamp")) else { return };
+    let ms = ts.timestamp_millis();
+    st.first_ms = Some(st.first_ms.map_or(ms, |f| f.min(ms)));
+    st.last_ms = Some(st.last_ms.map_or(ms, |l| l.max(ms)));
     let usage = v.pointer("/message/usage").cloned().unwrap_or(Value::Null);
     let Some(t) = claude_tokens(&usage) else { return };
 
@@ -1805,6 +1813,112 @@ fn project_of(root: &Path, file: &Path) -> Option<String> {
 
 /// Per-project windows, cut exactly like a card's. Projects with no spend in
 /// the last 30 days are left out; the rest sort by 30-day cost.
+/// One Claude Code session (one log file): when it ran, what it cost, where
+/// it worked. Metadata only. The conversation titles Claude Code keeps in
+/// the same logs are derived from prompts and are deliberately not read.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSpend {
+    /// The log file's stem: Claude Code's session id.
+    pub id: String,
+    pub project: String,
+    pub started_ms: Option<i64>,
+    pub ended_ms: Option<i64>,
+    /// Cost and tokens inside the 30-day window.
+    pub cost: f64,
+    pub tokens: f64,
+    pub top_model: Option<String>,
+    /// (area, cost) inside the window, largest first.
+    pub areas: Vec<(String, f64)>,
+    /// When a single day was asked for: this session's cost on that day.
+    pub day_cost: Option<f64>,
+}
+
+fn session_from(id: &str, project: &str, data: &FileData, st: Option<&ClaudeFileState>, today: i32) -> Option<SessionSpend> {
+    let in_window = |day: i32| day > today - TREND_DAYS as i32 && day <= today;
+    let mut models: HashMap<&str, f64> = HashMap::new();
+    let (mut cost, mut tokens) = (0.0, 0.0);
+    for ((day, model), (c, t)) in &data.days {
+        if in_window(*day) {
+            cost += c;
+            tokens += t;
+            *models.entry(model.as_str()).or_insert(0.0) += c;
+        }
+    }
+    if cost <= 0.004 && tokens <= 0.0 {
+        return None;
+    }
+    let mut areas: HashMap<&str, f64> = HashMap::new();
+    for ((day, area), (c, _)) in &data.areas {
+        if in_window(*day) {
+            *areas.entry(area.as_str()).or_insert(0.0) += c;
+        }
+    }
+    let mut areas: Vec<(String, f64)> = areas.into_iter().map(|(a, c)| (a.to_string(), c)).collect();
+    areas.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    Some(SessionSpend {
+        id: id.to_string(),
+        project: project.to_string(),
+        started_ms: st.and_then(|s| s.first_ms),
+        ended_ms: st.and_then(|s| s.last_ms),
+        cost,
+        tokens,
+        top_model: models
+            .into_iter()
+            .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(a.0)))
+            .map(|(m, _)| m.to_string()),
+        areas,
+        day_cost: None,
+    })
+}
+
+/// Sessions from the scan cache. `area` keeps those that spent anything in
+/// that area (a top-level folder matches what is under it); `day` (a local
+/// `YYYY-MM-DD`) keeps those that spent on that day and ranks by that day's
+/// cost, which answers "what was that expensive day?". Otherwise ranked by
+/// 30-day cost. Reads what the last `collect` cached; it does not rescan.
+pub fn claude_sessions(area: Option<&str>, day: Option<&str>, limit: usize) -> Vec<SessionSpend> {
+    let day = day
+        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        .map(|d| d.num_days_from_ce());
+    let root = std::env::var("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
+        .join("projects");
+    load_persisted_cache();
+    let today = Local::now().date_naive().num_days_from_ce();
+    let known = crate::inventory::known_project_paths();
+    let Ok(map) = cache().lock() else { return Vec::new() };
+    let mut out: Vec<SessionSpend> = map
+        .iter()
+        .filter_map(|(path, entry)| {
+            let project = project_of(&root, path)?;
+            let id = path.file_stem()?.to_str()?;
+            let mut session =
+                session_from(id, &resolve_project(&project, &known), &entry.data, entry.claude.as_ref(), today)?;
+            if let Some(day) = day {
+                let on_day: f64 =
+                    entry.data.days.iter().filter(|((d, _), _)| *d == day).map(|(_, (c, _))| c).sum();
+                if on_day <= 0.004 {
+                    return None;
+                }
+                session.day_cost = Some(on_day);
+            }
+            Some(session)
+        })
+        .filter(|s| match area {
+            Some(want) => s.areas.iter().any(|(a, _)| a == want || area_top(a) == want),
+            None => true,
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        let key = |s: &SessionSpend| s.day_cost.unwrap_or(s.cost);
+        key(b).total_cmp(&key(a)).then_with(|| a.id.cmp(&b.id))
+    });
+    out.truncate(limit);
+    out
+}
+
 /// Today / yesterday / last-30-days totals for each key of a day map.
 fn windows_by_key(days: DayMap, today: i32) -> HashMap<String, ([Window; 3], Vec<f64>)> {
     let mut out: HashMap<String, ([Window; 3], Vec<f64>)> = HashMap::new();
@@ -3294,6 +3408,21 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
 #[cfg(test)]
 mod tests {
 
+    /// Prints real sessions as JSON: `{"area": [...], "day": [...]}` for the
+    /// area and local day named in AITM_AREA / AITM_DAY.
+    #[test]
+    #[ignore]
+    fn live_sessions() {
+        let _ = collect(None);
+        let area = std::env::var("AITM_AREA").ok();
+        let day = std::env::var("AITM_DAY").ok();
+        let out = json!({
+            "area": claude_sessions(area.as_deref(), None, 40),
+            "day": claude_sessions(None, day.as_deref(), 40),
+        });
+        println!("{out}");
+    }
+
     /// Prints this machine's real spend. `cargo test -p aitm-core live_spend -- --ignored --nocapture`
     #[test]
     #[ignore]
@@ -3461,6 +3590,8 @@ mod tests {
                     seen_mids: [("msg_1".into(), false)].into_iter().collect(),
                     root: Some("/work".into()),
                     area: Some("acme".into()),
+                    first_ms: Some(1_790_000_000_000),
+                    last_ms: Some(1_790_000_900_000),
                 }),
                 pi_seen: vec!["pi-msg-1".into()],
             }],
@@ -3490,6 +3621,7 @@ mod tests {
         // to survive, or the next lines would book to "(unsorted)".
         let (sa, sb) = (a.claude.as_ref().unwrap(), b.claude.as_ref().unwrap());
         assert_eq!((&sa.root, &sa.area), (&sb.root, &sb.area));
+        assert_eq!((sa.first_ms, sa.last_ms), (sb.first_ms, sb.last_ms));
     }
 
     /// A v2 cache (no probes/corrections fields) must not load as v3 —
@@ -4464,6 +4596,37 @@ mod tests {
         let by_area: f64 = data.areas.values().map(|(c, _)| c).sum();
         assert_eq!(total, 63.0);
         assert_eq!(by_area, total);
+    }
+
+    #[test]
+    fn a_session_reports_its_span_cost_top_model_and_areas() {
+        let mut st = ClaudeFileState::default();
+        let mut data = FileData::default();
+        let line = |mid: &str, ts: &str, cwd: &str, model: &str, cost: f64| {
+            json!({
+                "type": "assistant", "timestamp": ts, "cwd": cwd, "requestId": format!("r-{mid}"), "costUSD": cost,
+                "message": {"id": mid, "model": model, "content": [{"type": "text", "text": "ok"}],
+                            "usage": {"input_tokens": 10, "output_tokens": 5}}
+            })
+            .to_string()
+        };
+        for l in [
+            line("a", "2026-09-20T10:00:00Z", "/w", "claude-sonnet-5", 1.0),
+            line("b", "2026-09-20T10:30:00Z", "/w/acme", "claude-opus-5", 6.0),
+            line("c", "2026-09-20T12:15:00Z", "/w/beta", "claude-opus-5", 2.0),
+        ] {
+            claude_line(&mut st, &l, &mut data);
+        }
+        let today = day_of_utc(parse_ts(Some(&json!("2026-09-21T00:00:00Z"))).unwrap());
+        let s = session_from("sess-1", "/w", &data, Some(&st), today).unwrap();
+        assert_eq!(s.cost, 9.0);
+        assert_eq!(s.top_model.as_deref(), Some("claude-opus-5"));
+        assert_eq!(s.ended_ms.unwrap() - s.started_ms.unwrap(), 135 * 60_000, "2h15m from first to last message");
+        assert_eq!(s.areas, [("acme".to_string(), 6.0), ("beta".to_string(), 2.0), ("(unsorted)".to_string(), 1.0)]);
+        // Outside the window there is nothing to report.
+        assert_eq!(session_from("old", "/w", &data, Some(&st), today + 60), None);
+        // No checkpoint (a non-Claude or pre-upgrade entry) still reports, without a span.
+        assert_eq!(session_from("x", "/w", &data, None, today).unwrap().started_ms, None);
     }
 
     #[test]

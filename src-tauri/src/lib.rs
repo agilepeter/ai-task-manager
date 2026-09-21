@@ -208,6 +208,14 @@ fn export_clients_csv(app: tauri::AppHandle, areas: Vec<spend::AreaSpend>) -> Re
     Ok(file.display().to_string())
 }
 
+/// The sessions behind an area or a day, from the scan cache (no rescan).
+#[tauri::command]
+async fn get_sessions(area: Option<String>, day: Option<String>) -> Result<Vec<spend::SessionSpend>, String> {
+    tauri::async_runtime::spawn_blocking(move || spend::claude_sessions(area.as_deref(), day.as_deref(), 40))
+        .await
+        .map_err(|e| format!("sessions: {e}"))
+}
+
 /// The subscription ledger with totals, renewals and value against usage.
 /// `usage30` is each card's 30-day API-equivalent spend, which the frontend
 /// already holds from the spend scan; passing it in avoids a second scan.
@@ -3123,6 +3131,7 @@ pub fn run() {
             get_inventory,
             get_history,
             get_ledger,
+            get_sessions,
             client_rollup,
             save_clients,
             export_clients_csv,

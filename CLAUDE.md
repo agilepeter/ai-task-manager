@@ -64,6 +64,11 @@ and computed Opportunities). Usage stays the default view.
   a real client name in code, tests, fixtures or commit messages**: use "Acme"/"Client A".
   The detail page redraws on data refresh; `render(true)` reads the rules editor back first
   so typing survives, but click handlers must call plain `render()`.
+- **Session drill-down**: click a Work area row or a Day bar for the sessions behind it
+  (`spend::claude_sessions`, read from the scan cache, never a rescan). Times, totals, top
+  model and areas only. Claude Code keeps conversation titles in the same logs; they come
+  from prompts and are deliberately never read. A span is first to last message, not time
+  worked: sessions stay open for weeks.
 - **Subscriptions ledger.** The user's own numbers in `ledger.json`. **Never guess a price**:
   a detected plan names a tier, not what someone pays, so suggestions pre-fill the name and
   the linked tool only. Renewals step from the anchor date (Jan 31 -> Feb 28 -> Mar 31, no

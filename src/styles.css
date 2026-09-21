@@ -3589,3 +3589,45 @@ body.wide #ledger {
 .dt-rule-actions .spacer {
   flex: 1;
 }
+
+/* ------------------------------------------------------------ session drill */
+.dt-drillable {
+  cursor: pointer;
+}
+.dt-bar-row.dt-drillable:hover .dt-bar-label {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.dt-drillable:focus-visible {
+  outline: 1px solid var(--chart-blue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.dt-drill-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.dt-drill-head .inv-learn {
+  margin-left: 0;
+}
+.dt-session {
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.dt-session .inv-name {
+  font-size: 12px;
+  white-space: normal;
+}
+.dt-session-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+:root[data-theme="light"] .dt-session {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}

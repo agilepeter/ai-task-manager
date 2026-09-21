@@ -49,6 +49,18 @@ interface AreaSpend {
   daily_cost: number[];
 }
 
+interface SessionSpend {
+  id: string;
+  project: string;
+  startedMs: number | null;
+  endedMs: number | null;
+  cost: number;
+  tokens: number;
+  topModel: string | null;
+  areas: [string, number][];
+  dayCost: number | null;
+}
+
 interface ClientRule {
   client: string;
   patterns: string[];
@@ -127,6 +139,8 @@ let clientView: ClientView | null = null;
 /** Rules being edited; null while the saved ones are shown. */
 let draftRules: ClientRule[] | null = null;
 let clientNote = "";
+/** The drill-down in view: sessions behind an area or a day. */
+let drill: { title: string; area?: string; day?: string; sessions: SessionSpend[] | null } | null = null;
 /** Wide mode: the window is twice as wide and this page is a fixed right column. */
 let wide = false;
 
@@ -373,15 +387,68 @@ function readDraft(root: HTMLElement): ClientRule[] {
 }
 
 // ---------------------------------------------------------------------------
+// Sessions drill-down
+// ---------------------------------------------------------------------------
+
+/// [when it started, how long from first to last message]. A session can sit
+/// open for weeks, so the second is a span, not time worked.
+function span(s: SessionSpend): [string, string] {
+  if (s.startedMs === null || s.endedMs === null) return ["", ""];
+  const start = new Date(s.startedMs);
+  const mins = Math.max(Math.round((s.endedMs - s.startedMs) / 60_000), 1);
+  const length =
+    mins >= 2880
+      ? `${Math.round(mins / 1440)} days`
+      : mins >= 60
+        ? `${Math.floor(mins / 60)}h ${mins % 60}m`
+        : `${mins}m`;
+  const day = start.toLocaleDateString([], { month: "short", day: "numeric" });
+  const time = start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return [`${day}, ${time}`, `spans ${length}`];
+}
+
+function drillSection(): string {
+  const d = drill!;
+  const head = `<div class="dt-drill-head"><button class="inv-learn" id="dt-drill-back">&#8592; Back</button><span>Sessions · ${esc(d.title)}</span></div>`;
+  if (!d.sessions) return `${head}<p class="dt-empty">Loading…</p>`;
+  if (!d.sessions.length) return `${head}<p class="dt-empty">No sessions found for this.</p>`;
+  const rows = d.sessions
+    .map((s) => {
+      const shown = s.dayCost ?? s.cost;
+      const where = s.areas.slice(0, 3).map(([a]) => a).join(", ");
+      const [started, length] = span(s);
+      return `
+      <div class="dt-session">
+        <div class="lg-item-head"><span class="inv-name">${esc(started || "Time not recorded")}</span><span class="lg-price">${money(shown)}</span></div>
+        <div class="dt-session-sub">${[length, s.topModel ? `mostly ${s.topModel}` : "", where, s.dayCost !== null ? `${money(s.cost)} over 30 days` : ""].filter(Boolean).map(esc).join(" · ")}</div>
+      </div>`;
+    })
+    .join("");
+  return `${head}${rows}<p class="dt-caption">One row per Claude Code session, most expensive first. Times and totals only: conversation titles and content are never read.</p>`;
+}
+
+async function openDrill(next: { title: string; area?: string; day?: string }): Promise<void> {
+  drill = { ...next, sessions: null };
+  render();
+  try {
+    const sessions = await invoke<SessionSpend[]>("get_sessions", { area: next.area ?? null, day: next.day ?? null });
+    if (drill && drill.title === next.title) drill.sessions = sessions;
+  } catch {
+    if (drill) drill.sessions = [];
+  }
+  render();
+}
+
+// ---------------------------------------------------------------------------
 // Spend
 // ---------------------------------------------------------------------------
 
-function bars(rows: { label: string; tip: string; cost: number; tokens: number }[]): string {
+function bars(rows: { label: string; tip: string; cost: number; tokens: number; drillArea?: string }[]): string {
   const max = Math.max(...rows.map((r) => r.cost), 0.0001);
   return `<div class="dt-bars">${rows
     .map(
       (r) => `
-      <div class="dt-bar-row" title="${esc(`${r.tip}: ${money(r.cost)}, ${tokens(r.tokens)} tokens`)}">
+      <div class="dt-bar-row${r.drillArea ? " dt-drillable" : ""}"${r.drillArea ? ` data-drill-area="${esc(r.drillArea)}" role="button" tabindex="0"` : ""} title="${esc(`${r.tip}: ${money(r.cost)}, ${tokens(r.tokens)} tokens${r.drillArea ? ". Click for its sessions" : ""}`)}">
         <span class="dt-bar-label">${esc(r.label)}</span>
         <span class="dt-bar-track"><span class="dt-bar" style="width:${Math.max((r.cost / max) * 100, r.cost > 0 ? 1.5 : 0)}%"></span></span>
         <span class="dt-bar-value">${money(r.cost)}</span>
@@ -398,7 +465,9 @@ function dayBars(daily: number[]): string {
       const d = new Date(today);
       d.setDate(today.getDate() - (daily.length - 1 - i));
       const label = d.toLocaleDateString([], { month: "short", day: "numeric" });
-      return `<span class="dt-day" title="${esc(`${label}: ${money(cost)}`)}"><span style="height:${Math.max((cost / max) * 100, cost > 0 ? 2 : 0)}%"></span></span>`;
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const can = cost > 0.004;
+      return `<span class="dt-day${can ? " dt-drillable" : ""}"${can ? ` data-drill-day="${iso}" data-drill-label="${esc(label)}" role="button" tabindex="0"` : ""} title="${esc(`${label}: ${money(cost)}${can ? ". Click for its sessions" : ""}`)}"><span style="height:${Math.max((cost / max) * 100, cost > 0 ? 2 : 0)}%"></span></span>`;
     })
     .join("");
   const total = daily.reduce((a, b) => a + b, 0);
@@ -410,6 +479,7 @@ function spendSection(sp: ProviderSpend | undefined): string {
   if (!sp || (sp.last30.cost < 0.005 && sp.last30.tokens <= 0)) {
     return `<p class="dt-empty">No local spend logs for this tool. Spend is read from the logs a command-line tool writes on this computer.</p>`;
   }
+  if (drill) return drillSection();
   const hasProjects = (sp.projects?.length ?? 0) > 0;
   const hasAreas = (sp.projects ?? []).some((p) => (p.areas?.length ?? 0) > 0);
   if (groupKey === "project" && !hasProjects) groupKey = "model";
@@ -439,7 +509,7 @@ function spendSection(sp: ProviderSpend | undefined): string {
         const name = areaDepth === "1" ? a.area.split("/")[0] : a.area;
         // With several projects an area name alone is ambiguous.
         const label = many ? `${projectLabel(p.project)} / ${name}` : name;
-        const row = merged.get(label) ?? { label, tip: `${p.project} / ${name}`, cost: 0, tokens: 0 };
+        const row = merged.get(label) ?? { label, tip: `${p.project} / ${name}`, cost: 0, tokens: 0, drillArea: name };
         row.cost += a[windowKey].cost;
         row.tokens += a[windowKey].tokens;
         merged.set(label, row);
@@ -647,6 +717,7 @@ function markSelected(): void {
 }
 
 function open(id: string): void {
+  if (openId !== id) drill = null;
   openId = id;
   if (historyFor !== id) history = [];
   document.body.classList.add("detail-open");
@@ -759,7 +830,17 @@ export function setupDetail(src: DetailSource): void {
   document.querySelector("#detail-body")?.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
     const root = document.querySelector<HTMLElement>("#detail-body")!;
-    if (target.closest("#dt-rule-edit")) {
+    const drillArea = target.closest<HTMLElement>("[data-drill-area]")?.dataset.drillArea;
+    const drillDay = target.closest<HTMLElement>("[data-drill-day]");
+    if (target.closest("#dt-drill-back")) {
+      drill = null;
+    } else if (drillArea) {
+      void openDrill({ title: drillArea, area: drillArea });
+      return;
+    } else if (drillDay?.dataset.drillDay) {
+      void openDrill({ title: drillDay.dataset.drillLabel ?? drillDay.dataset.drillDay, day: drillDay.dataset.drillDay });
+      return;
+    } else if (target.closest("#dt-rule-edit")) {
       draftRules = clientView?.rules.length ? clientView.rules.map((r) => ({ ...r })) : [{ client: "", patterns: [] }];
       clientNote = "";
     } else if (target.closest("#dt-rule-add")) {
@@ -794,6 +875,14 @@ export function setupDetail(src: DetailSource): void {
       return;
     }
     render();
+  });
+  document.querySelector("#detail-body")?.addEventListener("keydown", (e) => {
+    const key = (e as KeyboardEvent).key;
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-drill-area], [data-drill-day]");
+    if (el && (key === "Enter" || key === " ")) {
+      e.preventDefault();
+      el.click();
+    }
   });
   new ResizeObserver(() => openId && draftRules === null && render()).observe(document.body);
 }
