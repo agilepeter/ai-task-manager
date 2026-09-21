@@ -3552,3 +3552,40 @@ body.wide #drawer .panel-head {
 body.wide #ledger {
   max-width: 380px;
 }
+
+/* ------------------------------------------------------------ client rules */
+.dt-rules {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dt-rule {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 6px;
+}
+.dt-rule input {
+  font: inherit;
+  font-size: 12px;
+  min-width: 0;
+  box-sizing: border-box;
+  color: var(--foreground);
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 8px;
+  height: 30px;
+}
+.dt-rule-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.dt-rule-actions .inv-learn {
+  margin-left: 0;
+}
+.dt-rule-actions .spacer {
+  flex: 1;
+}

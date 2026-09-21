@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, history, httpapi, i18n, inventory, ledger, pricing, providers, spend};
+pub(crate) use aitm_core::{alerts, clients, history, httpapi, i18n, inventory, ledger, pricing, providers, spend};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -167,6 +167,45 @@ async fn get_inventory() -> Result<inventory::Inventory, String> {
     tauri::async_runtime::spawn_blocking(inventory::scan)
         .await
         .map_err(|e| format!("inventory scan: {e}"))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClientView {
+    rules: Vec<clients::ClientRule>,
+    rows: Vec<clients::ClientSpend>,
+}
+
+/// Work areas rolled up to the user's clients. The frontend already holds
+/// the areas from the spend scan, so they are passed in rather than rescanned.
+#[tauri::command]
+fn client_rollup(areas: Vec<spend::AreaSpend>) -> ClientView {
+    let rules = clients::load_from(&clients::path());
+    let rows = clients::rollup(&areas, &rules, chrono::Local::now().date_naive());
+    ClientView { rules, rows }
+}
+
+#[tauri::command]
+fn save_clients(rules: Vec<clients::ClientRule>) -> Result<Vec<clients::ClientRule>, String> {
+    clients::save_to(&clients::path(), rules)
+}
+
+/// Writes the client rollup as CSV into the Downloads folder and shows it
+/// there. Returns the file's path.
+#[tauri::command]
+fn export_clients_csv(app: tauri::AppHandle, areas: Vec<spend::AreaSpend>) -> Result<String, String> {
+    let today = chrono::Local::now().date_naive();
+    let rules = clients::load_from(&clients::path());
+    let body = clients::csv(&clients::rollup(&areas, &rules, today), today);
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("find the Downloads folder: {e}"))?;
+    let file = dir.join(format!("ai-cost-by-client-{}.csv", today.format("%Y-%m-%d")));
+    std::fs::write(&file, body).map_err(|e| format!("write {}: {e}", file.display()))?;
+    use tauri_plugin_opener::OpenerExt;
+    let _ = app.opener().reveal_item_in_dir(&file);
+    Ok(file.display().to_string())
 }
 
 /// The subscription ledger with totals, renewals and value against usage.
@@ -3084,6 +3123,9 @@ pub fn run() {
             get_inventory,
             get_history,
             get_ledger,
+            client_rollup,
+            save_clients,
+            export_clients_csv,
             save_subscription,
             delete_subscription,
             set_wide,

@@ -56,6 +56,14 @@ and computed Opportunities). Usage stays the default view.
   the `--viz-*` colours were validated per theme, so re-run the validator if they change.
   Project = the folder Claude Code was started in, matched against paths it still knows
   (folder names are lossy and cannot be decoded).
+- **Clients** (`crates/core/src/clients.rs`): the user's rules in `clients.json` map work
+  areas to a client name (plain folder = itself and below, `*` wildcard, first match wins).
+  Every dollar lands in exactly one row; no match is `Unassigned`, sorted last. Areas are
+  kept two folders deep so `site/client-a` and `site/client-b` can differ; the Work area view
+  rolls up to one level by default. CSV export defuses formula cells (`= + - @`). **Never put
+  a real client name in code, tests, fixtures or commit messages**: use "Acme"/"Client A".
+  The detail page redraws on data refresh; `render(true)` reads the rules editor back first
+  so typing survives, but click handlers must call plain `render()`.
 - **Subscriptions ledger.** The user's own numbers in `ledger.json`. **Never guess a price**:
   a detected plan names a tier, not what someone pays, so suggestions pre-fill the name and
   the linked tool only. Renewals step from the anchor date (Jan 31 -> Feb 28 -> Mar 31, no

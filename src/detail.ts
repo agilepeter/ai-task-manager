@@ -46,6 +46,26 @@ interface AreaSpend {
   today: SpendWindow;
   yesterday: SpendWindow;
   last30: SpendWindow;
+  daily_cost: number[];
+}
+
+interface ClientRule {
+  client: string;
+  patterns: string[];
+}
+
+interface ClientSpend {
+  client: string;
+  today: SpendWindow;
+  yesterday: SpendWindow;
+  last30: SpendWindow;
+  monthToDate: number;
+  areas: string[];
+}
+
+interface ClientView {
+  rules: ClientRule[];
+  rows: ClientSpend[];
 }
 
 interface ProjectSpend {
@@ -72,7 +92,7 @@ export interface DetailSource {
 }
 
 type WindowKey = "today" | "yesterday" | "last30";
-type GroupKey = "model" | "area" | "project" | "day";
+type GroupKey = "model" | "client" | "area" | "project" | "day";
 
 /** Rows shown before the rest fold into one "Other" row. */
 const MAX_BAR_ROWS = 12;
@@ -101,6 +121,12 @@ let history: Series[] = [];
 let historyFor = "";
 let loading = false;
 let lastLoad = 0;
+/** Work areas shown as top-level folders, or at the two levels the log keeps. */
+let areaDepth: "1" | "2" = "1";
+let clientView: ClientView | null = null;
+/** Rules being edited; null while the saved ones are shown. */
+let draftRules: ClientRule[] | null = null;
+let clientNote = "";
 /** Wide mode: the window is twice as wide and this page is a fixed right column. */
 let wide = false;
 
@@ -274,6 +300,79 @@ function wireCrosshair(root: HTMLElement): void {
 }
 
 // ---------------------------------------------------------------------------
+// Clients
+// ---------------------------------------------------------------------------
+
+function allAreas(sp: ProviderSpend): AreaSpend[] {
+  return (sp.projects ?? []).flatMap((p) => p.areas ?? []);
+}
+
+async function loadClients(): Promise<void> {
+  const sp = openId ? source?.spend(openId) : undefined;
+  if (!sp) return;
+  try {
+    clientView = await invoke<ClientView>("client_rollup", { areas: allAreas(sp) });
+  } catch (err) {
+    clientNote = String(err);
+  }
+  render();
+}
+
+function clientSection(): string {
+  if (!clientView) return `<p class="dt-empty">Loading…</p>`;
+  const rows = clientView.rows
+    .map((c) => ({
+      label: c.client,
+      tip: `${c.client} (${c.areas.slice(0, 6).join(", ")}${c.areas.length > 6 ? ", …" : ""})`,
+      cost: c[windowKey].cost,
+      tokens: c[windowKey].tokens,
+    }))
+    .filter((r) => r.cost > 0.004 || r.tokens > 0);
+  const chart = rows.length ? bars(rows) : `<p class="dt-empty">Nothing in this period.</p>`;
+
+  const rules = draftRules ?? clientView.rules;
+  const editing = draftRules !== null;
+  const unassigned = clientView.rows.find((c) => c.client === "Unassigned");
+  const hint =
+    unassigned && unassigned.areas.length
+      ? `<p class="dt-caption">Not assigned yet: ${unassigned.areas.slice(0, 8).map(esc).join(", ")}${unassigned.areas.length > 8 ? `, and ${unassigned.areas.length - 8} more` : ""}.</p>`
+      : "";
+  const editor = editing
+    ? `<div class="dt-rules">${rules
+        .map(
+          (r, i) => `
+        <div class="dt-rule">
+          <input data-rule-client="${i}" type="text" maxlength="96" placeholder="Client" value="${esc(r.client)}" aria-label="Client name" />
+          <input data-rule-patterns="${i}" type="text" placeholder="folder, folder/sub*" value="${esc(r.patterns.join(", "))}" aria-label="Folder patterns" />
+        </div>`,
+        )
+        .join("")}
+        <p class="dt-caption">Folders as they appear under Work area. A plain folder covers everything beneath it, * is a wildcard, and the first matching client wins.</p>
+        ${clientNote ? `<p class="lg-error" role="alert">${esc(clientNote)}</p>` : ""}
+        <div class="dt-rule-actions">
+          <button class="inv-learn" id="dt-rule-add">+ Client</button>
+          <span class="spacer"></span>
+          <button class="inv-learn" id="dt-rule-cancel">Cancel</button>
+          <button class="lg-save" id="dt-rule-save">Save</button>
+        </div></div>`
+    : `<div class="dt-rule-actions">
+        <button class="inv-learn" id="dt-rule-edit">${rules.length ? `Edit clients (${rules.length})` : "Set up clients"}</button>
+        <span class="spacer"></span>
+        <button class="inv-learn" id="dt-export" title="Save this table as a CSV in your Downloads folder">Export CSV</button>
+      </div>${clientNote ? `<p class="dt-caption">${esc(clientNote)}</p>` : ""}`;
+  return `${chart}${hint}${editor}`;
+}
+
+function readDraft(root: HTMLElement): ClientRule[] {
+  const names = [...root.querySelectorAll<HTMLInputElement>("[data-rule-client]")];
+  return names.map((el) => {
+    const i = el.dataset.ruleClient!;
+    const patterns = root.querySelector<HTMLInputElement>(`[data-rule-patterns="${i}"]`)?.value ?? "";
+    return { client: el.value, patterns: patterns.split(",").map((p) => p.trim()).filter(Boolean) };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Spend
 // ---------------------------------------------------------------------------
 
@@ -315,30 +414,38 @@ function spendSection(sp: ProviderSpend | undefined): string {
   const hasAreas = (sp.projects ?? []).some((p) => (p.areas?.length ?? 0) > 0);
   if (groupKey === "project" && !hasProjects) groupKey = "model";
   if (groupKey === "area" && !hasAreas) groupKey = "model";
+  if (groupKey === "client" && !hasAreas) groupKey = "model";
   const groups: [string, string][] = [["model", "Model"]];
-  if (hasAreas) groups.push(["area", "Work area"]);
+  if (hasAreas) groups.push(["client", "Client"], ["area", "Work area"]);
   if (hasProjects) groups.push(["project", "Project"]);
   groups.push(["day", "Day"]);
   const controls = `<div class="dt-controls">
       <label>Group by ${select("dt-group", groups, groupKey)}</label>
       ${groupKey === "day" ? "" : `<label>Period ${select("dt-window", WINDOWS, windowKey)}</label>`}
+      ${groupKey === "area" ? `<label>Detail ${select("dt-depth", [["1", "Top folders"], ["2", "Two levels"]], areaDepth)}</label>` : ""}
     </div>`;
 
   let body: string;
   if (groupKey === "day") {
     body = dayBars(sp.daily_cost ?? []);
+  } else if (groupKey === "client") {
+    body = clientSection();
   } else if (groupKey === "area") {
     const many = (sp.projects?.length ?? 0) > 1;
-    const all = (sp.projects ?? [])
-      .flatMap((p) =>
-        (p.areas ?? []).map((a) => ({
-          // With several projects an area name alone is ambiguous.
-          label: many ? `${projectLabel(p.project)} / ${a.area}` : a.area,
-          tip: `${p.project} / ${a.area}`,
-          cost: a[windowKey].cost,
-          tokens: a[windowKey].tokens,
-        })),
-      )
+    // The log keeps two folder levels; "Top folders" adds them back up.
+    const merged = new Map<string, { label: string; tip: string; cost: number; tokens: number }>();
+    for (const p of sp.projects ?? []) {
+      for (const a of p.areas ?? []) {
+        const name = areaDepth === "1" ? a.area.split("/")[0] : a.area;
+        // With several projects an area name alone is ambiguous.
+        const label = many ? `${projectLabel(p.project)} / ${name}` : name;
+        const row = merged.get(label) ?? { label, tip: `${p.project} / ${name}`, cost: 0, tokens: 0 };
+        row.cost += a[windowKey].cost;
+        row.tokens += a[windowKey].tokens;
+        merged.set(label, row);
+      }
+    }
+    const all = [...merged.values()]
       .filter((r) => r.cost > 0.004 || r.tokens > 0)
       .sort((a, b) => b.cost - a.cost);
     const top = all.slice(0, MAX_BAR_ROWS);
@@ -475,10 +582,17 @@ function nowSection(snap: Snapshot): string {
   return rows || `<p class="dt-empty">No live readings.</p>`;
 }
 
-function render(): void {
+/// `fromRefresh`: the redraw was caused by new data, not by something the
+/// user did. Only then is the rules editor read back first, so typing
+/// survives a refresh; after a click the handler has already set the draft
+/// (reading the screen back would undo a row that was just added).
+function render(fromRefresh = false): void {
   const el = document.querySelector<HTMLElement>("#detail-body");
   const title = document.querySelector<HTMLElement>("#detail-title");
   if (!el || !openId || !source) return;
+  if (fromRefresh && draftRules !== null && el.querySelector("[data-rule-client]")) {
+    draftRules = readDraft(el);
+  }
   const snap = source.snapshot(openId);
   if (!snap) {
     close();
@@ -523,7 +637,7 @@ async function loadHistory(): Promise<void> {
     history = [];
   }
   loading = false;
-  render();
+  render(true);
 }
 
 function markSelected(): void {
@@ -630,11 +744,56 @@ export function setupDetail(src: DetailSource): void {
       void loadHistory();
       return;
     }
-    if (t.id === "dt-metric") metricFilter = t.value;
+    if (t.id === "dt-group" && t.value === "client") {
+      groupKey = "client";
+      void loadClients();
+      return;
+    }
+    if (t.id === "dt-depth") areaDepth = t.value as "1" | "2";
+    else if (t.id === "dt-metric") metricFilter = t.value;
     else if (t.id === "dt-window") windowKey = t.value as WindowKey;
     else if (t.id === "dt-group") groupKey = t.value as GroupKey;
     else return;
     render();
   });
-  new ResizeObserver(() => openId && render()).observe(document.body);
+  document.querySelector("#detail-body")?.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const root = document.querySelector<HTMLElement>("#detail-body")!;
+    if (target.closest("#dt-rule-edit")) {
+      draftRules = clientView?.rules.length ? clientView.rules.map((r) => ({ ...r })) : [{ client: "", patterns: [] }];
+      clientNote = "";
+    } else if (target.closest("#dt-rule-add")) {
+      draftRules = [...readDraft(root), { client: "", patterns: [] }];
+    } else if (target.closest("#dt-rule-cancel")) {
+      draftRules = null;
+      clientNote = "";
+    } else if (target.closest("#dt-rule-save")) {
+      const rules = readDraft(root);
+      void invoke("save_clients", { rules }).then(
+        () => {
+          draftRules = null;
+          clientNote = "";
+          return loadClients();
+        },
+        (err) => {
+          draftRules = rules; // keep what was typed
+          clientNote = String(err);
+          render();
+        },
+      );
+      return;
+    } else if (target.closest("#dt-export")) {
+      const sp = openId ? source?.spend(openId) : undefined;
+      if (!sp) return;
+      void invoke<string>("export_clients_csv", { areas: allAreas(sp) }).then(
+        (path) => { clientNote = `Saved ${path}`; render(); },
+        (err) => { clientNote = String(err); render(); },
+      );
+      return;
+    } else {
+      return;
+    }
+    render();
+  });
+  new ResizeObserver(() => openId && draftRules === null && render()).observe(document.body);
 }

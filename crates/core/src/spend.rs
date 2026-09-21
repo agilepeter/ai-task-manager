@@ -22,14 +22,14 @@ use crate::providers;
 
 pub const TREND_DAYS: usize = 30;
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, serde::Deserialize)]
 pub struct ModelSpend {
     pub model: String,
     pub cost: f64,
     pub tokens: f64,
 }
 
-#[derive(Serialize, Clone, Default)]
+#[derive(Serialize, serde::Deserialize, Clone, Default)]
 pub struct Window {
     pub cost: f64,
     pub tokens: f64,
@@ -74,12 +74,15 @@ pub struct ProjectSpend {
 
 /// One work area's share of a project: a top-level folder, or `(unsorted)`
 /// for spend before the session had been anywhere.
-#[derive(Serialize, Clone)]
+#[derive(Serialize, serde::Deserialize, Clone)]
 pub struct AreaSpend {
     pub area: String,
     pub today: Window,
     pub yesterday: Window,
     pub last30: Window,
+    /// Dollars per day, oldest first with today last, like `daily_cost` on a
+    /// card. Lets a calendar month be cut out of the rolling window.
+    pub daily_cost: Vec<f64>,
 }
 
 impl ProviderSpend {
@@ -107,8 +110,8 @@ const MAX_MODELS_PER_FILE: usize = 4096;
 
 /// Work-area names come from paths in the logs, so they are capped the same
 /// way model names are: a bounded length and a bounded count per file.
-const MAX_AREA_KEY: usize = 64;
-const MAX_AREAS_PER_FILE: usize = 48;
+const MAX_AREA_KEY: usize = 96;
+const MAX_AREAS_PER_FILE: usize = 96;
 const OTHER_AREA: &str = "(other)";
 /// Spend before the session has been anywhere but its starting folder.
 const UNSORTED_AREA: &str = "(unsorted)";
@@ -313,7 +316,7 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 6; // bump on cache format *or* parser-logic changes
+const PERSIST_VERSION: u32 = 7; // bump on cache format *or* parser-logic changes
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1499,24 +1502,38 @@ struct ClaudeFileState {
 /// `claude -p` runs write the same assistant records (entrypoint "sdk-cli"),
 /// so they count like interactive usage; `--no-session-persistence` runs
 /// write no log at all.
-/// The first folder of `path` beneath `root`: the work area it belongs to.
-/// `is_dir` says the path is itself a folder (a working directory), so a
-/// single component counts; a lone file sitting in the root names no area.
+/// How many folder levels an area keeps. Two, so a rule can tell
+/// `site/client-a` from `site/client-b`; views roll up to one by default.
+const AREA_DEPTH: usize = 2;
+
+/// The folders of `path` beneath `root`, up to `AREA_DEPTH` levels, joined
+/// with '/': the work area it belongs to. `is_dir` says the path is itself a
+/// folder (a working directory); otherwise its last component is a file name
+/// and is left out, so a lone file sitting in the root names no area.
 fn area_under(path: &str, root: &str, is_dir: bool) -> Option<String> {
     let path = path.replace('\\', "/");
     let root = root.replace('\\', "/");
     let root = root.trim_end_matches('/');
     let rel = path.strip_prefix(root)?.strip_prefix('/')?.trim_end_matches('/');
-    let mut parts = rel.split('/');
-    let first = parts.next().filter(|p| !p.is_empty())?;
-    (is_dir || parts.next().is_some()).then(|| first.to_string())
+    let mut folders: Vec<&str> = rel.split('/').filter(|p| !p.is_empty()).collect();
+    if !is_dir {
+        folders.pop();
+    }
+    folders.truncate(AREA_DEPTH);
+    (!folders.is_empty()).then(|| folders.join("/"))
+}
+
+/// The top-level folder of an area: "site/client-a" → "site".
+pub fn area_top(area: &str) -> &str {
+    area.split('/').next().unwrap_or(area)
 }
 
 /// Folders named like scratch or tooling space (`_screenshots`, `.cache`).
 /// A tool call that merely reads from one does not move the work there;
 /// only a working directory inside it does.
 fn is_scratch_area(area: &str) -> bool {
-    area.starts_with('_') || area.starts_with('.')
+    let top = area_top(area);
+    top.starts_with('_') || top.starts_with('.')
 }
 
 /// The first path in a shell command that falls under `root`.
@@ -1529,8 +1546,11 @@ fn area_in_command(command: &str, root: &str, home: Option<&str>) -> Option<Stri
             (Some(rest), Some(home)) => format!("{home}{rest}"),
             _ => raw.to_string(),
         };
-        // A command names folders as readily as files (`cd …/acme`).
-        area_under(&expanded, root, true).filter(|a| !is_scratch_area(a))
+        // A command names folders as readily as files (`cd …/acme`); a last
+        // component with an extension is taken to be a file.
+        let leaf = expanded.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+        let is_file = leaf.rfind('.').is_some_and(|dot| dot > 0 && dot < leaf.len() - 1);
+        area_under(&expanded, root, !is_file).filter(|a| !is_scratch_area(a))
     })
 }
 
@@ -1786,10 +1806,14 @@ fn project_of(root: &Path, file: &Path) -> Option<String> {
 /// Per-project windows, cut exactly like a card's. Projects with no spend in
 /// the last 30 days are left out; the rest sort by 30-day cost.
 /// Today / yesterday / last-30-days totals for each key of a day map.
-fn windows_by_key(days: DayMap, today: i32) -> HashMap<String, [Window; 3]> {
-    let mut out: HashMap<String, [Window; 3]> = HashMap::new();
+fn windows_by_key(days: DayMap, today: i32) -> HashMap<String, ([Window; 3], Vec<f64>)> {
+    let mut out: HashMap<String, ([Window; 3], Vec<f64>)> = HashMap::new();
     for ((day, key), (cost, tokens)) in days {
-        let windows = out.entry(key).or_default();
+        let (windows, daily) = out.entry(key).or_insert_with(|| (Default::default(), vec![0.0; TREND_DAYS]));
+        let idx = day - (today - TREND_DAYS as i32 + 1);
+        if (0..TREND_DAYS as i32).contains(&idx) {
+            daily[idx as usize] += cost;
+        }
         let bump = |w: &mut Window| {
             w.cost += cost;
             w.tokens += tokens;
@@ -1820,11 +1844,17 @@ fn project_spends(per_project: Vec<(String, FileData)>, today: i32) -> Vec<Proje
                 entry.1 += tokens;
             }
             let [today_w, yesterday, last30] =
-                windows_by_key(totals, today).remove("").unwrap_or_default();
+                windows_by_key(totals, today).remove("").map(|(w, _)| w).unwrap_or_default();
             let mut areas: Vec<AreaSpend> = windows_by_key(data.areas, today)
                 .into_iter()
-                .filter(|(_, w)| w[2].cost > 0.004 || w[2].tokens > 0.0)
-                .map(|(area, [today, yesterday, last30])| AreaSpend { area, today, yesterday, last30 })
+                .filter(|(_, (w, _))| w[2].cost > 0.004 || w[2].tokens > 0.0)
+                .map(|(area, ([today, yesterday, last30], daily_cost))| AreaSpend {
+                    area,
+                    today,
+                    yesterday,
+                    last30,
+                    daily_cost,
+                })
                 .collect();
             areas.sort_by(|a, b| b.last30.cost.total_cmp(&a.last30.cost).then_with(|| a.area.cmp(&b.area)));
             (last30.cost > 0.004 || last30.tokens > 0.0).then_some(ProjectSpend {
@@ -4343,14 +4373,22 @@ mod tests {
     #[test]
     fn area_is_the_first_folder_under_the_session_root() {
         let root = "/Users/me/work";
-        assert_eq!(area_under("/Users/me/work/acme/src/a.rs", root, false).as_deref(), Some("acme"));
+        assert_eq!(area_under("/Users/me/work/acme/a.rs", root, false).as_deref(), Some("acme"));
+        assert_eq!(area_under("/Users/me/work/acme/src/a.rs", root, false).as_deref(), Some("acme/src"));
+        assert_eq!(
+            area_under("/Users/me/work/acme/src/deep/er/a.rs", root, false).as_deref(),
+            Some("acme/src"),
+            "two levels, no more"
+        );
         assert_eq!(area_under("/Users/me/work/acme", root, true).as_deref(), Some("acme"), "a cwd is a folder");
+        assert_eq!(area_top("acme/src"), "acme");
         assert_eq!(area_under("/Users/me/work/notes.md", root, false), None, "a file in the root names no area");
         assert_eq!(area_under("/Users/me/work", root, true), None);
         assert_eq!(area_under("/Users/me/workshop/x.rs", root, false), None, "prefix must end at a separator");
         assert_eq!(area_under("/tmp/scratch/x.rs", root, false), None);
         // Windows separators are normalised; the area keeps its spelling.
         assert_eq!(area_under(r"C:\work\Acme\a.rs", r"C:\work", false).as_deref(), Some("Acme"));
+        assert_eq!(area_under(r"C:\work\Acme\web\a.rs", r"C:\work", false).as_deref(), Some("Acme/web"));
     }
 
     #[test]
@@ -4363,7 +4401,11 @@ mod tests {
         assert_eq!(
             area_in_command("ls /tmp/x; cat ~/work/beta/README.md", root, Some("/Users/me")).as_deref(),
             Some("beta"),
-            "~ expands to the home directory"
+            "~ expands to the home directory, and README.md is a file, not a folder"
+        );
+        assert_eq!(
+            area_in_command("ls /Users/me/work/beta/docs", root, None).as_deref(),
+            Some("beta/docs")
         );
         assert_eq!(area_in_command("git status", root, None), None);
     }
@@ -4397,7 +4439,7 @@ mod tests {
         let root = "/Users/me/work";
         let data = claude_run(&[
             area_line("m1", root, 1.0, None),                                     // nothing known yet
-            area_line("m2", "/Users/me/work/acme/src", 2.0, None),                // cwd moved into acme
+            area_line("m2", "/Users/me/work/acme", 2.0, None),                // cwd moved into acme
             area_line("m3", root, 4.0, None),                                     // back at the root: sticky
             // Same message as m3 (a later content block): not counted again,
             // but the file it touches moves the session to beta.
@@ -4437,8 +4479,8 @@ mod tests {
         ]);
         assert_eq!(
             area_costs(&data),
-            [("(unsorted)".to_string(), 0.5), ("acme".to_string(), 3.0), ("beta".to_string(), 12.0)],
-            "m2 stays in acme; m3's command skips .cache and lands in beta"
+            [("(unsorted)".to_string(), 0.5), ("acme".to_string(), 3.0), ("beta/src".to_string(), 12.0)],
+            "m2 stays in acme; m3's command skips .cache and lands in beta/src"
         );
         // Working *inside* such a folder is still a deliberate place to be.
         let inside = claude_run(&[
