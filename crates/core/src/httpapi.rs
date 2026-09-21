@@ -10,6 +10,53 @@ use crate::providers::Snapshot;
 
 static LATEST: OnceLock<Mutex<Value>> = OnceLock::new();
 
+/// Optional feeds for the user's own dashboards: path → JSON. Empty unless
+/// the user turned them on. They can name work areas and clients, which are
+/// folder and customer names, so nothing is kept here at all while the
+/// setting is off: a disabled feed is a 404, not a hidden value.
+static FEEDS: OnceLock<Mutex<std::collections::HashMap<String, String>>> = OnceLock::new();
+
+fn feeds() -> &'static Mutex<std::collections::HashMap<String, String>> {
+    FEEDS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Replaces every feed. `enabled` false clears them, whatever is passed.
+pub fn publish_feeds(enabled: bool, next: Vec<(&str, Value)>) {
+    let Ok(mut map) = feeds().lock() else { return };
+    map.clear();
+    if enabled {
+        for (path, body) in next {
+            map.insert(path.to_string(), body.to_string());
+        }
+    }
+}
+
+/// Spend per provider, without anything folder-derived.
+pub fn spend_feed(spend: &[crate::spend::ProviderSpend]) -> Value {
+    json!(spend
+        .iter()
+        .map(|p| json!({
+            "providerId": p.id,
+            "displayName": p.name,
+            "today": p.today.cost,
+            "yesterday": p.yesterday.cost,
+            "last30": p.last30.cost,
+            "dailyCost": p.daily_cost,
+            "models": p.last30.models.iter().map(|m| json!({"model": m.model, "last30": m.cost})).collect::<Vec<_>>(),
+        }))
+        .collect::<Vec<_>>())
+}
+
+/// Work areas across every project, top level and as logged.
+pub fn areas_feed(spend: &[crate::spend::ProviderSpend]) -> Value {
+    json!(spend
+        .iter()
+        .flat_map(|p| p.projects.iter())
+        .flat_map(|pr| pr.areas.iter())
+        .map(|a| json!({"area": a.area, "today": a.today.cost, "yesterday": a.yesterday.cost, "last30": a.last30.cost}))
+        .collect::<Vec<_>>())
+}
+
 fn latest() -> &'static Mutex<Value> {
     LATEST.get_or_init(|| Mutex::new(Value::Array(vec![])))
 }
@@ -176,6 +223,8 @@ fn route(method: &tiny_http::Method, url: &str) -> (u16, String) {
                         .unwrap_or((404, json!({"error": "provider_not_found"}).to_string())),
                     Err(_) => (503, json!({"error": "server_busy"}).to_string()),
                 }
+            } else if let Some(body) = feeds().lock().ok().and_then(|m| m.get(path).cloned()) {
+                (200, body)
             } else {
                 (404, json!({"error": "not_found"}).to_string())
             }
@@ -230,6 +279,22 @@ pub fn start() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn feeds_exist_only_while_the_user_has_them_on() {
+        use super::route;
+        use serde_json::json;
+        let get = |path: &str| route(&tiny_http::Method::Get, path);
+        super::publish_feeds(false, vec![("/v1/feed-test", json!({"a": 1}))]);
+        assert_eq!(get("/v1/feed-test").0, 404, "off means absent, not hidden");
+        super::publish_feeds(true, vec![("/v1/feed-test", json!({"a": 1}))]);
+        assert_eq!(get("/v1/feed-test"), (200, "{\"a\":1}".to_string()));
+        assert_eq!(get("/v1/feed-test?x=1").0, 200, "a query string does not change the path");
+        assert_eq!(route(&tiny_http::Method::Post, "/v1/feed-test").0, 405, "read-only");
+        // Turning it off removes what was published before.
+        super::publish_feeds(false, vec![]);
+        assert_eq!(get("/v1/feed-test").0, 404);
+    }
+
     use super::{host_ok, provider_json, publish, route};
     use crate::providers::{Metric, ResetCredit, Snapshot};
 

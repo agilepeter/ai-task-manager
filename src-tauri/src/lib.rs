@@ -119,6 +119,9 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("wideMode").or_insert(json!(false));
     // Off by default: the only request to a non-provider server.
     obj.entry("trustLookup").or_insert(json!(false));
+    // Off by default: serves spend, work areas, clients and the ledger on
+    // the loopback API for the user's own dashboards.
+    obj.entry("apiFeeds").or_insert(json!(false));
     // Days before a renewal to send its one reminder (0 = off).
     obj.entry("renewalReminderDays").or_insert(json!(3));
     obj.entry("burnAlertPoints").or_insert(json!(15));
@@ -325,6 +328,7 @@ const CONFIG_KEYS: &[&str] = &[
     "dailySpendAlert",
     "wideMode",
     "trustLookup",
+    "apiFeeds",
     "renewalReminderDays",
     "spendMetric",
     "spendTab",
@@ -1639,6 +1643,49 @@ fn hydrate_fetch_time(s: &mut providers::Snapshot, at: i64) {
     }
 }
 
+/// When the last usage fetch and the last spend scan began (epoch ms), from
+/// whichever side started them. The background loop reads these so it never
+/// fetches on top of the window.
+static LAST_USAGE_FETCH_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+static LAST_SPEND_SCAN_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+/// The spend scan reads local logs; ten minutes keeps feeds and the daily
+/// spend alert current without walking the log tree every minute.
+const BACKGROUND_SPEND_EVERY_MIN: i64 = 10;
+
+/// Has `interval_min` passed since `last_ms`? A clock set backwards counts
+/// as due, so a stale future timestamp cannot switch refreshing off.
+fn refresh_due(last_ms: i64, now_ms: i64, interval_min: i64) -> bool {
+    now_ms < last_ms || now_ms - last_ms >= interval_min.max(1) * 60_000
+}
+
+/// Keeps refreshing while the window is closed. The window's own refresh
+/// runs on JavaScript timers, and macOS suspends those in a hidden webview:
+/// a tray app is hidden nearly all the time, so history recording, the
+/// budget alerts, renewal reminders and the API feeds all stalled for hours
+/// (a 192-minute hole showed up in a real history file). This loop lives in
+/// Rust, where nothing suspends it. While the window is open and refreshing
+/// it stays quiet, because the timestamps above are shared.
+fn spawn_background_refresh(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            let cfg = config_with_defaults(load_config());
+            let every = cfg.get("refreshMinutes").and_then(Value::as_i64).unwrap_or(1);
+            let now = chrono::Utc::now().timestamp_millis();
+            let last_usage = LAST_USAGE_FETCH_MS.load(std::sync::atomic::Ordering::Relaxed);
+            // Half a minute of grace lets an open window go first.
+            if refresh_due(last_usage + 30_000, now, every) {
+                let _ = fetch_usage(handle.clone(), None).await;
+            }
+            let last_spend = LAST_SPEND_SCAN_MS.load(std::sync::atomic::Ordering::Relaxed);
+            if refresh_due(last_spend, now, BACKGROUND_SPEND_EVERY_MIN) {
+                let _ = fetch_spend(handle.clone()).await;
+            }
+        }
+    });
+}
+
 /// Called by the UI. Refreshes every enabled provider at the same time and
 /// returns whatever each one found — data, "not signed in", or an error.
 #[tauri::command]
@@ -1646,6 +1693,7 @@ async fn fetch_usage(
     app: tauri::AppHandle,
     disabled: Option<Vec<String>>,
 ) -> Vec<providers::Snapshot> {
+    LAST_USAGE_FETCH_MS.store(chrono::Utc::now().timestamp_millis(), std::sync::atomic::Ordering::Relaxed);
     let cfg = config_with_defaults(load_config());
     let disabled = disabled.unwrap_or_else(|| {
         cfg.get("disabled")
@@ -2344,6 +2392,7 @@ fn cached_usage() -> Vec<providers::Snapshot> {
 /// own session logs. Heavy file IO, so it runs on a blocking thread.
 #[tauri::command]
 async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
+    LAST_SPEND_SCAN_MS.store(chrono::Utc::now().timestamp_millis(), std::sync::atomic::Ordering::Relaxed);
     eprintln!("[aitm] spend: scan starting");
     let started = std::time::Instant::now();
     // Cursor's CSV export needs the async client; fetch it here and hand it
@@ -2380,6 +2429,38 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
         result.len(),
         started.elapsed()
     );
+    // Optional dashboard feeds on the loopback API. Off by default; when off
+    // nothing is published, so the paths do not exist.
+    {
+        let cfg = config_with_defaults(load_config());
+        let on = cfg.get("apiFeeds").and_then(Value::as_bool).unwrap_or(false);
+        let today = chrono::Local::now().date_naive();
+        let areas: Vec<spend::AreaSpend> = result
+            .iter()
+            .flat_map(|p| p.projects.iter())
+            .flat_map(|pr| pr.areas.iter().cloned())
+            .collect();
+        let usage30: std::collections::HashMap<String, f64> =
+            result.iter().map(|p| (p.id.clone(), p.last30.cost)).collect();
+        httpapi::publish_feeds(
+            on,
+            vec![
+                ("/v1/spend", httpapi::spend_feed(&result)),
+                ("/v1/spend/areas", httpapi::areas_feed(&result)),
+                (
+                    "/v1/spend/clients",
+                    serde_json::to_value(clients::rollup(&areas, &clients::load_from(&clients::path()), today))
+                        .unwrap_or(Value::Null),
+                ),
+                (
+                    "/v1/subscriptions",
+                    serde_json::to_value(ledger::view(&ledger::load_from(&ledger::path()), today, &usage30))
+                        .unwrap_or(Value::Null),
+                ),
+            ],
+        );
+    }
+
     // Budget guard: today's total across every provider against the user's
     // daily mark. `today` windows are already cut at local midnight.
     let today_cost: f64 = result.iter().map(|p| p.today.cost).sum();
@@ -3230,6 +3311,7 @@ pub fn run() {
         ])
         .setup(|app| {
             spawn_update_checker(app.handle());
+            spawn_background_refresh(app.handle());
             let quit = MenuItem::with_id(
                 app,
                 "quit",
@@ -3315,6 +3397,18 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_background_loop_waits_its_turn_and_a_bad_clock_cannot_stop_it() {
+        let min = 60_000;
+        assert!(!super::refresh_due(10 * min, 10 * min + 59_000, 1), "the window fetched 59 s ago");
+        assert!(super::refresh_due(10 * min, 11 * min, 1));
+        assert!(!super::refresh_due(10 * min, 14 * min, 5));
+        assert!(super::refresh_due(10 * min, 15 * min, 5));
+        assert!(super::refresh_due(0, 2 * min, 1), "never fetched is due");
+        assert!(super::refresh_due(99 * min, 10 * min, 1), "a timestamp from the future is due, not a permanent off");
+        assert!(super::refresh_due(10 * min, 11 * min, 0), "an interval of 0 is treated as a minute");
+    }
+
     #[test]
     fn the_shortcut_hints_shown_in_settings_are_strings_the_parser_accepts() {
         use tauri_plugin_global_shortcut::Shortcut;

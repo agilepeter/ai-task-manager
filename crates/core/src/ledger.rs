@@ -155,9 +155,11 @@ pub fn view(items: &[Subscription], today: NaiveDate, usage30: &HashMap<String, 
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => b.monthly_cost.total_cmp(&a.monthly_cost),
     });
-    let monthly: f64 = rows.iter().map(|r| r.monthly_cost).sum();
+    // An empty f64 sum is -0.0, which serialises as "-0.0". Adding 0.0 makes
+    // it a plain zero without changing any other value.
+    let monthly: f64 = rows.iter().map(|r| r.monthly_cost).sum::<f64>() + 0.0;
     LedgerView {
-        idle_monthly: rows.iter().filter(|r| r.idle).map(|r| r.monthly_cost).sum(),
+        idle_monthly: rows.iter().filter(|r| r.idle).map(|r| r.monthly_cost).sum::<f64>() + 0.0,
         monthly,
         yearly: monthly * 12.0,
         items: rows,
@@ -323,6 +325,14 @@ mod tests {
         assert_eq!(next_renewal(d("2024-02-29"), Cycle::Yearly, d("2026-03-01")), Some(d("2027-02-28")));
         // Years of monthly steps still land exactly.
         assert_eq!(next_renewal(d("2019-03-15"), Cycle::Monthly, d("2026-09-21")), Some(d("2026-10-15")));
+    }
+
+    #[test]
+    fn an_empty_ledger_totals_a_plain_zero() {
+        let v = view(&[], d("2026-09-21"), &HashMap::new());
+        let wire = serde_json::to_string(&v).unwrap();
+        assert!(!wire.contains("-0"), "{wire}");
+        assert!(wire.contains("\"monthly\":0.0"));
     }
 
     #[test]

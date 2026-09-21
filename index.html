@@ -365,6 +365,14 @@
       <div class="acc-group">
         <button class="acc-head"><span data-i18n="settings.advanced">Advanced</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
+          <div class="setting-row">
+            <label class="toggle"><input id="api-feeds" type="checkbox" /> <span>Serve spend and subscriptions on the local API</span></label>
+          </div>
+          <p class="settings-note">
+            For your own dashboards. Adds /v1/spend, /v1/spend/areas, /v1/spend/clients and
+            /v1/subscriptions to http://127.0.0.1:6736, reachable from this computer only. Areas and
+            clients are folder and customer names, so this is off until you turn it on.
+          </p>
           <p class="settings-note" data-i18n="settings.advancedNote">
             Restores every preference to its default and re-detects installed
             tools. API keys and your usage history stay. Proxy changes still

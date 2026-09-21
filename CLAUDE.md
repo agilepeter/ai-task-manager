@@ -35,6 +35,17 @@ file under `src-tauri/src/providers/` and port it by hand.
   (`trustLookup`), and when on it sends NOTHING about the machine: one parameterless GET of
   the public list, at most daily, matched locally. Never turn that into a per-package query.
   Anything else that would leave the machine needs the same explicit, documented decision.
+- **The local API's extra feeds are opt-in** (`apiFeeds`, Settings > Advanced): `/v1/spend`,
+  `/v1/spend/areas`, `/v1/spend/clients`, `/v1/subscriptions`. Areas and clients are folder
+  and customer names, so while the switch is off nothing is published at all (the paths are
+  404, not hidden). Loopback only, and the DNS-rebinding host check covers them. This
+  supersedes the earlier "never on the API" note for areas, by the owner's decision.
+- **Refreshing is driven from Rust, not the webview** (`spawn_background_refresh`). macOS
+  suspends JavaScript timers in a hidden webview, and a tray app is hidden nearly always:
+  history, alerts, reminders and feeds stalled for hours. The loop yields to an open window
+  through shared last-fetch timestamps, so providers are never fetched twice. Do not move
+  scheduling back into the frontend. Note `tauri dev` only watches `src-tauri/`: a change
+  under `crates/` needs the app restarted by hand.
 - The HTTP user-agent is `ai-task-manager/<version>`: the same for every install, never an id.
 - **Self-update is off** (`UPDATES_ENABLED` in `src-tauri/src/lib.rs`). The
   pubkey left in `tauri.conf.json` is upstream's. Never enable updates without

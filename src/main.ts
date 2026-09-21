@@ -214,6 +214,8 @@ interface Config {
   renewalReminderDays: number;
   /** Opt-in: fetch the public MCP Trust Index list. Off by default. */
   trustLookup: boolean;
+  /** Opt-in: serve spend, areas, clients and the ledger on the loopback API. */
+  apiFeeds: boolean;
   spendTab: SpendTab;
   spendMetric: "cost" | "tokens" | "mtok";
   showUsed: boolean;
@@ -253,6 +255,7 @@ const FRONTEND_CONFIG_KEYS = [
   "wideMode",
   "renewalReminderDays",
   "trustLookup",
+  "apiFeeds",
   "spendTab",
   "spendMetric",
   "showUsed",
@@ -447,6 +450,7 @@ let config: Config = {
   wideMode: false,
   renewalReminderDays: 3,
   trustLookup: false,
+  apiFeeds: false,
   spendTab: "today",
   spendMetric: "cost",
   showUsed: false,
@@ -4863,14 +4867,18 @@ async function initSettings(): Promise<void> {
     ["#notify-almost", "notifyAlmostOut"],
     ["#notify-close", "notifyCuttingClose"],
     ["#notify-runout", "notifyWillRunOut"],
+    ["#api-feeds", "apiFeeds"],
   ];
   for (const [selector, key] of notifyToggles) {
     const box = document.querySelector<HTMLInputElement>(selector)!;
     box.checked = Boolean(config[key]);
     box.addEventListener("change", () => {
-      void patchConfig({ [key]: box.checked } as Partial<Config>);
+      const saved = patchConfig({ [key]: box.checked } as Partial<Config>);
       // notifyReset also arms/clears the reset-moment refresh timer.
       if (key === "notifyReset") scheduleResetRefresh();
+      // Feeds are published by the spend scan: run one now, so the switch
+      // does what it says at once instead of at the next refresh.
+      if (key === "apiFeeds") void saved.then(() => refresh(true));
     });
   }
 
