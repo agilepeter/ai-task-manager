@@ -31,9 +31,21 @@ file under `src-tauri/src/providers/` and port it by hand.
 - Internal crate is still named `pane` / `pane_lib`; rename during the core split.
 - Antigravity discovery shells out to PowerShell/netstat: compiles, finds nothing on macOS.
 - Claude extra accounts via `CLAUDE_CONFIG_DIR` (hash-suffixed Keychain service) are not mapped.
-- Config dir naming still says "Pane".
+- Log prefix is still `[pane]`, and some user-facing strings still say "Pane" or "this PC".
+- Spend scan skips any single CLI log over 512 MiB, so a huge Claude Code session is
+  left out of spend totals (seen on a 723 MiB session file).
+- Only Claude and Copilot are verified end to end on macOS. Codex, Cursor, OpenRouter
+  and ElevenLabs credential paths on macOS are unverified.
+
+## Own config dir, never upstream's
+
+`config_dir()` is `AITaskManager`. Do not reintroduce upstream's "OpenUsage -> Pane"
+directory migration: on macOS OpenUsage is a separate real app, and sharing "Pane"
+would let this app and upstream Pane overwrite each other.
 
 ## Build
 
-Needs Rust (rustup) and Node. `npm install`, then `npm run tauri dev`.
+Needs Rust (rustup, official installer: Homebrew has no bottle for Intel macOS 26 and
+builds LLVM from source) and Node. `npm install`, then `npm run tauri dev`.
+Local API for checking real numbers: `curl http://127.0.0.1:6736/v1/usage`.
 Rust tests: `cd src-tauri && cargo test`.

@@ -313,28 +313,18 @@ pub(crate) fn read_small_text(
     Ok(text)
 }
 
-/// Where Pane keeps its own settings, e.g. saved API keys:
-/// C:\Users\you\AppData\Roaming\Pane
+/// Where the app keeps its own settings, e.g. saved API keys:
+/// `%APPDATA%\AITaskManager` on Windows,
+/// `~/Library/Application Support/AITaskManager` on macOS.
 ///
-/// The app shipped as "OpenUsage" before the rename — on first call, an
-/// existing %APPDATA%\OpenUsage is moved over so nobody loses their config,
-/// keys, or caches. If the move fails but the old dir is usable, keep using
-/// the old dir rather than silently starting fresh.
+/// Deliberately our own directory. Upstream Pane moved a legacy "OpenUsage"
+/// directory over on first run; that migration is gone because on macOS
+/// OpenUsage is a separate, real app whose settings we must never touch, and
+/// sharing "Pane" would let this app and upstream Pane overwrite each other.
 pub fn config_dir() -> PathBuf {
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    DIR.get_or_init(|| {
-        let base = dirs::config_dir().unwrap_or_default();
-        let new = base.join("Pane");
-        let old = base.join("OpenUsage");
-        if !new.exists() && old.exists() {
-            let _ = std::fs::rename(&old, &new);
-            if !new.exists() {
-                return old;
-            }
-        }
-        new
-    })
-    .clone()
+    DIR.get_or_init(|| dirs::config_dir().unwrap_or_default().join("AITaskManager"))
+        .clone()
 }
 
 /// Reads a generic credential's blob from the OS credential store:
