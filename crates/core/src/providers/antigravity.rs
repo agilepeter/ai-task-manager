@@ -52,7 +52,7 @@ pub async fn snapshot() -> Snapshot {
             if installed() {
                 Snapshot::no_credentials(ID, NAME, "Start Antigravity once and try again.")
             } else {
-                Snapshot::no_credentials(ID, NAME, "Antigravity not found on this PC.")
+                Snapshot::no_credentials(ID, NAME, "Antigravity not found on this computer.")
             }
         }
     }

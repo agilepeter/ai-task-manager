@@ -37,9 +37,9 @@ file under `src-tauri/src/providers/` and port it by hand.
 
 - Antigravity discovery shells out to PowerShell/netstat: compiles, finds nothing on macOS.
 - Claude extra accounts via `CLAUDE_CONFIG_DIR` (hash-suffixed Keychain service) are not mapped.
-- Log prefix is still `[pane]`. About 10 user-facing strings (x3 languages in `src/i18n.ts`,
-  plus Rust hints) still say "this PC" or show the old `%APPDATA%\Pane` path, which is now
-  wrong on both platforms (the dir is `AITaskManager`). One copy pass, with the core split.
+- Log prefix is still `[pane]`. UI copy is platform-neutral now; keep it that way ("this
+  computer", "system notifications", no `%APPDATA%` paths). Still Windows-flavoured: the
+  global-shortcut placeholder (`Ctrl+Shift+U`).
 - Spend scan skips any single CLI log over 512 MiB, so a huge Claude Code session is
   left out of spend totals (seen on a 723 MiB session file).
 - Only Claude and Copilot are verified end to end on macOS. Codex, Cursor, OpenRouter
@@ -62,6 +62,20 @@ and computed Opportunities). Usage stays the default view.
 - **Check UI in WebKit, not Chromium**: the macOS webview is WebKit. Playwright's `webkit`
   with a mocked `window.__TAURI_INTERNALS__.invoke` renders the real frontend from the vite
   dev server (port 1420). Feed it real data, and give `get_config` a full config or boot aborts.
+
+## Budget guard
+
+Two alert rules in `crates/core/src/alerts.rs`, configured by dropdowns in Settings > Notifications:
+
+- **Burning Fast** (`burnAlertPoints`, default 15, 0 = off): a weekly-or-longer limit rose
+  that many points inside 30 minutes. Exists because the pace rules are straight lines from
+  the period start, so an agent fan-out early in a week looks fine to them until much later.
+  Short windows are excluded on purpose: a busy 5-hour session is not an incident.
+- **Daily Spend** (`dailySpendAlert` dollars, default 0 = off): today's local spend total
+  crossed the mark. Fires once per local day. On a flat-rate plan the figure is
+  API-equivalent value, not a charge; the tooltip says so, keep it honest.
+
+Rules take the clock as a parameter (`evaluate_at`) so windows are tested exactly.
 
 ## Own config dir, never upstream's
 

@@ -262,7 +262,7 @@ fn scoped_id_charset(raw: &str) -> bool {
 fn with_live_db<T>(dir: &Path, f: impl FnOnce(&Path) -> Result<T, String>) -> Result<T, String> {
     let db_path = dir.join("opencode.db");
     if !db_path.exists() {
-        return Err("opencode.db not found — has OpenCode been used on this PC?".into());
+        return Err("opencode.db not found — has OpenCode been used on this computer?".into());
     }
     f(&db_path)
 }
@@ -334,7 +334,7 @@ async fn fetch(
             // an offline/revoked-key card after the wrong problem.
             let mut snap = local_windows_snapshot(dir, id, name)
                 .map_err(|db| format!("usage API failed ({e}); local fallback: {db}"))?;
-            snap.plan = Some("Go — this PC only".into());
+            snap.plan = Some("Go — this computer only".into());
             Ok(snap)
         }
     }
@@ -429,7 +429,7 @@ fn month_period_ending(resets_ms: i64) -> i64 {
     ((resets_ms as f64 - start) as i64).max(1)
 }
 
-/// Fallback: the pre-API local computation from opencode.db — this PC's
+/// Fallback: the pre-API local computation from opencode.db — this computer's
 /// rows only, so shared subscriptions under-count here.
 fn local_windows_snapshot(dir: &Path, id: &str, name: &str) -> Result<Snapshot, String> {
     let w = with_live_db(dir, |db| {

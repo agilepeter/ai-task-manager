@@ -113,6 +113,11 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("notifyCuttingClose").or_insert(json!(true));
     obj.entry("notifyWillRunOut").or_insert(json!(true));
     obj.entry("notifyReset").or_insert(json!(true));
+    // Budget guard. Burn: points of a weekly-or-longer quota inside 30
+    // minutes (0 = off). Spend: dollars in one local day (0 = off; there is
+    // no universal default for what a day should cost).
+    obj.entry("burnAlertPoints").or_insert(json!(15));
+    obj.entry("dailySpendAlert").or_insert(json!(0));
     obj.entry("spendTab").or_insert(json!("today"));
     obj.entry("spendMetric").or_insert(json!("cost"));
     obj.entry("showUsed").or_insert(json!(false));
@@ -183,6 +188,8 @@ const CONFIG_KEYS: &[&str] = &[
     "notifyCuttingClose",
     "notifyWillRunOut",
     "notifyReset",
+    "burnAlertPoints",
+    "dailySpendAlert",
     "spendMetric",
     "spendTab",
     "showUsed",
@@ -2171,7 +2178,7 @@ fn cached_usage() -> Vec<providers::Snapshot> {
 /// Computes local spend (Today / Yesterday / Last 30 Days) from the CLIs'
 /// own session logs. Heavy file IO, so it runs on a blocking thread.
 #[tauri::command]
-async fn fetch_spend() -> Vec<spend::ProviderSpend> {
+async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
     eprintln!("[pane] spend: scan starting");
     let started = std::time::Instant::now();
     // Cursor's CSV export needs the async client; fetch it here and hand it
@@ -2208,6 +2215,20 @@ async fn fetch_spend() -> Vec<spend::ProviderSpend> {
         result.len(),
         started.elapsed()
     );
+    // Budget guard: today's total across every provider against the user's
+    // daily mark. `today` windows are already cut at local midnight.
+    let today_cost: f64 = result.iter().map(|p| p.today.cost).sum();
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let cfg = config_with_defaults(load_config());
+    if let Some(alert) = alerts::evaluate_spend(today_cost, &today, &cfg) {
+        use tauri_plugin_notification::NotificationExt;
+        let _ = app
+            .notification()
+            .builder()
+            .title(&alert.title)
+            .body(&alert.body)
+            .show();
+    }
     result
 }
 

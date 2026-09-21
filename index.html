@@ -183,7 +183,7 @@
         <button class="acc-head"><span data-i18n="settings.notifications">Notifications</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note" data-i18n="settings.notifyNote">
-            Windows toasts when a weekly or monthly window resets, or when a quota worsens — once per metric per reset period.
+            System notifications when a weekly or monthly window resets, a quota worsens, a long limit burns unusually fast, or the day's spend passes your mark. Each fires once, then re-arms.
           </p>
           <div class="setting-row">
             <label class="toggle"><input id="notify-reset" type="checkbox" /> <span data-i18n="settings.notifyReset">Weekly limit reset (window back to 100%)</span></label>
@@ -196,6 +196,27 @@
           </div>
           <div class="setting-row">
             <label class="toggle"><input id="notify-runout" type="checkbox" /> <span data-i18n="settings.notifyRunout">Will run out</span></label>
+          </div>
+          <div class="setting-row">
+            <label for="burn-alert" data-i18n="settings.burnAlert" title="A weekly or longer limit climbing this fast. Catches an agent fan-out long before the pace projection does." data-i18n-title="settings.burnAlertTip">Burning fast</label>
+            <select id="burn-alert">
+              <option value="0" data-i18n="settings.alertOff">Off</option>
+              <option value="10" data-i18n="settings.burn10">10% of a weekly limit in 30 min</option>
+              <option value="15" data-i18n="settings.burn15">15% in 30 min</option>
+              <option value="25" data-i18n="settings.burn25">25% in 30 min</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="spend-alert" data-i18n="settings.spendAlert" title="Today's total across every tool, from your local logs. On a flat-rate plan this is the API-equivalent value, not a charge." data-i18n-title="settings.spendAlertTip">Daily spend</label>
+            <select id="spend-alert">
+              <option value="0" data-i18n="settings.alertOff">Off</option>
+              <option value="10">$10</option>
+              <option value="25">$25</option>
+              <option value="50">$50</option>
+              <option value="100">$100</option>
+              <option value="250">$250</option>
+              <option value="500">$500</option>
+            </select>
           </div>
         </div></div>
       </div>

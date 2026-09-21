@@ -4,6 +4,11 @@
 //! - "Will Run Out" — projected to hit the limit before the reset.
 //! - "Limit Reset" — a weekly-or-longer reset window rolled over and the
 //!   quota is full (short windows reset too often to be worth a toast).
+//! - "Burning Fast" — a weekly-or-longer quota rose by N points inside 30
+//!   minutes. The projection rules above are straight lines from the period
+//!   start, so an agent fan-out early in the week looks fine to them until
+//!   much later; this one watches the rate itself.
+//! - "Daily Spend" — today's local spend crossed the amount the user set.
 //!
 //! Anti-spam: an alert fires only when a quota *worsens while the app is
 //! running* (the first reading after launch is a silent baseline), fires
@@ -24,6 +29,9 @@ struct MetricState {
     almost_out: bool,
     close: bool,
     run_out: bool,
+    /// Recent (time, used%) readings, oldest first, for the burn-rate rule.
+    history: Vec<(i64, f64)>,
+    burning: bool,
 }
 
 fn states() -> &'static Mutex<HashMap<String, MetricState>> {
@@ -116,13 +124,33 @@ fn compact_duration(ms: i64) -> String {
     }
 }
 
+/// The burn-rate rule looks this far back.
+const BURN_WINDOW_MS: i64 = 30 * 60_000;
+/// Readings closer together than this are not a rate yet.
+const BURN_MIN_SPAN_MS: i64 = 2 * 60_000;
+
+/// How far `used` has risen above the oldest reading still inside the burn
+/// window: `(points, minutes)`. None without a reading old enough to compare.
+fn burn_rise(history: &[(i64, f64)], now: i64, used: f64) -> Option<(f64, i64)> {
+    let (at, then) = *history.iter().find(|(at, _)| now - at <= BURN_WINDOW_MS)?;
+    let span = now - at;
+    (span >= BURN_MIN_SPAN_MS).then(|| (used - then, span / 60_000))
+}
+
 pub fn evaluate(snapshots: &[Snapshot], cfg: &Value) -> Vec<Alert> {
+    evaluate_at(snapshots, cfg, chrono::Utc::now().timestamp_millis())
+}
+
+/// `evaluate` with the clock passed in, so the burn window is testable.
+pub fn evaluate_at(snapshots: &[Snapshot], cfg: &Value, now: i64) -> Vec<Alert> {
     let want = |key: &str| cfg.get(key).and_then(Value::as_bool).unwrap_or(false);
+    let burn_points = cfg.get("burnAlertPoints").and_then(Value::as_f64).unwrap_or(0.0);
+    let want_burn = burn_points > 0.0;
     let want_almost = want("notifyAlmostOut");
     let want_close = want("notifyCuttingClose");
     let want_runout = want("notifyWillRunOut");
     let want_reset = want("notifyReset");
-    if !(want_almost || want_close || want_runout || want_reset) {
+    if !(want_almost || want_close || want_runout || want_reset || want_burn) {
         return Vec::new();
     }
 
@@ -285,6 +313,40 @@ pub fn evaluate(snapshots: &[Snapshot], cfg: &Value) -> Vec<Alert> {
                 }
             }
 
+            // Burn rate, weekly-and-longer windows only: a 5-hour window
+            // climbing 15 points in half an hour is just a working session.
+            if want_burn && metric.period_ms.is_some_and(|p| p >= LONG_WINDOW_MS) {
+                let rise = burn_rise(&entry.history, now, used);
+                let hot = rise.is_some_and(|(points, _)| points >= burn_points);
+                if let (true, false, Some((points, minutes))) = (hot, entry.burning, rise) {
+                    let shown = crate::i18n::metric_label(cfg, &metric.label);
+                    let name = format!("{} {}", snapshot.name, shown);
+                    alerts.push(match crate::i18n::resolved_locale(cfg) {
+                        "zh" => Alert {
+                            title: "消耗过快".into(),
+                            body: format!("{name} 在 {minutes} 分钟内用掉了 {points:.0}%，剩余 {left:.0}%。"),
+                        },
+                        "ru" => Alert {
+                            title: "Быстрый расход".into(),
+                            body: format!("{name}: {points:.0}% за {minutes} мин, осталось {left:.0}%."),
+                        },
+                        _ => Alert {
+                            title: "Burning Fast".into(),
+                            body: format!("{name} used {points:.0}% in {minutes} min. {left:.0}% left."),
+                        },
+                    });
+                }
+                // Re-arm only once the rate has clearly fallen, so a spike
+                // hovering at the threshold does not toast on every refresh.
+                entry.burning = if entry.burning {
+                    rise.is_some_and(|(points, _)| points >= burn_points / 2.0)
+                } else {
+                    hot
+                };
+                entry.history.retain(|(at, _)| now - at <= BURN_WINDOW_MS);
+                entry.history.push((now, used));
+            }
+
             entry.almost_out = almost_now;
             entry.close = close_now;
             entry.run_out = run_out_now;
@@ -293,6 +355,48 @@ pub fn evaluate(snapshots: &[Snapshot], cfg: &Value) -> Vec<Alert> {
         }
     }
     alerts
+}
+
+/// The day the spend alert last fired for. One toast per day: spend only
+/// grows through a day, so a crossing happens once.
+fn spend_alert_day() -> &'static Mutex<Option<String>> {
+    static DAY: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    DAY.get_or_init(|| Mutex::new(None))
+}
+
+/// "Daily Spend": today's total crossed `dailySpendAlert` dollars (0 = off).
+/// `today` is the local date the total belongs to, e.g. "2026-09-21".
+pub fn evaluate_spend(today_cost: f64, today: &str, cfg: &Value) -> Option<Alert> {
+    let limit = cfg.get("dailySpendAlert").and_then(Value::as_f64).unwrap_or(0.0);
+    if limit <= 0.0 || !today_cost.is_finite() || today_cost < limit {
+        return None;
+    }
+    let mut fired = spend_alert_day().lock().ok()?;
+    if fired.as_deref() == Some(today) {
+        return None;
+    }
+    *fired = Some(today.to_string());
+    Some(match crate::i18n::resolved_locale(cfg) {
+        "zh" => Alert {
+            title: "今日花费".into(),
+            body: format!("今天已花费 ${today_cost:.0}，超过了你设定的 ${limit:.0}。"),
+        },
+        "ru" => Alert {
+            title: "Расход за день".into(),
+            body: format!("Сегодня потрачено ${today_cost:.0}, это больше вашего порога ${limit:.0}."),
+        },
+        _ => Alert {
+            title: "Daily Spend".into(),
+            body: format!("${today_cost:.0} spent today, past your ${limit:.0} mark."),
+        },
+    })
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub fn reset_spend_alert_for_test() {
+    if let Ok(mut fired) = spend_alert_day().lock() {
+        *fired = None;
+    }
 }
 
 /// Drop every metric keyed as `{snapshot_id}:…`. Prefix is `id + ':'` so
@@ -324,6 +428,86 @@ pub fn has_state_for_test(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const MIN: i64 = 60_000;
+    const WEEK: i64 = 7 * 24 * 60 * MIN;
+
+    fn weekly(id: &str, used: f64, now: i64) -> Snapshot {
+        Snapshot::ok(id, "Claude", None, vec![
+            crate::providers::Metric::progress("Weekly", used, None)
+                .with_reset(Some(now + 3 * 24 * 60 * MIN), Some(WEEK)),
+        ])
+    }
+
+    #[test]
+    fn burn_rise_measures_against_the_oldest_sample_inside_the_window() {
+        let now = 10_000 * MIN;
+        let history = [(now - 50 * MIN, 5.0), (now - 25 * MIN, 20.0), (now - 5 * MIN, 30.0)];
+        // The 50-minute-old reading is outside the 30-minute window.
+        assert_eq!(burn_rise(&history, now, 38.0), Some((18.0, 25)));
+        // One sample a few seconds old is not a rate yet.
+        assert_eq!(burn_rise(&[(now - 10_000, 30.0)], now, 50.0), None);
+        assert_eq!(burn_rise(&[], now, 50.0), None);
+    }
+
+    #[test]
+    fn fast_burn_fires_once_on_a_weekly_window_and_re_arms_after_it_cools() {
+        let id = "burn-weekly";
+        let cfg = serde_json::json!({"burnAlertPoints": 15, "locale": "en"});
+        let t0 = 20_000 * MIN;
+        forget_snapshot(id);
+        assert!(evaluate_at(&[weekly(id, 20.0, t0)], &cfg, t0).is_empty(), "baseline is silent");
+        assert!(evaluate_at(&[weekly(id, 26.0, t0)], &cfg, t0 + 10 * MIN).is_empty(), "6 points is normal");
+        let fired = evaluate_at(&[weekly(id, 37.0, t0)], &cfg, t0 + 20 * MIN);
+        assert_eq!(fired.len(), 1, "17 points in 20 minutes");
+        assert_eq!(fired[0].title, "Burning Fast");
+        assert!(fired[0].body.contains("17%") && fired[0].body.contains("20 min"), "{}", fired[0].body);
+        assert!(evaluate_at(&[weekly(id, 39.0, t0)], &cfg, t0 + 25 * MIN).is_empty(), "fires once");
+        // An hour of calm, then a second spike is a new event.
+        assert!(evaluate_at(&[weekly(id, 40.0, t0)], &cfg, t0 + 90 * MIN).is_empty());
+        assert_eq!(evaluate_at(&[weekly(id, 58.0, t0)], &cfg, t0 + 110 * MIN).len(), 1);
+        forget_snapshot(id);
+    }
+
+    #[test]
+    fn fast_burn_ignores_short_windows_and_the_off_setting() {
+        let id = "burn-session";
+        let t0 = 30_000 * MIN;
+        let session = |used: f64| Snapshot::ok(id, "Claude", None, vec![
+            crate::providers::Metric::progress("Session", used, None)
+                .with_reset(Some(t0 + 120 * MIN), Some(300 * MIN)),
+        ]);
+        let on = serde_json::json!({"burnAlertPoints": 15, "locale": "en"});
+        forget_snapshot(id);
+        assert!(evaluate_at(&[session(10.0)], &on, t0).is_empty());
+        // 40 points of a 5-hour window in 20 minutes is just a busy session.
+        assert!(evaluate_at(&[session(50.0)], &on, t0 + 20 * MIN).is_empty());
+        forget_snapshot(id);
+
+        let off = serde_json::json!({"burnAlertPoints": 0, "locale": "en"});
+        let id2 = "burn-off";
+        forget_snapshot(id2);
+        assert!(evaluate_at(&[weekly(id2, 10.0, t0)], &off, t0).is_empty());
+        assert!(evaluate_at(&[weekly(id2, 60.0, t0)], &off, t0 + 20 * MIN).is_empty());
+        forget_snapshot(id2);
+    }
+
+    #[test]
+    fn daily_spend_alert_fires_once_per_day_when_the_threshold_is_crossed() {
+        reset_spend_alert_for_test();
+        let cfg = serde_json::json!({"dailySpendAlert": 50, "locale": "en"});
+        assert!(evaluate_spend(49.99, "2026-09-21", &cfg).is_none());
+        let alert = evaluate_spend(62.4, "2026-09-21", &cfg).expect("crossed $50");
+        assert_eq!(alert.title, "Daily Spend");
+        assert!(alert.body.contains("$62") && alert.body.contains("$50"), "{}", alert.body);
+        assert!(evaluate_spend(80.0, "2026-09-21", &cfg).is_none(), "once per day");
+        assert!(evaluate_spend(55.0, "2026-09-22", &cfg).is_some(), "a new day re-arms");
+        // Raising the threshold past today's spend must not re-fire today.
+        reset_spend_alert_for_test();
+        let off = serde_json::json!({"dailySpendAlert": 0, "locale": "en"});
+        assert!(evaluate_spend(500.0, "2026-09-21", &off).is_none(), "0 is off");
+        assert!(evaluate_spend(f64::NAN, "2026-09-21", &cfg).is_none());
+    }
 
     #[test]
     fn sub2api_alerts_ignore_stale_disabled_and_nonfinite_observations() {

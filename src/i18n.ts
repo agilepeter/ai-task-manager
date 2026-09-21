@@ -9,7 +9,7 @@ type Dict = Record<string, string>;
 
 const en: Dict = {
   "settings.sub2api": "Sub2API sites",
-  "settings.sub2apiNote": "Add Sub2API sites and keys without a remote check. Keys stay on this PC (%APPDATA%\\Pane\\sub2api.json) and are sent only to that site's /v1/usage. Shared wallets and subscriptions are shown separately for each key.",
+  "settings.sub2apiNote": "Add Sub2API sites and keys without a remote check. Keys stay on this computer (sub2api.json in the app's settings folder) and are sent only to that site's /v1/usage. Shared wallets and subscriptions are shown separately for each key.",
   "settings.sub2apiFamily": "Show Sub2API cards",
   "settings.siteInvalidUrl": "Invalid site URL",
   "footer.sub2apiFailed": "Sub2API: {err}",
@@ -113,11 +113,19 @@ const en: Dict = {
 
   "settings.notifications": "Notifications",
   "settings.notifyNote":
-    "Windows toasts when a weekly or monthly window resets, or when a quota worsens — once per metric per reset period.",
+    "System notifications when a weekly or monthly window resets, a quota worsens, a long limit burns unusually fast, or the day's spend passes your mark. Each fires once, then re-arms.",
   "settings.notifyReset": "Weekly limit reset (window back to 100%)",
   "settings.notifyAlmost": "Almost out (<10% left)",
   "settings.notifyClose": "Cutting it close",
   "settings.notifyRunout": "Will run out",
+  "settings.burnAlert": "Burning fast",
+  "settings.burnAlertTip": "A weekly or longer limit climbing this fast. Catches an agent fan-out long before the pace projection does.",
+  "settings.alertOff": "Off",
+  "settings.burn10": "10% of a weekly limit in 30 min",
+  "settings.burn15": "15% in 30 min",
+  "settings.burn25": "25% in 30 min",
+  "settings.spendAlert": "Daily spend",
+  "settings.spendAlertTip": "Today's total across every tool, from your local logs. On a flat-rate plan this is the API-equivalent value, not a charge.",
 
   "settings.network": "Network",
   "settings.useProxy": "Use proxy",
@@ -127,7 +135,7 @@ const en: Dict = {
 
   "settings.apiKeys": "API keys",
   "settings.apiKeysNote":
-    "Stored only on this PC (%APPDATA%\\Pane). Leave empty and save to remove.",
+    "Stored only on this computer. Leave empty and save to remove.",
   "settings.save": "Save",
   "settings.keyPlaceholder": "API key",
   "settings.keyPhMinimax": "API key (auto-detected from CLI)",
@@ -153,7 +161,7 @@ const en: Dict = {
 
   "settings.onenewapi": "One/New API sites",
   "settings.onenewapiNote":
-    "Register OneAPI / NewAPI compatible sites. Keys stay on this PC (%APPDATA%\\Pane\\onenewapi.json) and are sent only to that site. Empty sites stay here; cards appear after you add a key.",
+    "Register OneAPI / NewAPI compatible sites. Keys stay on this computer (onenewapi.json in the app's settings folder) and are sent only to that site. Empty sites stay here; cards appear after you add a key.",
   "settings.onenewapiFamily": "Show One/New API cards",
   "settings.onenewapiFamilyTip":
     "Turns off every key card at once. Per-key switches in Customize stay.",
@@ -260,7 +268,7 @@ const en: Dict = {
   "spend.title": "Total Spend",
   "spend.scanning": "Scanning session logs…",
   "spend.emptyFirst":
-    "No spend data yet — appears once Claude Code, Codex, or another CLI logs some usage on this PC.",
+    "No spend data yet — appears once Claude Code, Codex, or another CLI logs some usage on this computer.",
   "spend.emptyPeriod": "No spend in this period.",
   "spend.emptyPeriodTip": "No spend recorded in this period.",
   "spend.info":
@@ -337,7 +345,7 @@ const en: Dict = {
 
   "welcome.title": "Welcome 👋",
   "welcome.body":
-    "You're set up with the AI tools found on this PC. Arrange cards, star tray metrics, and hide rows in Customize.",
+    "You're set up with the AI tools found on this computer. Arrange cards, star tray metrics, and hide rows in Customize.",
   "welcome.open": "Open Customize",
   "welcome.dismiss": "Dismiss",
 
@@ -395,7 +403,7 @@ const en: Dict = {
 
 const zh: Dict = {
   "settings.sub2api": "Sub2API 站点",
-  "settings.sub2apiNote": "添加 Sub2API 站点和密钥，无需远程验证。密钥只保存在本机（%APPDATA%\\Pane\\sub2api.json），仅发送至对应站点的 /v1/usage。共享钱包和订阅按 Key 分别展示，不汇总。",
+  "settings.sub2apiNote": "添加 Sub2API 站点和密钥，无需远程验证。密钥只保存在本机（应用设置文件夹中的 sub2api.json），仅发送至对应站点的 /v1/usage。共享钱包和订阅按 Key 分别展示，不汇总。",
   "settings.sub2apiFamily": "显示 Sub2API 卡片",
   "settings.siteInvalidUrl": "站点地址格式无效",
   "footer.sub2apiFailed": "Sub2API：{err}",
@@ -497,11 +505,19 @@ const zh: Dict = {
   "settings.shortcutPh": "例如 Ctrl+Shift+U",
 
   "settings.notifications": "通知",
-  "settings.notifyNote": "每周或每月额度窗口重置，或额度变差时弹出 Windows 提醒 — 每个指标在每个重置周期只提醒一次。",
+  "settings.notifyNote": "每周或每月额度窗口重置、额度变差、长周期额度消耗异常快，或今日花费超过你设定的金额时，弹出系统通知。每条只提醒一次，之后会重新生效。",
   "settings.notifyReset": "周额度重置（窗口恢复 100%）",
   "settings.notifyAlmost": "即将用完（剩余不足 10%）",
   "settings.notifyClose": "余量紧张",
   "settings.notifyRunout": "将会用完",
+  "settings.burnAlert": "消耗过快",
+  "settings.burnAlertTip": "每周或更长周期的额度上涨得这么快时提醒。比按进度推算更早发现多代理并发的消耗。",
+  "settings.alertOff": "关闭",
+  "settings.burn10": "30 分钟内用掉周额度的 10%",
+  "settings.burn15": "30 分钟内 15%",
+  "settings.burn25": "30 分钟内 25%",
+  "settings.spendAlert": "今日花费",
+  "settings.spendAlertTip": "根据本机日志统计的今日全部工具花费。包月套餐下这是按 API 价格折算的价值，不是实际扣费。",
 
   "settings.network": "网络",
   "settings.useProxy": "使用代理",
@@ -511,7 +527,7 @@ const zh: Dict = {
 
   "settings.apiKeys": "API 密钥",
   "settings.apiKeysNote":
-    "只存在这台电脑上（%APPDATA%\\Pane）。留空再保存即可删除。",
+    "只存在这台电脑上。留空再保存即可删除。",
   "settings.save": "保存",
   "settings.keyPlaceholder": "API 密钥",
   "settings.keyPhMinimax": "API 密钥（可从 CLI 自动读取）",
@@ -537,7 +553,7 @@ const zh: Dict = {
 
   "settings.onenewapi": "One/New API 站点",
   "settings.onenewapiNote":
-    "注册兼容 OneAPI / NewAPI 的站点。密钥只保存在这台电脑（%APPDATA%\\Pane\\onenewapi.json），并只发送到该站点。空站点留在这里；添加密钥后才会出现卡片。",
+    "注册兼容 OneAPI / NewAPI 的站点。密钥只保存在这台电脑（应用设置文件夹中的 onenewapi.json），并只发送到该站点。空站点留在这里；添加密钥后才会出现卡片。",
   "settings.onenewapiFamily": "显示 One/New API 卡片",
   "settings.onenewapiFamilyTip":
     "一次关掉所有密钥卡片。自定义里的逐密钥开关会保留。",
@@ -842,11 +858,19 @@ const ru: Dict = {
 
   "settings.notifications": "Уведомления",
   "settings.notifyNote":
-    "Всплывающие уведомления Windows, когда недельное или месячное окно квоты сбрасывается или квота ухудшается — один раз на показатель за период сброса.",
+    "Системные уведомления, когда недельное или месячное окно квоты сбрасывается, квота ухудшается, длинный лимит расходуется необычно быстро или дневной расход превышает ваш порог. Каждое срабатывает один раз и затем взводится снова.",
   "settings.notifyReset": "Сброс недельного лимита (окно снова 100%)",
   "settings.notifyAlmost": "Почти кончилось (осталось <10%)",
   "settings.notifyClose": "Запас на исходе",
   "settings.notifyRunout": "Кончится до сброса",
+  "settings.burnAlert": "Быстрый расход",
+  "settings.burnAlertTip": "Недельный или более длинный лимит растёт с такой скоростью. Ловит параллельный запуск агентов намного раньше, чем прогноз по темпу.",
+  "settings.alertOff": "Выкл.",
+  "settings.burn10": "10% недельного лимита за 30 мин",
+  "settings.burn15": "15% за 30 мин",
+  "settings.burn25": "25% за 30 мин",
+  "settings.spendAlert": "Расход за день",
+  "settings.spendAlertTip": "Сумма за сегодня по всем инструментам из локальных логов. На тарифе с фиксированной ценой это эквивалент по ценам API, а не списание.",
 
   "settings.network": "Сеть",
   "settings.useProxy": "Использовать прокси",
@@ -856,7 +880,7 @@ const ru: Dict = {
 
   "settings.apiKeys": "Ключи API",
   "settings.apiKeysNote":
-    "Хранятся только на этом ПК (%APPDATA%\\Pane). Оставьте пустым и сохраните, чтобы удалить.",
+    "Хранятся только на этом компьютере. Оставьте пустым и сохраните, чтобы удалить.",
   "settings.save": "Сохранить",
   "settings.keyPlaceholder": "Ключ API",
   "settings.keyPhMinimax": "Ключ API (можно взять из CLI)",
@@ -962,7 +986,7 @@ const ru: Dict = {
   "spend.title": "Всего потрачено",
   "spend.scanning": "Сканирование журналов сессий…",
   "spend.emptyFirst":
-    "Пока нет данных о тратах — появятся, когда Claude Code, Codex или другой CLI запишет использование на этом ПК.",
+    "Пока нет данных о тратах — появятся, когда Claude Code, Codex или другой CLI запишет использование на этом компьютере.",
   "spend.emptyPeriod": "За этот период трат нет.",
   "spend.emptyPeriodTip": "За этот период траты не записаны.",
   "spend.info":
@@ -1038,7 +1062,7 @@ const ru: Dict = {
 
   "welcome.title": "Добро пожаловать 👋",
   "welcome.body":
-    "Настроены инструменты ИИ, найденные на этом ПК. Карточки, звёзды трея и скрытые строки — в «Настройка».",
+    "Настроены инструменты ИИ, найденные на этом компьютере. Карточки, звёзды трея и скрытые строки — в «Настройка».",
   "welcome.open": "Открыть настройку",
   "welcome.dismiss": "Закрыть",
 

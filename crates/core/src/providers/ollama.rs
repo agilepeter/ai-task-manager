@@ -36,7 +36,7 @@ async fn fetch() -> Result<Snapshot, String> {
             return Ok(Snapshot::no_credentials(
                 ID,
                 NAME,
-                "Ollama isn't running on this PC (nothing on port 11434).",
+                "Ollama isn't running on this computer (nothing on port 11434).",
             ));
         }
     };

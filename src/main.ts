@@ -202,6 +202,10 @@ interface Config {
   notifyCuttingClose: boolean;
   notifyWillRunOut: boolean;
   notifyReset: boolean;
+  /** Points of a weekly-or-longer quota inside 30 minutes; 0 = off. */
+  burnAlertPoints: number;
+  /** Dollars in one local day; 0 = off. */
+  dailySpendAlert: number;
   spendTab: SpendTab;
   spendMetric: "cost" | "tokens" | "mtok";
   showUsed: boolean;
@@ -236,6 +240,8 @@ const FRONTEND_CONFIG_KEYS = [
   "notifyCuttingClose",
   "notifyWillRunOut",
   "notifyReset",
+  "burnAlertPoints",
+  "dailySpendAlert",
   "spendTab",
   "spendMetric",
   "showUsed",
@@ -425,6 +431,8 @@ let config: Config = {
   notifyCuttingClose: false,
   notifyWillRunOut: false,
   notifyReset: false,
+  burnAlertPoints: 15,
+  dailySpendAlert: 0,
   spendTab: "today",
   spendMetric: "cost",
   showUsed: false,
@@ -4810,6 +4818,19 @@ async function initSettings(): Promise<void> {
     void patchConfig({ timeFormat: timeFormat.value as Config["timeFormat"] }).then(renderAll);
   });
 
+  // Budget guard: numeric selects. An unlisted saved value (hand-edited
+  // config) keeps working; the select just shows blank for it.
+  for (const [sel, key] of [
+    ["#burn-alert", "burnAlertPoints"],
+    ["#spend-alert", "dailySpendAlert"],
+  ] as const) {
+    const el = document.querySelector<HTMLSelectElement>(sel)!;
+    el.value = String(config[key]);
+    el.addEventListener("change", () => {
+      void patchConfig({ [key]: Number(el.value) });
+    });
+  }
+
   const localeSel = document.querySelector<HTMLSelectElement>("#locale")!;
   localeSel.value = config.locale;
   localeSel.addEventListener("change", () => {
@@ -4952,6 +4973,8 @@ async function resetAllSettings(): Promise<void> {
     notifyCuttingClose: true,
     notifyWillRunOut: true,
     notifyReset: true,
+    burnAlertPoints: 15,
+    dailySpendAlert: 0,
     spendTab: "today",
     spendMetric: "cost",
     showUsed: false,
@@ -4996,6 +5019,8 @@ function syncSettingsControls(): void {
   setNum("#interval", String(config.refreshMinutes));
   setCheck("#pacing", config.pacingAlways);
   setSelect("#timeformat", config.timeFormat);
+  setSelect("#burn-alert", String(config.burnAlertPoints));
+  setSelect("#spend-alert", String(config.dailySpendAlert));
   setSelect("#locale", config.locale);
   setCheck("#notify-reset", config.notifyReset);
   setCheck("#notify-almost", config.notifyAlmostOut);
