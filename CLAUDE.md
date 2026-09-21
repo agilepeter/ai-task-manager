@@ -47,9 +47,11 @@ file under `src-tauri/src/providers/` and port it by hand.
   scheduling back into the frontend. Note `tauri dev` only watches `src-tauri/`: a change
   under `crates/` needs the app restarted by hand.
 - The HTTP user-agent is `ai-task-manager/<version>`: the same for every install, never an id.
-- **Self-update is off** (`UPDATES_ENABLED` in `src-tauri/src/lib.rs`). The
-  pubkey left in `tauri.conf.json` is upstream's. Never enable updates without
-  replacing both the endpoints and the pubkey with our own.
+- **Self-update is off** (`UPDATES_ENABLED` in `src-tauri/src/lib.rs`). The pubkey in
+  `tauri.conf.json` is now OURS (minisign `6CDFF96385CA8101`; private half in `~/.tauri/` and
+  repo secrets, never in the repo). The endpoints in `updater_endpoint_strings` are still
+  upstream's and must be replaced before it is ever enabled. `SHIPPING.md` lists what
+  distribution still needs.
 - **OS credential stores are read-only.** `read_os_credential` never writes.
   On macOS the Claude provider reads the Keychain and never refreshes the
   token, because a refresh rotates it and would sign Claude Code out.

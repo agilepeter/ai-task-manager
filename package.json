@@ -1,7 +1,7 @@
 {
-  "name": "pane",
+  "name": "ai-task-manager",
   "private": true,
-  "version": "0.4.52",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

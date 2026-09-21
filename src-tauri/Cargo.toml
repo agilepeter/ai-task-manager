@@ -1,6 +1,6 @@
 [package]
 name = "ai-task-manager"
-version = "0.4.52"
+version = "0.1.0"
 description = "AI subscription usage, limits and local AI inventory in the tray"
 authors = ["Peter Saddington", "jazii (upstream Pane)"]
 edition = "2021"
