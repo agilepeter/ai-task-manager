@@ -762,8 +762,13 @@ mod tests {
             let Ok(sid) = super::current_user_sid() else {
                 return false;
             };
+            // SDDL spells well-known accounts as aliases, not SIDs: the
+            // built-in Administrator (RID 500, which is what CI runners
+            // run as) prints as "LA", so its full SID never appears.
+            let user_ace = sddl.contains(&format!(";{sid})"))
+                || (sid.ends_with("-500") && sddl.contains(";LA)"));
             sddl.contains("D:P")
-                && sddl.contains(&sid)
+                && user_ace
                 && sddl.contains(";SY)")
                 && !sddl.contains(";WD)")
                 && !sddl.contains(";BU)")
