@@ -152,12 +152,14 @@ pub fn pct_left(cfg: &Value, name: &str, label: &str, left: f64) -> String {
 }
 
 /// Primary language 0x04 = Chinese (zh-CN, zh-TW, zh-HK, …).
+#[cfg(any(windows, test))]
 fn langid_is_zh(langid: u16) -> bool {
     const LANG_CHINESE: u16 = 0x04;
     langid & 0x03FF == LANG_CHINESE
 }
 
 /// Primary language 0x19 = Russian (ru-RU, ru-MD, …).
+#[cfg(any(windows, test))]
 fn langid_is_ru(langid: u16) -> bool {
     const LANG_RUSSIAN: u16 = 0x19;
     langid & 0x03FF == LANG_RUSSIAN

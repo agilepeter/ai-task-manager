@@ -239,12 +239,22 @@ mod tests {
 
     /// One-shot mock site: answers exactly `responses` requests (each
     /// fetch sends quota + plan concurrently, so a full round is two).
+    /// `responses` is `[quota reply, plan reply]`. The fetch fires both
+    /// requests concurrently, so replies are matched by URL path, never by
+    /// arrival order: arrival order is a race.
     fn serve(responses: Vec<(u16, String)>) -> String {
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let addr = format!("http://{}", server.server_addr());
         std::thread::spawn(move || {
-            for (status, body) in responses {
+            let mut replies = responses.into_iter();
+            let mut quota = replies.next();
+            let mut plan = replies.next();
+            while quota.is_some() || plan.is_some() {
                 let request = server.recv().unwrap();
+                let wants_plan = request.url().contains("/subscription/");
+                let reply = if wants_plan { plan.take().or_else(|| quota.take()) }
+                            else { quota.take().or_else(|| plan.take()) };
+                let (status, body) = reply.unwrap();
                 let response = tiny_http::Response::from_string(body).with_status_code(status);
                 let _ = request.respond(response);
             }

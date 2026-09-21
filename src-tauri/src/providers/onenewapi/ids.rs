@@ -18,6 +18,7 @@ pub fn new_id_avoiding(occupied: &HashSet<String>) -> Result<String, String> {
     Err("could not allocate a unique id".into())
 }
 
+#[cfg(windows)]
 fn fill_os_random(buf: &mut [u8]) -> Result<(), String> {
     if try_rtl_gen_random(buf) {
         return Ok(());
@@ -28,11 +29,23 @@ fn fill_os_random(buf: &mut [u8]) -> Result<(), String> {
     Err("OS RNG failed".into())
 }
 
+/// Unix: the kernel CSPRNG. `/dev/urandom` never blocks on macOS or on any
+/// Linux new enough to run this app.
+#[cfg(unix)]
+fn fill_os_random(buf: &mut [u8]) -> Result<(), String> {
+    use std::io::Read;
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(buf))
+        .map_err(|e| format!("OS RNG failed: {e}"))
+}
+
+#[cfg(windows)]
 #[link(name = "advapi32")]
 extern "system" {
     fn SystemFunction036(random_buffer: *mut u8, random_buffer_length: u32) -> u8;
 }
 
+#[cfg(windows)]
 fn try_rtl_gen_random(buf: &mut [u8]) -> bool {
     if buf.is_empty() {
         return true;
@@ -40,6 +53,7 @@ fn try_rtl_gen_random(buf: &mut [u8]) -> bool {
     unsafe { SystemFunction036(buf.as_mut_ptr(), buf.len() as u32) != 0 }
 }
 
+#[cfg(windows)]
 #[link(name = "bcrypt")]
 extern "system" {
     fn BCryptGenRandom(
@@ -50,6 +64,7 @@ extern "system" {
     ) -> i32;
 }
 
+#[cfg(windows)]
 fn try_bcrypt_gen_random(buf: &mut [u8]) -> bool {
     const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
     if buf.is_empty() {

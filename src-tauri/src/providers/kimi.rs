@@ -792,13 +792,15 @@ mod tests {
     fn cred_candidates_prefer_kimi_home_then_dot_dirs() {
         let kimi = PathBuf::from(r"D:\custom-kimi");
         let user = PathBuf::from(r"C:\Users\me");
-        let paths = cred_candidates(Some(kimi), Some(user));
+        let paths = cred_candidates(Some(kimi.clone()), Some(user.clone()));
+        // Built with `join` so the separators match the host platform.
+        let tail = |base: PathBuf| base.join("credentials").join("kimi-code.json");
         assert_eq!(
             paths,
             [
-                PathBuf::from(r"D:\custom-kimi\credentials\kimi-code.json"),
-                PathBuf::from(r"C:\Users\me\.kimi-code\credentials\kimi-code.json"),
-                PathBuf::from(r"C:\Users\me\.kimi\credentials\kimi-code.json"),
+                tail(kimi),
+                tail(user.join(".kimi-code")),
+                tail(user.join(".kimi")),
             ]
         );
     }

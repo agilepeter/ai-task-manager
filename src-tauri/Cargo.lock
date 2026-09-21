@@ -2761,7 +2761,6 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dirs 6.0.0",
- "getrandom 0.2.17",
  "md-5",
  "prost",
  "regex",
