@@ -64,6 +64,11 @@ and computed Opportunities). Usage stays the default view.
   a real client name in code, tests, fixtures or commit messages**: use "Acme"/"Client A".
   The detail page redraws on data refresh; `render(true)` reads the rules editor back first
   so typing survives, but click handlers must call plain `render()`.
+- **Usage coaching** (`crates/core/src/coaching.rs`): Opportunities from how the tools were
+  used (top-heavy model mix, long-lived costly sessions, a large unsorted share). Same
+  contract as the setup ones: computed, states its own numbers, absent when there is nothing
+  to say. Thresholds are named constants. A model whose tier the name does not reveal is left
+  out of the mix, never guessed.
 - **Forecast** (`crates/core/src/forecast.rs`): "when does this run out at the rate I have
   been going?" Recent rate from the history store (lookback = a seventh of the period, 1 h to
   24 h, readings before a reset ignored), period average only when history is too thin, and

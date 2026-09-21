@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, clients, forecast, history, httpapi, i18n, inventory, ledger, pricing, providers, spend};
+pub(crate) use aitm_core::{alerts, clients, coaching, forecast, history, httpapi, i18n, inventory, ledger, pricing, providers, spend};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -164,9 +164,19 @@ fn system_ui_locale() -> &'static str {
 /// only; see `inventory.rs` for what is deliberately never read out.
 #[tauri::command]
 async fn get_inventory() -> Result<inventory::Inventory, String> {
-    tauri::async_runtime::spawn_blocking(inventory::scan)
-        .await
-        .map_err(|e| format!("inventory scan: {e}"))
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut inv = inventory::scan();
+        // Usage-based opportunities sit with the setup ones. The spend scan
+        // is cached per file, so this is quick after the first refresh.
+        let spend = spend::collect(None);
+        let claude = spend.iter().find(|p| p.id == "claude");
+        inv.opportunities.extend(coaching::opportunities(claude, &spend::claude_sessions(None, None, 500)));
+        // Gaps first, then things to learn, each in the order found.
+        inv.opportunities.sort_by_key(|o| o.kind != "tighten");
+        inv
+    })
+    .await
+    .map_err(|e| format!("inventory scan: {e}"))
 }
 
 #[derive(serde::Serialize)]
