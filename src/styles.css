@@ -3333,3 +3333,49 @@ body.wide #drawer .panel-head {
 .provider.dt-selected .card-panel {
   box-shadow: inset 0 0 0 1px var(--viz-1);
 }
+
+/* ------------------------------------------------- card expander extras */
+.dt-mini {
+  padding-top: 4px;
+}
+.dt-spark {
+  display: block;
+  width: 100%;
+  height: 36px;
+}
+/* The sparkline stretches to the card's width, so its stroke must not. */
+.dt-spark-line {
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.dt-mini-legend {
+  margin: 4px 0 0;
+  font-size: 10.5px;
+}
+.dt-mini-span {
+  color: var(--muted-foreground);
+}
+.dt-mini-note {
+  margin: 2px 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.dt-mini-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.dt-mini-foot span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dt-mini-open {
+  margin-left: 0;
+  flex: none;
+}

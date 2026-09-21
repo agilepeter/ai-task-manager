@@ -133,6 +133,14 @@ function projectLabel(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
+/// Readings inside the window, plus the last one before it as the value the
+/// window opens with. Older readings would all pile up on the left border.
+function clip(points: Series["points"], t0: number): Series["points"] {
+  const first = points.findIndex((p) => p.at >= t0);
+  if (first === -1) return points.slice(-1);
+  return points.slice(Math.max(first - 1, 0));
+}
+
 function select(id: string, options: [string, string][], current: string): string {
   return `<select id="${id}">${options
     .map(([v, l]) => `<option value="${esc(v)}"${v === current ? " selected" : ""}>${esc(l)}</option>`)
@@ -158,6 +166,7 @@ function lineChart(all: Series[], width: number): string {
   const pad = { l: 30, r: 10, t: 8, b: 20 };
   const t1 = Date.now();
   const t0 = t1 - hours * 3_600_000;
+  for (const s of shown) s.points = clip(s.points, t0);
   const x = (at: number) => pad.l + ((Math.max(at, t0) - t0) / (t1 - t0)) * (W - pad.l - pad.r);
   const y = (used: number) => pad.t + (1 - used / 100) * (H - pad.t - pad.b);
 
@@ -321,6 +330,83 @@ function spendSection(sp: ProviderSpend | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
+// Card expander: the short version, inline under an expanded card
+// ---------------------------------------------------------------------------
+
+const SPARK_HOURS = 24;
+const sparkCache = new Map<string, { at: number; series: Series[] }>();
+const sparkLoading = new Set<string>();
+
+function miniHtml(id: string): string {
+  const cached = sparkCache.get(id);
+  // Copies: clipping below must not eat into the cached readings.
+  const series = (cached?.series ?? [])
+    .slice(0, SERIES_VARS.length)
+    .map((s) => ({ ...s }))
+    .filter((s) => s.points.length > 1);
+  let chart: string;
+  if (!cached) {
+    chart = `<p class="dt-mini-note">Loading the last 24 hours…</p>`;
+  } else if (series.length === 0) {
+    chart = `<p class="dt-mini-note">The 24-hour trend appears once a few readings are saved.</p>`;
+  } else {
+    const W = 300;
+    const H = 36;
+    const t1 = Date.now();
+    const t0 = t1 - SPARK_HOURS * 3_600_000;
+    for (const s of series) s.points = clip(s.points, t0);
+    const x = (at: number) => ((Math.max(at, t0) - t0) / (t1 - t0)) * W;
+    const y = (used: number) => 2 + (1 - used / 100) * (H - 4);
+    const paths = series
+      .map((s, slot) => {
+        const d = s.points.map((p, i) => `${i ? "L" : "M"}${x(p.at).toFixed(1)} ${y(p.used).toFixed(1)}`).join("");
+        return `<path class="dt-line dt-spark-line" style="stroke:var(${SERIES_VARS[slot]})" d="${d}"/>`;
+      })
+      .join("");
+    // Identity is never colour alone: each line is named with its value.
+    const keys = series
+      .map((s, slot) => {
+        const last = s.points[s.points.length - 1];
+        return `<span class="dt-key"><i style="background:var(${SERIES_VARS[slot]})"></i>${esc(s.metric)} <b>${last.used.toFixed(0)}%</b></span>`;
+      })
+      .join("");
+    chart = `<svg class="dt-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Percent used over the last 24 hours">${paths}</svg>
+      <div class="dt-legend dt-mini-legend"><span class="dt-mini-span">24h, % used</span>${keys}</div>`;
+  }
+  const sp = source?.spend(id);
+  const top = sp ? [...sp.today.models].sort((a, b) => b.cost - a.cost)[0] : undefined;
+  const facts =
+    sp && sp.today.cost > 0.004
+      ? `<span>Today ${money(sp.today.cost)}${top ? ` · mostly ${esc(top.model)}` : ""}</span>`
+      : `<span></span>`;
+  return `${chart}<div class="dt-mini-foot">${facts}<button class="inv-learn dt-mini-open" data-detail="${esc(id)}">Details</button></div>`;
+}
+
+async function loadSpark(id: string): Promise<void> {
+  if (sparkLoading.has(id)) return;
+  sparkLoading.add(id);
+  try {
+    const series = await invoke<Series[]>("get_history", { providerId: id, hours: SPARK_HOURS });
+    sparkCache.set(id, { at: Date.now(), series });
+  } catch {
+    sparkCache.set(id, { at: Date.now(), series: [] });
+  }
+  sparkLoading.delete(id);
+  // Patch in place: a full re-render here would loop back into this load.
+  document.querySelectorAll<HTMLElement>("[data-mini]").forEach((el) => {
+    if (el.dataset.mini === id) el.innerHTML = miniHtml(id);
+  });
+}
+
+/// The inline extras for an expanded card. Synchronous for the card
+/// renderer: it draws from cache and refreshes the cache in the background.
+export function cardExtras(id: string): string {
+  const cached = sparkCache.get(id);
+  if (!cached || Date.now() - cached.at > 5 * 60_000) void loadSpark(id);
+  return `<div class="dt-mini" data-mini="${esc(id)}">${miniHtml(id)}</div>`;
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -465,6 +551,11 @@ export function setupDetail(src: DetailSource): void {
   source = src;
   // A card's name is the way in. Keyboard users get the same through Enter.
   document.querySelector("#providers")?.addEventListener("click", (e) => {
+    const more = (e.target as HTMLElement).closest<HTMLElement>("[data-detail]");
+    if (more?.dataset.detail) {
+      open(more.dataset.detail);
+      return;
+    }
     const name = (e.target as HTMLElement).closest<HTMLElement>(".provider-name");
     const card = name?.closest<HTMLElement>("[data-provider]");
     if (card?.dataset.provider) open(card.dataset.provider);

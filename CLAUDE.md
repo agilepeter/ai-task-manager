@@ -58,6 +58,10 @@ and computed Opportunities). Usage stays the default view.
   the `--viz-*` colours were validated per theme, so re-run the validator if they change.
   Project = the folder Claude Code was started in, matched against paths it still knows
   (folder names are lossy and cannot be decoded).
+- **Card expander extras** (`cardExtras` in `src/detail.ts`): every live card's chevron opens
+  a 24-hour sparkline, today's spend with the leading model, and a Details button. The card
+  renderer is synchronous, so extras draw from a cache and patch themselves in place when the
+  background load lands. Never trigger a full re-render from that load: it would loop.
 - **Wide mode** (`wideMode`, the Wide / Narrow button): the SAME window grown from 380 to
   760, list left, detail right. Never a second window. `set_wide` keeps the right edge fixed
   (the tray side). Full-window panels keep to the left column, and a closed Settings parks

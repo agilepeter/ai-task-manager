@@ -1,5 +1,5 @@
 import { setupViews } from "./inventory";
-import { applySavedWide, refreshDetail, setupDetail } from "./detail";
+import { applySavedWide, cardExtras, refreshDetail, setupDetail } from "./detail";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -1363,11 +1363,13 @@ function renderCard(s: Snapshot): string {
 
       body = always.map((k) => renderItem(s, spend, k)).join("");
       const onDemandHtml = onDemand.map((k) => renderItem(s, spend, k)).join("");
-      if (onDemandHtml.trim()) {
+      // A live card always has something to expand into: the 24-hour trend,
+      // today's spend and the way into its detail page.
+      if (onDemandHtml.trim() || s.status === "ok") {
         const anim = L.expanded && animateExpandId === s.id ? " anim" : "";
         caret = `
         <button class="card-caret${L.expanded ? " expanded" : ""}" data-caret="${escapeHtml(s.id)}" title="${L.expanded ? t("card.showLess") : t("card.showMore")}"><svg class="caret-svg" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}</div>` : ""}`;
+        ${L.expanded ? `<div class="on-demand${anim}">${onDemandHtml}${s.status === "ok" ? cardExtras(s.id) : ""}</div>` : ""}`;
       }
     }
   } else {
