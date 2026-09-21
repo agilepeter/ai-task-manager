@@ -499,6 +499,21 @@ fn claude_dir() -> PathBuf {
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".claude"))
 }
 
+/// Project paths Claude Code has on record (`~/.claude.json`), whether or not
+/// they still exist. Used to turn a log folder name back into a path.
+pub fn known_project_paths() -> Vec<String> {
+    let home = dirs::home_dir().unwrap_or_default();
+    [claude_dir().join(".claude.json"), home.join(".claude.json")]
+        .into_iter()
+        .find_map(|p| read_json(&p))
+        .and_then(|doc| {
+            doc.get("projects")
+                .and_then(Value::as_object)
+                .map(|projects| projects.keys().cloned().collect())
+        })
+        .unwrap_or_default()
+}
+
 /// Scans this machine. Missing files are normal and simply contribute nothing.
 pub fn scan() -> Inventory {
     let home = dirs::home_dir().unwrap_or_default();

@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, httpapi, i18n, inventory, pricing, providers, spend};
+pub(crate) use aitm_core::{alerts, history, httpapi, i18n, inventory, pricing, providers, spend};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -164,6 +164,15 @@ async fn get_inventory() -> Result<inventory::Inventory, String> {
     tauri::async_runtime::spawn_blocking(inventory::scan)
         .await
         .map_err(|e| format!("inventory scan: {e}"))
+}
+
+/// Limit readings for one card over the last `hours`, for the detail view.
+#[tauri::command]
+async fn get_history(provider_id: String, hours: u32) -> Result<Vec<history::Series>, String> {
+    let since = chrono::Utc::now().timestamp_millis() - i64::from(hours.min(24 * 90)) * 3_600_000;
+    tauri::async_runtime::spawn_blocking(move || history::series(&provider_id, since))
+        .await
+        .map_err(|e| format!("history: {e}"))
 }
 
 #[tauri::command]
@@ -2073,6 +2082,9 @@ async fn fetch_usage(
     all.retain(|snapshot| !card_is_disabled(&snapshot.id, &publish_disabled));
     httpapi::publish(&all);
 
+    // Local history for the detail view's charts. Never fails a refresh.
+    history::record(&all);
+
     for alert in alerts::evaluate(&all, &cfg) {
         use tauri_plugin_notification::NotificationExt;
         let _ = app
@@ -2970,6 +2982,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             fetch_usage,
             get_inventory,
+            get_history,
             cached_usage,
             fetch_spend,
             set_api_key,

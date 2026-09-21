@@ -52,6 +52,22 @@ pub struct ProviderSpend {
     /// under-report and the ⚠ says so.
     pub unpriced: u64,
     pub unpriced_models: Vec<String>,
+    /// Dollars per day, oldest first, indexed exactly like `trend`.
+    pub daily_cost: Vec<f64>,
+    /// Claude Code only: the same windows split by project folder, largest
+    /// 30-day cost first. Empty for every other provider.
+    pub projects: Vec<ProjectSpend>,
+}
+
+/// One project's share of a provider's spend.
+#[derive(Serialize, Clone)]
+pub struct ProjectSpend {
+    /// The project's path when Claude Code still knows it, else the folder
+    /// name it logs under.
+    pub project: String,
+    pub today: Window,
+    pub yesterday: Window,
+    pub last30: Window,
 }
 
 impl ProviderSpend {
@@ -515,6 +531,8 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
         trend: vec![0.0; TREND_DAYS],
         unpriced: data.unpriced.values().sum(),
         unpriced_models,
+        daily_cost: vec![0.0; TREND_DAYS],
+        projects: Vec::new(),
     };
     let mut models: [HashMap<String, (f64, f64)>; 3] =
         [HashMap::new(), HashMap::new(), HashMap::new()];
@@ -538,6 +556,7 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
             let idx = (day - (today - TREND_DAYS as i32 + 1)) as usize;
             if idx < TREND_DAYS {
                 sp.trend[idx] += tokens;
+                sp.daily_cost[idx] += cost;
             }
         }
     }
@@ -1591,6 +1610,65 @@ fn split_kimi_routed(all: &mut FileData) -> FileData {
 /// (ANTHROPIC_BASE_URL); those sessions log MiniMax models into the same
 /// files. That usage is split out and returned separately — it belongs on
 /// the MiniMax card, not Claude's.
+/// Claude Code names a project's log folder after its path with every
+/// non-alphanumeric character replaced by '-'. That is lossy, so a folder
+/// name cannot be decoded, only matched against paths that are still known.
+fn encode_project_path(path: &str) -> String {
+    path.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+}
+
+fn resolve_project(dir_name: &str, known_paths: &[String]) -> String {
+    known_paths
+        .iter()
+        .find(|p| encode_project_path(p) == dir_name)
+        .cloned()
+        .unwrap_or_else(|| dir_name.to_string())
+}
+
+/// The project folder a log file belongs to: the first component under the
+/// `projects` root. None for a file sitting directly in the root.
+fn project_of(root: &Path, file: &Path) -> Option<String> {
+    let mut parts = file.strip_prefix(root).ok()?.components();
+    let first = parts.next()?;
+    parts.next()?; // the file itself, or deeper: either way `first` is a folder
+    Some(first.as_os_str().to_string_lossy().into_owned())
+}
+
+/// Per-project windows, cut exactly like a card's. Projects with no spend in
+/// the last 30 days are left out; the rest sort by 30-day cost.
+fn project_spends(per_project: Vec<(String, FileData)>, today: i32) -> Vec<ProjectSpend> {
+    let mut out: Vec<ProjectSpend> = per_project
+        .into_iter()
+        .filter_map(|(project, data)| {
+            let mut windows = [Window::default(), Window::default(), Window::default()];
+            for ((day, _model), (cost, tokens)) in data.days {
+                let bump = |w: &mut Window| {
+                    w.cost += cost;
+                    w.tokens += tokens;
+                };
+                if day == today {
+                    bump(&mut windows[0]);
+                }
+                if day == today - 1 {
+                    bump(&mut windows[1]);
+                }
+                if day > today - TREND_DAYS as i32 && day <= today {
+                    bump(&mut windows[2]);
+                }
+            }
+            let [today_w, yesterday, last30] = windows;
+            (last30.cost > 0.004 || last30.tokens > 0.0).then_some(ProjectSpend {
+                project,
+                today: today_w,
+                yesterday,
+                last30,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| b.last30.cost.total_cmp(&a.last30.cost).then_with(|| a.project.cmp(&b.project)));
+    out
+}
+
 fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData, FileData) {
     let root = std::env::var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
@@ -1600,8 +1678,13 @@ fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData, FileData) {
     let mut files = Vec::new();
     recent_jsonl_files(&root, &mut files);
     let mut all = FileData::default();
+    let mut by_project: HashMap<String, FileData> = HashMap::new();
     for file in files {
-        merge_data(&mut all, claude_file(&file));
+        let data = claude_file(&file);
+        if let Some(project) = project_of(&root, &file) {
+            merge_data(by_project.entry(project).or_default(), data.clone());
+        }
+        merge_data(&mut all, data);
     }
     // Usage from other scanners that belongs on this card (pi sessions)
     // driving a Claude account) joins before the splits below, so it gets
@@ -1615,7 +1698,21 @@ fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData, FileData) {
     // Kimi slugs likewise mean Moonshot billed the session (Anthropic-
     // compatible endpoint or a router) — Kimi's card owns those dollars.
     let kimi_routed = split_kimi_routed(&mut all);
-    (build_spend("claude", "Claude", all), minimax, qwen_via_aihubmix, kimi_routed)
+    let mut spend = build_spend("claude", "Claude", all);
+    // Projects get the same splits as the card, so their totals add up to
+    // it: rows routed to another card's backend are not Claude spend.
+    let known = crate::inventory::known_project_paths();
+    let per_project = by_project
+        .into_iter()
+        .map(|(dir, mut data)| {
+            let _ = split_models(&mut data, "MiniMax");
+            let _ = split_models(&mut data, "qwen");
+            let _ = split_kimi_routed(&mut data);
+            (resolve_project(&dir, &known), data)
+        })
+        .collect();
+    spend.projects = project_spends(per_project, Local::now().date_naive().num_days_from_ce());
+    (spend, minimax, qwen_via_aihubmix, kimi_routed)
 }
 
 /// Spend for each discovered extra Claude account, scanned from that
@@ -2995,6 +3092,69 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn project_dirs_resolve_to_known_paths_and_fall_back_to_the_folder_name() {
+        let known = vec!["/Users/me/work/acme-site".to_string(), "/Users/me/.dotfiles".to_string()];
+        // Claude Code replaces every non-alphanumeric character with '-'.
+        assert_eq!(encode_project_path("/Users/me/.dotfiles"), "-Users-me--dotfiles");
+        assert_eq!(resolve_project("-Users-me-work-acme-site", &known), "/Users/me/work/acme-site");
+        assert_eq!(resolve_project("-Users-me--dotfiles", &known), "/Users/me/.dotfiles");
+        assert_eq!(resolve_project("-Users-me-gone", &known), "-Users-me-gone");
+    }
+
+    #[test]
+    fn project_of_is_the_first_folder_under_the_projects_root() {
+        let root = Path::new("/home/me/.claude/projects");
+        assert_eq!(
+            project_of(root, &root.join("-work-acme").join("abc.jsonl")).as_deref(),
+            Some("-work-acme")
+        );
+        assert_eq!(
+            project_of(root, &root.join("-work-acme").join("sub").join("abc.jsonl")).as_deref(),
+            Some("-work-acme"),
+            "sidechain files in a subfolder still belong to the project"
+        );
+        assert_eq!(project_of(root, &root.join("loose.jsonl")), None);
+        assert_eq!(project_of(root, Path::new("/elsewhere/x.jsonl")), None);
+    }
+
+    #[test]
+    fn project_spend_windows_match_the_card_and_sort_by_thirty_day_cost() {
+        let today = 800_000;
+        let mut small = FileData::default();
+        small.days.insert((today, "opus".into()), (2.0, 100.0));
+        let mut big = FileData::default();
+        big.days.insert((today, "opus".into()), (5.0, 10.0));
+        big.days.insert((today - 1, "sonnet".into()), (7.0, 20.0));
+        big.days.insert((today - 10, "opus".into()), (30.0, 30.0));
+        big.days.insert((today - 45, "opus".into()), (999.0, 999.0)); // outside 30 days
+        let got = project_spends(
+            vec![("small".into(), small), ("big".into(), big), ("empty".into(), FileData::default())],
+            today,
+        );
+        assert_eq!(got.len(), 2, "a project with no spend in range is left out");
+        assert_eq!(got[0].project, "big");
+        assert_eq!((got[0].today.cost, got[0].yesterday.cost, got[0].last30.cost), (5.0, 7.0, 42.0));
+        assert_eq!(got[0].last30.tokens, 60.0);
+        assert_eq!(got[1].project, "small");
+        assert_eq!(got[1].last30.cost, 2.0);
+    }
+
+    #[test]
+    fn daily_cost_lines_up_with_the_token_trend() {
+        let today = Local::now().date_naive().num_days_from_ce();
+        let mut data = FileData::default();
+        data.days.insert((today, "opus".into()), (3.0, 10.0));
+        data.days.insert((today, "sonnet".into()), (1.5, 5.0));
+        data.days.insert((today - 2, "opus".into()), (8.0, 40.0));
+        let sp = build_spend("claude", "Claude", data);
+        assert_eq!(sp.daily_cost.len(), TREND_DAYS);
+        assert_eq!(sp.daily_cost[TREND_DAYS - 1], 4.5, "last slot is today");
+        assert_eq!(sp.daily_cost[TREND_DAYS - 3], 8.0);
+        assert_eq!(sp.trend[TREND_DAYS - 3], 40.0, "same indexing as the token trend");
+        assert!(sp.projects.is_empty(), "only the Claude scan attaches projects");
+    }
     use super::*;
     use serde_json::json;
 
