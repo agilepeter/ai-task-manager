@@ -3879,3 +3879,187 @@ body.wide:not(.audit-open) #audit {
   color: var(--foreground);
   box-shadow: inset 0 0 0 1px var(--viz-1);
 }
+
+/* -------------------------------------------------------------------- about */
+#about {
+  position: fixed;
+  inset: 0;
+  z-index: 53;
+  background: var(--background);
+  padding: 56px 14px 48px;
+  overflow-y: auto;
+  transform: translateX(103%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  scrollbar-width: none;
+}
+#about::-webkit-scrollbar {
+  display: none;
+}
+body.about-open #about {
+  transform: none;
+}
+body.reduce-anim #about {
+  transition: none;
+}
+body.wide #about,
+body.wide #about .panel-head {
+  right: auto;
+  width: 380px;
+}
+body.wide:not(.about-open) #about {
+  transform: translateX(-103%);
+}
+#build-info {
+  cursor: pointer;
+}
+.ab-hero {
+  text-align: center;
+  padding-top: 16px;
+}
+.ab-hero h2 {
+  margin: 6px 0 2px;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+.ab-tagline {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  color: var(--secondary-foreground);
+}
+.ab-maker {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.ab-maker .lg-link {
+  font-size: 12px;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ab-bot-btn {
+  all: unset;
+  cursor: pointer;
+  display: inline-block;
+  border-radius: 24px;
+}
+.ab-bot-btn:focus-visible {
+  outline: 1px solid var(--chart-blue);
+  outline-offset: 4px;
+}
+.ab-bot {
+  width: 112px;
+  height: 112px;
+  display: block;
+}
+.ab-antenna {
+  fill: #00c8ff;
+}
+.ab-antenna-glow {
+  fill: #5cc8ff;
+  opacity: 0.25;
+  transform-origin: 120px 34px;
+  animation: ab-pulse 2.6s ease-in-out infinite;
+}
+.ab-eyes {
+  transform-origin: 120px 117px;
+  animation: ab-blink 5.2s infinite;
+}
+@keyframes ab-pulse {
+  50% { opacity: 0.55; transform: scale(1.25); }
+}
+@keyframes ab-blink {
+  0%, 94%, 100% { transform: scaleY(1); }
+  96.5% { transform: scaleY(0.1); }
+}
+.ab-hop .ab-bot-body {
+  animation: ab-hop 0.45s ease-out;
+}
+.ab-dance .ab-bot-body {
+  transform-origin: 120px 200px;
+  animation: ab-dance 1.4s ease-in-out;
+}
+@keyframes ab-hop {
+  40% { transform: translateY(-14px); }
+  70% { transform: translateY(2px); }
+}
+@keyframes ab-dance {
+  15% { transform: rotate(-12deg) translateY(-8px); }
+  35% { transform: rotate(12deg) translateY(0); }
+  55% { transform: rotate(-12deg) translateY(-8px); }
+  75% { transform: rotate(12deg) translateY(0); }
+}
+.ab-bubble {
+  display: inline-block;
+  margin: 2px 0 4px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--muted);
+  color: var(--foreground);
+}
+.ab-bubble[hidden] {
+  display: none;
+}
+.ab-link {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 0;
+  cursor: pointer;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--muted-foreground);
+}
+.dt-section h3 + .ab-link {
+  border-top: none;
+}
+:root[data-theme="light"] .ab-link {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+.ab-link:hover {
+  color: var(--foreground);
+}
+.ab-link:focus-visible {
+  outline: 1px solid var(--chart-blue);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.ab-link-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ab-link-main b {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.ab-link-main span {
+  font-size: 11px;
+}
+.ab-credit {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--secondary-foreground);
+}
+.ab-credit .lg-link {
+  font-size: 11.5px;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* Motion is decoration here: honour the OS setting and the app's own. */
+@media (prefers-reduced-motion: reduce) {
+  .ab-antenna-glow, .ab-eyes, .ab-hop .ab-bot-body, .ab-dance .ab-bot-body { animation: none; }
+}
+body.reduce-anim .ab-antenna-glow,
+body.reduce-anim .ab-eyes,
+body.reduce-anim .ab-hop .ab-bot-body,
+body.reduce-anim .ab-dance .ab-bot-body {
+  animation: none;
+}

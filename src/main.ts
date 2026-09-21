@@ -1,5 +1,6 @@
 import { setupViews, showView } from "./inventory";
 import { maybeFirstRunAudit, setupAudit } from "./audit";
+import { setupAbout } from "./about";
 import { setupLedger } from "./ledger";
 import { applySavedWide, cardExtras, refreshDetail, setupDetail } from "./detail";
 import { invoke } from "@tauri-apps/api/core";
@@ -5117,6 +5118,7 @@ window.addEventListener("DOMContentLoaded", () => {
     trustLookup: () => config.trustLookup === true,
     setTrustLookup: (trustLookup) => patchConfig({ trustLookup }),
   });
+  setupAbout();
   setupAudit({
     seen: () => config.auditSeen === true,
     markSeen: () => void patchConfig({ auditSeen: true }),

@@ -86,7 +86,7 @@
 
         <footer>
           <span id="status">Starting…</span>
-          <span id="build-info"></span>
+          <span id="build-info" role="button" tabindex="0" title="About this app"></span>
         </footer>
       </div>
 
@@ -102,6 +102,7 @@
             <button id="wide-btn" title="Wide view: list and details side by side">&#8596;</button>
             <button id="customize-btn" title="Customize" data-i18n-title="sidebar.customize">&#9776;</button>
             <button id="settings-btn" title="Settings" data-i18n-title="sidebar.settings">&#9881;</button>
+            <button id="about-btn" title="About this app">&#9432;</button>
           </div>
         </aside>
       </div>
@@ -110,6 +111,15 @@
     <!-- Customize: full-window panel sliding in from the left. -->
     <aside id="drawer" aria-label="Customize" data-i18n-aria="sidebar.customize">
       <div id="drawer-body"></div>
+    </aside>
+
+    <!-- About: the maker, where to learn more, and the projects this stands on. -->
+    <aside id="about" aria-label="About">
+      <div class="panel-head glass-bar">
+        <button class="mini-btn" id="about-close">&#8592; Done</button>
+        <span class="panel-title">About</span>
+      </div>
+      <div id="about-body"></div>
     </aside>
 
     <!-- Audit: a scored read of the whole setup. Opens itself on first run. -->
