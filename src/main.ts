@@ -1,4 +1,5 @@
-import { setupViews } from "./inventory";
+import { setupViews, showView } from "./inventory";
+import { maybeFirstRunAudit, setupAudit } from "./audit";
 import { setupLedger } from "./ledger";
 import { applySavedWide, cardExtras, refreshDetail, setupDetail } from "./detail";
 import { invoke } from "@tauri-apps/api/core";
@@ -220,6 +221,8 @@ interface Config {
   weeklyDigest: string;
   /** Days a still-used session may stay open before one weekly nudge; 0 = off. */
   sessionNudgeDays: number;
+  /** False until the first-run audit has been shown and closed. */
+  auditSeen: boolean;
   spendTab: SpendTab;
   spendMetric: "cost" | "tokens" | "mtok";
   showUsed: boolean;
@@ -262,6 +265,7 @@ const FRONTEND_CONFIG_KEYS = [
   "apiFeeds",
   "weeklyDigest",
   "sessionNudgeDays",
+  "auditSeen",
   "spendTab",
   "spendMetric",
   "showUsed",
@@ -459,6 +463,7 @@ let config: Config = {
   apiFeeds: false,
   weeklyDigest: "mon",
   sessionNudgeDays: 7,
+  auditSeen: false,
   spendTab: "today",
   spendMetric: "cost",
   showUsed: false,
@@ -5112,6 +5117,11 @@ window.addEventListener("DOMContentLoaded", () => {
     trustLookup: () => config.trustLookup === true,
     setTrustLookup: (trustLookup) => patchConfig({ trustLookup }),
   });
+  setupAudit({
+    seen: () => config.auditSeen === true,
+    markSeen: () => void patchConfig({ auditSeen: true }),
+    goTo: (view) => showView(view),
+  });
   setupLedger({
     usage30: () => Object.fromEntries(lastSpend.map((s) => [s.id, s.last30.cost])),
     tools: () =>
@@ -5448,6 +5458,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   void initSettings().then(() => {
     applySavedWide();
+    maybeFirstRunAudit();
     scheduleAutoRefresh();
     void paintCachedSnapshots();
     void refresh(true);

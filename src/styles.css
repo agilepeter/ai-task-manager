@@ -3762,3 +3762,120 @@ body.wide #ledger {
   border-radius: 2px;
   background: color-mix(in srgb, var(--viz-1) calc(var(--level) * 100%), var(--muted));
 }
+
+/* -------------------------------------------------------------------- audit */
+#audit {
+  position: fixed;
+  inset: 0;
+  z-index: 52;
+  background: var(--background);
+  padding: 56px 14px 48px;
+  overflow-y: auto;
+  transform: translateX(103%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  scrollbar-width: none;
+}
+#audit::-webkit-scrollbar {
+  display: none;
+}
+body.audit-open #audit {
+  transform: none;
+}
+body.reduce-anim #audit {
+  transition: none;
+}
+body.wide #audit {
+  right: auto;
+  width: 380px;
+}
+body.wide #audit .panel-head {
+  right: auto;
+  width: 380px;
+}
+body.wide:not(.audit-open) #audit {
+  transform: translateX(-103%);
+}
+.au-welcome {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.au-score {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.au-score b {
+  font-size: 34px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.au-score span {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.au-meter {
+  height: 6px;
+  margin: 10px 0 2px;
+  border-radius: 3px;
+  background: var(--muted);
+  overflow: hidden;
+}
+.au-meter span {
+  display: block;
+  height: 100%;
+  background: var(--viz-3);
+  border-radius: 3px;
+}
+.au-check {
+  padding: 9px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.dt-section h3 + .au-check {
+  border-top: none;
+}
+:root[data-theme="light"] .au-check {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+.au-check-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.au-status {
+  flex: none;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.au-pass .au-status {
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px var(--viz-3);
+}
+.au-attention .au-status {
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px #eab308;
+}
+.au-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.au-info .au-title {
+  font-weight: 500;
+}
+.au-detail {
+  margin: 4px 0 4px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+.au-consider .au-status {
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px var(--viz-1);
+}

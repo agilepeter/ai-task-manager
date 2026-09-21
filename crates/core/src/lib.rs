@@ -3,6 +3,7 @@
 //! per-seat agent is meant to be another.
 
 pub mod alerts;
+pub mod audit;
 pub mod clients;
 pub mod coaching;
 pub mod digest;

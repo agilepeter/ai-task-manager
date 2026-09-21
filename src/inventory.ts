@@ -366,7 +366,10 @@ function render(): void {
       <label class="inv-filter">Scope
         <select id="inv-scope">${scopeOptions(inv)}</select>
       </label>
-      <button class="inv-rescan" id="inv-rescan" title="Read the local setup again">Rescan</button>
+      <span class="lg-toolbar">
+        <button class="inv-rescan" id="audit-open-btn" title="A scored read of this whole setup, which you can export">Audit</button>
+        <button class="inv-rescan" id="inv-rescan" title="Read the local setup again">Rescan</button>
+      </span>
     </div>
     <p class="inv-note">Read from this machine only. Names and counts, never keys or prompts. ${inv.projects} project${inv.projects === 1 ? "" : "s"} scanned.</p>
     ${renderOpportunities(inv.opportunities)}
@@ -415,6 +418,11 @@ function show(view: View): void {
 
 /// Wires the Usage / Inventory switch. Usage is the default view every time
 /// the popover opens; Inventory loads on first visit and on Rescan.
+/// Switches the main view from elsewhere (the audit's "Open …" links).
+export function showView(view: "usage" | "inventory" | "ledger"): void {
+  show(view);
+}
+
 export function setupViews(h: InventoryHost): void {
   host = h;
   document.querySelector("#view-tabs")?.addEventListener("click", (e) => {

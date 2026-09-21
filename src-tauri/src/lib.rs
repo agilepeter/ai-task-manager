@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, clients, coaching, digest, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, providers, spend, trust};
+pub(crate) use aitm_core::{alerts, audit, clients, coaching, digest, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -126,6 +126,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("weeklyDigest").or_insert(json!("mon"));
     // Days a still-used session may stay open before one weekly nudge (0 = off).
     obj.entry("sessionNudgeDays").or_insert(json!(7));
+    // The audit opens by itself once, on the first run.
+    obj.entry("auditSeen").or_insert(json!(false));
     // Days before a renewal to send its one reminder (0 = off).
     obj.entry("renewalReminderDays").or_insert(json!(3));
     obj.entry("burnAlertPoints").or_insert(json!(15));
@@ -334,6 +336,53 @@ async fn get_burn_profile(provider_id: String) -> Result<Vec<history::BurnProfil
         .map_err(|e| format!("burn profile: {e}"))
 }
 
+fn build_audit() -> audit::AuditReport {
+    let mut inv = inventory::scan();
+    let spend = spend::collect(None);
+    let claude = spend.iter().find(|p| p.id == "claude");
+    inv.opportunities.extend(coaching::opportunities(claude, &spend::claude_sessions(None, None, 500)));
+    let usage30: std::collections::HashMap<String, f64> = spend.iter().map(|p| (p.id.clone(), p.last30.cost)).collect();
+    let today = chrono::Local::now().date_naive();
+    let ledger_view = ledger::view(&ledger::load_from(&ledger::path()), today, &usage30);
+    let areas: std::collections::HashSet<&str> = spend
+        .iter()
+        .flat_map(|p| p.projects.iter())
+        .flat_map(|pr| pr.areas.iter())
+        .map(|a| spend::area_top(&a.area))
+        .filter(|a| !a.starts_with('('))
+        .collect();
+    audit::run(
+        &audit::Inputs {
+            inventory: &inv,
+            ledger: &ledger_view,
+            spend30: spend.iter().map(|p| p.last30.cost).sum(),
+            client_rules: clients::load_from(&clients::path()).len(),
+            work_areas: areas.len(),
+        },
+        chrono::Utc::now().timestamp_millis(),
+    )
+}
+
+/// The scored read of this machine's AI setup.
+#[tauri::command]
+async fn get_audit() -> Result<audit::AuditReport, String> {
+    tauri::async_runtime::spawn_blocking(build_audit).await.map_err(|e| format!("audit: {e}"))
+}
+
+/// Saves the audit as Markdown in the Downloads folder and reveals it.
+#[tauri::command]
+async fn export_audit(app: tauri::AppHandle) -> Result<String, String> {
+    let report = tauri::async_runtime::spawn_blocking(build_audit).await.map_err(|e| format!("audit: {e}"))?;
+    let now = chrono::Local::now();
+    let dir = app.path().download_dir().map_err(|e| format!("find the Downloads folder: {e}"))?;
+    let file = dir.join(format!("ai-setup-audit-{}.md", now.format("%Y-%m-%d")));
+    std::fs::write(&file, audit::to_markdown(&report, &now.format("%-d %B %Y").to_string()))
+        .map_err(|e| format!("write {}: {e}", file.display()))?;
+    use tauri_plugin_opener::OpenerExt;
+    let _ = app.opener().reveal_item_in_dir(&file);
+    Ok(file.display().to_string())
+}
+
 /// The sessions behind an area or a day, from the scan cache (no rescan).
 #[tauri::command]
 async fn get_sessions(area: Option<String>, day: Option<String>) -> Result<Vec<spend::SessionSpend>, String> {
@@ -399,6 +448,7 @@ const CONFIG_KEYS: &[&str] = &[
     "apiFeeds",
     "weeklyDigest",
     "sessionNudgeDays",
+    "auditSeen",
     "renewalReminderDays",
     "spendMetric",
     "spendTab",
@@ -3466,6 +3516,8 @@ pub fn run() {
             get_inventory,
             get_history,
             get_ledger,
+            get_audit,
+            export_audit,
             get_burn_profile,
             pin_preview,
             pin_apply,

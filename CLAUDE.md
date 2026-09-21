@@ -106,6 +106,13 @@ and computed Opportunities). Usage stays the default view.
   a real client name in code, tests, fixtures or commit messages**: use "Acme"/"Client A".
   The detail page redraws on data refresh; `render(true)` reads the rules editor back first
   so typing survives, but click handlers must call plain `render()`.
+- **Audit** (`crates/core/src/audit.rs`, `src/audit.ts`): a scored, sectioned read of the whole
+  setup; opens itself once on first run (`auditSeen`), then from Inventory > Audit; exports
+  Markdown. It never judges anything a second time: each existing finding becomes a check,
+  its absence a pass. **Only "tighten" findings count against the score; "learn" findings
+  show as "worth a look" and are unscored** (a remote server or an unused capability is not
+  a failing). The score is checks passed over checks that apply, arithmetic only, and what
+  cannot be judged (under $50 of usage, no tools found) is left out instead of counted.
 - **Your week** (detail page; `history::burn_profile_from`): a 7 x 24 heatmap of when a limit
   gets used, in local time, with the next reset outlined. A rise is booked to an hour only
   when the two readings are within 90 minutes; across a longer gap nobody knows when the
