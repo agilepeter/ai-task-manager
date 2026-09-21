@@ -118,6 +118,7 @@ suite 20 to 30 times before calling a concurrency fix done.
 
 ## CI
 
-`.github/workflows/ci.yml` is Windows only, on purpose (see the comment in the file):
-macOS runners bill at 10x on private repos and Mac is built locally. It runs on pushes
-touching Rust or manifests, and on manual dispatch.
+`.github/workflows/ci.yml` has no macOS job, on purpose: macOS runners bill at 10x on
+private repos and Mac is built locally. A small `changes` job routes each push: Rust or
+manifest changes run the Windows build and tests (about 15 minutes, 2x billing); UI changes
+run a one-minute Linux type-check and build. Do not widen the Windows job to UI paths.

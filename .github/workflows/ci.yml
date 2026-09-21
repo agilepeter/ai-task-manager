@@ -13,6 +13,12 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/ci.yml"
+      - "src/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "vite.config.ts"
   workflow_dispatch:
 
 concurrency:
@@ -23,7 +29,49 @@ permissions:
   contents: read
 
 jobs:
+  # Which half changed decides which job runs: a UI-only push must not pay for
+  # a fifteen-minute Windows Rust build, and a Rust-only push needs no tsc.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: filter
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"; echo "web=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed=$(git diff --name-only HEAD~1 HEAD || true)
+          echo "$changed"
+          rust=false; web=false
+          echo "$changed" | grep -qE '^(crates/|src-tauri/|Cargo\.(toml|lock)$|\.github/workflows/ci\.yml$)' && rust=true
+          echo "$changed" | grep -qE '^(src/|index\.html$|package(-lock)?\.json$|tsconfig\.json$|vite\.config\.ts$|\.github/workflows/ci\.yml$)' && web=true
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"; echo "web=$web" >> "$GITHUB_OUTPUT"
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Type-check and build
+        run: npm run build
+
   windows:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
