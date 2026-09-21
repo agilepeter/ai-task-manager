@@ -36,6 +36,6 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
 
 ## Still upstream's
 
-- The app icon (`src-tauri/icons/`, `app-icon.png`) is Pane's. Replace before any public
-  release: `npx tauri icon path/to/1024.png` regenerates every size.
+- ~~The app icon~~ is ours now: an original vector in the HalperBot family
+  (`design/app-icon.svg`; regenerate every size with `npx tauri icon design/app-icon-1024.png`).
 - `README.md`, `CHANGELOG.md`, `ROADMAP.md`, `docs/` describe Pane for Windows.

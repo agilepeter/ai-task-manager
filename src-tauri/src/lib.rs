@@ -685,6 +685,40 @@ fn draw_tray_numbers(values: &[u32]) -> Vec<u8> {
     rgba
 }
 
+/// The menu bar text for the starred metrics: "33 · 48". Percent left, the
+/// same numbers the Windows tray draws into its icon.
+fn menu_bar_title(remaining: &[u32]) -> Option<String> {
+    let parts: Vec<String> = remaining.iter().take(3).map(|v| (*v).min(100).to_string()).collect();
+    (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
+}
+
+/// macOS: a template glyph plus native text. The Windows approach (digits
+/// drawn into a 32 px bitmap) is scaled up by a Retina menu bar into a blur,
+/// and a coloured icon ignores the light / dark menu bar. A template image
+/// is tinted by the system, and the title is real text at any scale.
+#[cfg(target_os = "macos")]
+fn apply_main_tray_projection(
+    app: &tauri::AppHandle,
+    projection: &tray_projection::MainTrayProjection,
+) -> Result<(), String> {
+    let tray = app
+        .tray_by_id("tray")
+        .ok_or_else(|| "main tray icon is unavailable".to_string())?;
+    tray.set_tooltip(Some(&projection.tooltip))
+        .map_err(|error| format!("set main tray tooltip: {error}"))?;
+    let title = match projection.icon_mode {
+        tray_projection::MainTrayIconMode::Logo => None,
+        tray_projection::MainTrayIconMode::Numbers => menu_bar_title(&projection.remaining_percentages),
+    };
+    tray.set_title(title.as_deref()).map_err(|error| format!("set menu bar title: {error}"))?;
+    if let Ok(mut slot) = last_main_tray().lock() {
+        slot.lefts = projection.remaining_percentages.clone();
+        slot.tooltip = projection.tooltip.clone();
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
 fn apply_main_tray_projection(
     app: &tauri::AppHandle,
     projection: &tray_projection::MainTrayProjection,
@@ -3489,9 +3523,20 @@ pub fn run() {
             )?;
             let menu = Menu::with_items(app, &[&quit])?;
 
+            // macOS: a monochrome template glyph the system tints for a light
+            // or dark menu bar. Elsewhere: the app icon, as before.
+            #[cfg(target_os = "macos")]
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))?;
+            #[cfg(not(target_os = "macos"))]
+            let tray_icon = app.default_window_icon().unwrap().clone();
+            // A menu bar app has no business in the Dock or the app switcher.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             TrayIconBuilder::with_id("tray")
-                .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Pane")
+                .icon(tray_icon)
+                .icon_as_template(cfg!(target_os = "macos"))
+                .tooltip("AI Task Manager")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
@@ -3565,6 +3610,14 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_menu_bar_title_is_short_real_text() {
+        assert_eq!(super::menu_bar_title(&[33, 48]).as_deref(), Some("33 \u{b7} 48"));
+        assert_eq!(super::menu_bar_title(&[140]).as_deref(), Some("100"), "capped");
+        assert_eq!(super::menu_bar_title(&[1, 2, 3, 4]).as_deref(), Some("1 \u{b7} 2 \u{b7} 3"), "three at most: the menu bar is narrow");
+        assert_eq!(super::menu_bar_title(&[]), None);
+    }
+
     #[test]
     fn the_background_loop_waits_its_turn_and_a_bad_clock_cannot_stop_it() {
         let min = 60_000;

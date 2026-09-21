@@ -151,6 +151,12 @@ and computed Opportunities). Usage stays the default view.
   (the tray side). Full-window panels keep to the left column, and a closed Settings parks
   off the LEFT in wide mode, because its usual park position lands inside a 760 window.
   The saved choice is applied by `applySavedWide()` after the config loads, not in setup.
+- **The macOS tray is a template glyph plus native title text** (`design/tray-template.svg`,
+  `menu_bar_title`). Never draw digits into the icon on macOS: a Retina menu bar scales a
+  32 px bitmap into a blur, and a coloured icon ignores the light / dark menu bar. The glyph
+  must stay pure black on transparent. The app runs as an Accessory (no Dock icon). Windows
+  keeps upstream's drawn-number icon. Icons are original vectors in the HalperBot family
+  (silver helmet, dark screen, cyan eyes, antenna): sources in `design/`, never generated art.
 - **Popover anchoring is per platform** (`popover_origin`): above the click for a bottom
   taskbar, below it for the macOS menu bar.
 - **Inventory covers every MCP-capable app it knows**, not just Claude Code: Claude Desktop,

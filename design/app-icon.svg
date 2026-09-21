@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- AI Task Manager app icon. An original drawing in the HalperBot family:
+       helmet head, dark screen face, cyan eyes, pixel smile, antenna with a
+       glowing tip. The smile doubles as a usage bar: mostly full, a little left. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26304a"/><stop offset="1" stop-color="#121826"/>
+    </linearGradient>
+    <linearGradient id="helmet" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0f0f5"/><stop offset="1" stop-color="#c2c2cc"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#5cc8ff" stop-opacity="0.55"/><stop offset="1" stop-color="#5cc8ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#tile)"/>
+  <!-- antenna -->
+  <circle cx="512" cy="196" r="92" fill="url(#glow)"/>
+  <rect x="498" y="214" width="28" height="92" rx="14" fill="#c2c2cc"/>
+  <circle cx="512" cy="196" r="36" fill="#00c8ff"/>
+  <circle cx="500" cy="184" r="11" fill="#d6f4ff"/>
+  <!-- ears -->
+  <rect x="196" y="476" width="56" height="150" rx="24" fill="#2a2a35"/>
+  <rect x="772" y="476" width="56" height="150" rx="24" fill="#2a2a35"/>
+  <!-- helmet -->
+  <rect x="232" y="296" width="560" height="500" rx="150" fill="url(#helmet)"/>
+  <!-- screen -->
+  <rect x="296" y="372" width="432" height="344" rx="86" fill="#1a2030"/>
+  <!-- eyes -->
+  <rect x="368" y="448" width="76" height="92" rx="30" fill="#5cc8ff"/>
+  <rect x="580" y="448" width="76" height="92" rx="30" fill="#5cc8ff"/>
+  <rect x="384" y="462" width="22" height="26" rx="10" fill="#d6f4ff"/>
+  <rect x="596" y="462" width="22" height="26" rx="10" fill="#d6f4ff"/>
+  <!-- pixel smile, read left to right as a meter: five lit, two dim -->
+  <g>
+    <rect x="372" y="596" width="32" height="32" rx="6" fill="#5cc8ff"/>
+    <rect x="412" y="616" width="32" height="32" rx="6" fill="#5cc8ff"/>
+    <rect x="452" y="626" width="32" height="32" rx="6" fill="#5cc8ff"/>
+    <rect x="496" y="630" width="32" height="32" rx="6" fill="#5cc8ff"/>
+    <rect x="540" y="626" width="32" height="32" rx="6" fill="#5cc8ff"/>
+    <rect x="580" y="616" width="32" height="32" rx="6" fill="#33506e"/>
+    <rect x="620" y="596" width="32" height="32" rx="6" fill="#33506e"/>
+  </g>
+</svg>
