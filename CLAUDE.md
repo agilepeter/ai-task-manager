@@ -64,6 +64,12 @@ and computed Opportunities). Usage stays the default view.
   a real client name in code, tests, fixtures or commit messages**: use "Acme"/"Client A".
   The detail page redraws on data refresh; `render(true)` reads the rules editor back first
   so typing survives, but click handlers must call plain `render()`.
+- **Forecast** (`crates/core/src/forecast.rs`): "when does this run out at the rate I have
+  been going?" Recent rate from the history store (lookback = a seventh of the period, 1 h to
+  24 h, readings before a reset ignored), period average only when history is too thin, and
+  the text always says which. Idle lately forecasts FLAT, not the old average. A wall is only
+  reported when it comes before the reset. Separate from the pace rules in `alerts.rs`, which
+  are straight lines from the period start.
 - **Session drill-down**: click a Work area row or a Day bar for the sessions behind it
   (`spend::claude_sessions`, read from the scan cache, never a rescan). Times, totals, top
   model and areas only. Claude Code keeps conversation titles in the same logs; they come

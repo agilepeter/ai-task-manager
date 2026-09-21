@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, clients, history, httpapi, i18n, inventory, ledger, pricing, providers, spend};
+pub(crate) use aitm_core::{alerts, clients, forecast, history, httpapi, i18n, inventory, ledger, pricing, providers, spend};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -206,6 +206,38 @@ fn export_clients_csv(app: tauri::AppHandle, areas: Vec<spend::AreaSpend>) -> Re
     use tauri_plugin_opener::OpenerExt;
     let _ = app.opener().reveal_item_in_dir(&file);
     Ok(file.display().to_string())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveMetric {
+    label: String,
+    used: f64,
+    resets_at: Option<i64>,
+    period_ms: Option<i64>,
+}
+
+/// When each of a card's limits runs out at the recent rate of use. The live
+/// readings come from the frontend; the rate comes from the history store.
+#[tauri::command]
+async fn get_forecast(provider_id: String, metrics: Vec<LiveMetric>) -> Result<Vec<forecast::Forecast>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let now = chrono::Utc::now().timestamp_millis();
+        let series = history::series(&provider_id, now - 25 * 3_600_000);
+        metrics
+            .iter()
+            .filter_map(|m| {
+                let points: Vec<(i64, f64)> = series
+                    .iter()
+                    .find(|s| s.metric == m.label)
+                    .map(|s| s.points.iter().map(|p| (p.at, p.used)).collect())
+                    .unwrap_or_default();
+                forecast::forecast(&m.label, &points, m.used, m.resets_at, m.period_ms, now)
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("forecast: {e}"))
 }
 
 /// The sessions behind an area or a day, from the scan cache (no rescan).
@@ -3131,6 +3163,7 @@ pub fn run() {
             get_inventory,
             get_history,
             get_ledger,
+            get_forecast,
             get_sessions,
             client_rollup,
             save_clients,

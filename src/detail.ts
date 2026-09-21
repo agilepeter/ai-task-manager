@@ -16,6 +16,16 @@ interface Metric {
   detail: string | null;
   value: string | null;
   resets_at: number | null;
+  period_ms?: number | null;
+}
+
+interface Forecast {
+  metric: string;
+  basis: "recent" | "period";
+  windowHours: number;
+  ratePerHour: number;
+  hitsLimitAt: number | null;
+  projectedAtReset: number | null;
 }
 
 interface Snapshot {
@@ -139,6 +149,8 @@ let clientView: ClientView | null = null;
 /** Rules being edited; null while the saved ones are shown. */
 let draftRules: ClientRule[] | null = null;
 let clientNote = "";
+/** Forecasts per card, refreshed with the history. */
+const forecasts = new Map<string, Forecast[]>();
 /** The drill-down in view: sessions behind an area or a day. */
 let drill: { title: string; area?: string; day?: string; sessions: SessionSpend[] | null } | null = null;
 /** Wide mode: the window is twice as wide and this page is a fixed right column. */
@@ -311,6 +323,52 @@ function wireCrosshair(root: HTMLElement): void {
     cross.setAttribute("visibility", "hidden");
     tip.hidden = true;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Forecast
+// ---------------------------------------------------------------------------
+
+async function loadForecast(id: string): Promise<void> {
+  const snap = source?.snapshot(id);
+  if (!snap) return;
+  const metrics = snap.metrics
+    .filter((m) => m.kind === "progress" && m.used_percent !== null)
+    .map((m) => ({ label: m.label, used: m.used_percent, resetsAt: m.resets_at, periodMs: m.period_ms ?? null }));
+  try {
+    forecasts.set(id, await invoke<Forecast[]>("get_forecast", { providerId: id, metrics }));
+  } catch {
+    forecasts.delete(id);
+  }
+}
+
+function atText(ms: number): string {
+  const d = new Date(ms);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return sameDay ? `today at ${time}` : `${d.toLocaleDateString([], { weekday: "short" })} at ${time}`;
+}
+
+/// One forecast as a sentence. `short` is for the card, where space is tight.
+function forecastText(f: Forecast, short = false): string {
+  const basis =
+    f.basis === "recent"
+      ? `at the pace of the last ${f.windowHours >= 1.5 ? `${Math.round(f.windowHours)} hours` : "hour"}`
+      : "at this period's average pace";
+  if (f.hitsLimitAt !== null) {
+    return short ? `${f.metric} runs out ${atText(f.hitsLimitAt)} at this pace` : `${f.metric} runs out ${atText(f.hitsLimitAt)}, ${basis}.`;
+  }
+  if (f.projectedAtReset === null) return "";
+  if (f.ratePerHour === 0) return short ? "" : `${f.metric} has not moved lately: it holds at ${f.projectedAtReset.toFixed(0)}% until the reset.`;
+  return short ? "" : `${f.metric} reaches about ${f.projectedAtReset.toFixed(0)}% by the reset, ${basis}.`;
+}
+
+function forecastSection(id: string): string {
+  const lines = (forecasts.get(id) ?? []).map((f) => ({ f, text: forecastText(f) })).filter((l) => l.text);
+  if (!lines.length) return "";
+  return `<div class="dt-forecast">${lines
+    .map((l) => `<p class="${l.f.hitsLimitAt !== null ? "dt-forecast-hit" : ""}">${esc(l.text)}</p>`)
+    .join("")}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -599,18 +657,25 @@ function miniHtml(id: string): string {
   }
   const sp = source?.spend(id);
   const top = sp ? [...sp.today.models].sort((a, b) => b.cost - a.cost)[0] : undefined;
+  const wall = (forecasts.get(id) ?? [])
+    .filter((f) => f.hitsLimitAt !== null)
+    .sort((a, b) => a.hitsLimitAt! - b.hitsLimitAt!)[0];
+  const warn = wall ? `<p class="dt-mini-note dt-forecast-hit">${esc(forecastText(wall, true))}</p>` : "";
   const facts =
     sp && sp.today.cost > 0.004
       ? `<span>Today ${money(sp.today.cost)}${top ? ` · mostly ${esc(top.model)}` : ""}</span>`
       : `<span></span>`;
-  return `${chart}<div class="dt-mini-foot">${facts}<button class="inv-learn dt-mini-open" data-detail="${esc(id)}">Details</button></div>`;
+  return `${chart}${warn}<div class="dt-mini-foot">${facts}<button class="inv-learn dt-mini-open" data-detail="${esc(id)}">Details</button></div>`;
 }
 
 async function loadSpark(id: string): Promise<void> {
   if (sparkLoading.has(id)) return;
   sparkLoading.add(id);
   try {
-    const series = await invoke<Series[]>("get_history", { providerId: id, hours: SPARK_HOURS });
+    const [series] = await Promise.all([
+      invoke<Series[]>("get_history", { providerId: id, hours: SPARK_HOURS }),
+      loadForecast(id),
+    ]);
     sparkCache.set(id, { at: Date.now(), series });
   } catch {
     sparkCache.set(id, { at: Date.now(), series: [] });
@@ -681,6 +746,7 @@ function render(fromRefresh = false): void {
         ${history.length > 1 ? `<label>Limit ${select("dt-metric", metrics, metricFilter)}</label>` : ""}
       </div>
       ${loading && historyFor !== openId ? `<p class="dt-empty">Loading…</p>` : lineChart(history, width)}
+      ${forecastSection(openId)}
     </section>
     <section class="dt-section">
       <h3>Spend</h3>
@@ -699,7 +765,7 @@ async function loadHistory(): Promise<void> {
   loading = true;
   lastLoad = Date.now();
   try {
-    const got = await invoke<Series[]>("get_history", { providerId: id, hours });
+    const [got] = await Promise.all([invoke<Series[]>("get_history", { providerId: id, hours }), loadForecast(id)]);
     if (openId !== id) return;
     history = got;
     historyFor = id;

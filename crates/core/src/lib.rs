@@ -4,6 +4,7 @@
 
 pub mod alerts;
 pub mod clients;
+pub mod forecast;
 pub mod history;
 pub mod httpapi;
 pub mod i18n;
