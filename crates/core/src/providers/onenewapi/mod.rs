@@ -1,6 +1,6 @@
 mod billing;
 mod fingerprint;
-pub(super) mod ids;
+pub mod ids;
 mod snapshot;
 pub mod store;
 pub(super) mod url;

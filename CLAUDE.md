@@ -8,7 +8,17 @@ limits, spend, and the local AI setup. Cargo workspace:
   per-seat agent is meant to reuse it as is. `cargo tree -p aitm-core` must never list tauri.
 - `src-tauri` (`ai-task-manager`): the Tauri v2 tray app. Re-exports the core modules at
   its root so `providers::…` / `alerts::…` paths work unchanged.
+- `crates/agent` (`aitm-agent`): headless. `report` prints this machine's seat report,
+  `push --to URL` sends it to a collector (token only from `AITM_COLLECTOR_TOKEN`, https
+  required off-machine). No daemon: cron / launchd / Task Scheduler decides when.
+- `crates/collector` (`aitm-collector`): self-hosted receiver + team dashboard. One process,
+  one folder of JSON, token on every request, binds to localhost by default.
 - `src/`: vanilla TS UI.
+
+**The seat report (`crates/core/src/seat.rs`) is the privacy boundary of the enterprise half.**
+It has no field that could hold a prompt, path, folder, work area, client name, session id or
+credential, and `never_carries_*` plants those in its inputs. Add a field only with a reason
+an organisation needs it, and extend that test. Finding *titles* go out; *details* do not.
 
 ## Provenance
 

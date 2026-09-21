@@ -14,6 +14,7 @@ pub mod ledger;
 pub mod pricing;
 pub mod providers;
 pub mod rt;
+pub mod seat;
 pub mod spend;
 pub mod trust;
 
