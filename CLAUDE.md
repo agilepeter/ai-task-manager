@@ -166,6 +166,14 @@ Two alert rules in `crates/core/src/alerts.rs`, configured by dropdowns in Setti
 
 Rules take the clock as a parameter (`evaluate_at`) so windows are tested exactly.
 
+- **Client budgets** (`monthly_budget` on a client rule): one alert per client per calendar
+  month when month to date passes it. **Weekly digest** (`crates/core/src/digest.rs`,
+  `weeklyDigest` = off or a weekday): once per ISO week from 9:00, catches up if the machine
+  slept through its day, and sends nothing for an empty week. Both fire from the spend scan
+  (so from the Rust loop) and remember what they have said in `alert_marks.json`.
+- **Export CSV** (`export_table`): saves what a view is showing to Downloads. Cells are made
+  spreadsheet-safe and the file name file-safe on the Rust side, whatever the frontend sent.
+
 ## Own config dir, never upstream's
 
 `config_dir()` is `AITaskManager`. Do not reintroduce upstream's "OpenUsage -> Pane"

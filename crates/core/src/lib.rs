@@ -5,6 +5,7 @@
 pub mod alerts;
 pub mod clients;
 pub mod coaching;
+pub mod digest;
 pub mod forecast;
 pub mod history;
 pub mod httpapi;

@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, clients, coaching, forecast, history, httpapi, i18n, inventory, ledger, pricing, providers, spend, trust};
+pub(crate) use aitm_core::{alerts, clients, coaching, digest, forecast, history, httpapi, i18n, inventory, ledger, pricing, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -122,6 +122,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // Off by default: serves spend, work areas, clients and the ledger on
     // the loopback API for the user's own dashboards.
     obj.entry("apiFeeds").or_insert(json!(false));
+    // "off" or a weekday ("mon" … "sun").
+    obj.entry("weeklyDigest").or_insert(json!("mon"));
     // Days before a renewal to send its one reminder (0 = off).
     obj.entry("renewalReminderDays").or_insert(json!(3));
     obj.entry("burnAlertPoints").or_insert(json!(15));
@@ -266,6 +268,23 @@ async fn get_trust(packages: Vec<String>) -> trust::TrustView {
     trust::view(enabled, &packages, chrono::Utc::now().timestamp_millis()).await
 }
 
+/// Saves a table the UI is showing as CSV in the Downloads folder and
+/// reveals it. Cells are made spreadsheet-safe and the name file-safe here,
+/// whatever the frontend sent.
+#[tauri::command]
+fn export_table(app: tauri::AppHandle, name: String, headers: Vec<String>, rows: Vec<Vec<String>>) -> Result<String, String> {
+    if headers.is_empty() || headers.len() > 40 || rows.iter().any(|r| r.len() > 40) {
+        return Err("that table cannot be exported".into());
+    }
+    let dir = app.path().download_dir().map_err(|e| format!("find the Downloads folder: {e}"))?;
+    let today = chrono::Local::now().format("%Y-%m-%d");
+    let file = dir.join(format!("{}-{today}.csv", clients::safe_stem(&name)));
+    std::fs::write(&file, clients::table_csv(&headers, &rows)).map_err(|e| format!("write {}: {e}", file.display()))?;
+    use tauri_plugin_opener::OpenerExt;
+    let _ = app.opener().reveal_item_in_dir(&file);
+    Ok(file.display().to_string())
+}
+
 /// The sessions behind an area or a day, from the scan cache (no rescan).
 #[tauri::command]
 async fn get_sessions(area: Option<String>, day: Option<String>) -> Result<Vec<spend::SessionSpend>, String> {
@@ -329,6 +348,7 @@ const CONFIG_KEYS: &[&str] = &[
     "wideMode",
     "trustLookup",
     "apiFeeds",
+    "weeklyDigest",
     "renewalReminderDays",
     "spendMetric",
     "spendTab",
@@ -2461,6 +2481,65 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
         );
     }
 
+    // Client budgets and the weekly digest. Both remember what they have
+    // already said in a small state file, so a restart does not repeat them.
+    {
+        use tauri_plugin_notification::NotificationExt;
+        let cfg = config_with_defaults(load_config());
+        let now = chrono::Local::now();
+        let today = now.date_naive();
+        let marks_path = providers::config_dir().join("alert_marks.json");
+        let mut marks: Value = std::fs::read_to_string(&marks_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_else(|| json!({}));
+        let mut changed = false;
+
+        let rules = clients::load_from(&clients::path());
+        if rules.iter().any(|r| r.monthly_budget.is_some()) {
+            let areas: Vec<spend::AreaSpend> = result
+                .iter()
+                .flat_map(|p| p.projects.iter())
+                .flat_map(|pr| pr.areas.iter().cloned())
+                .collect();
+            let rows = clients::rollup(&areas, &rules, today);
+            let mut fired: Vec<String> = marks
+                .get("budgetFired")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default();
+            for (client, spent, budget) in clients::over_budget(&rows, &rules, today, &mut fired) {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("Client budget passed")
+                    .body(format!("{client} is at ${spent:.0} this month, past its ${budget:.0} budget."))
+                    .show();
+                changed = true;
+            }
+            marks["budgetFired"] = json!(fired);
+        }
+
+        let setting = cfg.get("weeklyDigest").and_then(Value::as_str).unwrap_or("off");
+        let last = marks.get("digestWeek").and_then(Value::as_str).map(str::to_string);
+        use chrono::Timelike;
+        if digest::due(setting, today, now.hour(), last.as_deref()) {
+            let usage30: std::collections::HashMap<String, f64> =
+                result.iter().map(|p| (p.id.clone(), p.last30.cost)).collect();
+            let ledger_view = ledger::view(&ledger::load_from(&ledger::path()), today, &usage30);
+            if let Some(d) = digest::build(&result, &ledger_view) {
+                let _ = app.notification().builder().title(&d.title).body(&d.body).show();
+            }
+            // Marked even when there was nothing to say: an empty week is
+            // not retried every ten minutes.
+            marks["digestWeek"] = json!(digest::week_mark(today));
+            changed = true;
+        }
+        if changed {
+            let _ = std::fs::write(&marks_path, marks.to_string());
+        }
+    }
+
     // Budget guard: today's total across every provider against the user's
     // daily mark. `today` windows are already cut at local midnight.
     let today_cost: f64 = result.iter().map(|p| p.today.cost).sum();
@@ -3268,6 +3347,7 @@ pub fn run() {
             get_inventory,
             get_history,
             get_ledger,
+            export_table,
             get_trust,
             get_forecast,
             get_sessions,

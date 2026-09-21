@@ -3669,3 +3669,13 @@ body.wide #ledger {
 .inv-filter .lg-link {
   margin-left: 4px;
 }
+
+/* ------------------------------------------------ budgets + export buttons */
+.dt-rule {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 4fr) minmax(0, 2fr);
+}
+.lg-toolbar {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}

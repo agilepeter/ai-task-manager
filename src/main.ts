@@ -216,6 +216,8 @@ interface Config {
   trustLookup: boolean;
   /** Opt-in: serve spend, areas, clients and the ledger on the loopback API. */
   apiFeeds: boolean;
+  /** "off" or the weekday ("mon" … "sun") the weekly digest goes out. */
+  weeklyDigest: string;
   spendTab: SpendTab;
   spendMetric: "cost" | "tokens" | "mtok";
   showUsed: boolean;
@@ -256,6 +258,7 @@ const FRONTEND_CONFIG_KEYS = [
   "renewalReminderDays",
   "trustLookup",
   "apiFeeds",
+  "weeklyDigest",
   "spendTab",
   "spendMetric",
   "showUsed",
@@ -451,6 +454,7 @@ let config: Config = {
   renewalReminderDays: 3,
   trustLookup: false,
   apiFeeds: false,
+  weeklyDigest: "mon",
   spendTab: "today",
   spendMetric: "cost",
   showUsed: false,
@@ -4853,6 +4857,10 @@ async function initSettings(): Promise<void> {
     });
   }
 
+  const digestSel = document.querySelector<HTMLSelectElement>("#weekly-digest")!;
+  digestSel.value = config.weeklyDigest;
+  digestSel.addEventListener("change", () => void patchConfig({ weeklyDigest: digestSel.value }));
+
   const localeSel = document.querySelector<HTMLSelectElement>("#locale")!;
   localeSel.value = config.locale;
   localeSel.addEventListener("change", () => {
@@ -5048,6 +5056,7 @@ function syncSettingsControls(): void {
   setSelect("#burn-alert", String(config.burnAlertPoints));
   setSelect("#spend-alert", String(config.dailySpendAlert));
   setSelect("#renewal-reminder", String(config.renewalReminderDays));
+  setSelect("#weekly-digest", config.weeklyDigest);
   setSelect("#locale", config.locale);
   setCheck("#notify-reset", config.notifyReset);
   setCheck("#notify-almost", config.notifyAlmostOut);

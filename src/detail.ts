@@ -74,6 +74,7 @@ interface SessionSpend {
 interface ClientRule {
   client: string;
   patterns: string[];
+  monthlyBudget?: number | null;
 }
 
 interface ClientSpend {
@@ -149,6 +150,8 @@ let clientView: ClientView | null = null;
 /** Rules being edited; null while the saved ones are shown. */
 let draftRules: ClientRule[] | null = null;
 let clientNote = "";
+/** What the Spend section is showing, kept so Export CSV saves exactly that. */
+let lastTable: { name: string; headers: string[]; rows: string[][] } | null = null;
 /** Forecasts per card, refreshed with the history. */
 const forecasts = new Map<string, Forecast[]>();
 /** The drill-down in view: sessions behind an area or a day. */
@@ -401,6 +404,14 @@ function clientSection(): string {
     }))
     .filter((r) => r.cost > 0.004 || r.tokens > 0);
   const chart = rows.length ? bars(rows) : `<p class="dt-empty">Nothing in this period.</p>`;
+  const budgets = clientView.rules
+    .filter((r) => r.monthlyBudget)
+    .map((r) => {
+      const spent = clientView!.rows.find((c) => c.client === r.client)?.monthToDate ?? 0;
+      const over = spent >= r.monthlyBudget!;
+      return `<p class="dt-caption${over ? " dt-forecast-hit" : ""}">${esc(r.client)}: ${money(spent)} of ${money(r.monthlyBudget!)} this month${over ? ", over budget" : ""}.</p>`;
+    })
+    .join("");
 
   const rules = draftRules ?? clientView.rules;
   const editing = draftRules !== null;
@@ -416,6 +427,7 @@ function clientSection(): string {
         <div class="dt-rule">
           <input data-rule-client="${i}" type="text" maxlength="96" placeholder="Client" value="${esc(r.client)}" aria-label="Client name" />
           <input data-rule-patterns="${i}" type="text" placeholder="folder, folder/sub*" value="${esc(r.patterns.join(", "))}" aria-label="Folder patterns" />
+          <input data-rule-budget="${i}" type="number" min="0" step="1" placeholder="$ / month" value="${r.monthlyBudget ? r.monthlyBudget : ""}" aria-label="Monthly budget in dollars, optional" title="Optional. Alerts once when this client's month passes it." />
         </div>`,
         )
         .join("")}
@@ -432,7 +444,7 @@ function clientSection(): string {
         <span class="spacer"></span>
         <button class="inv-learn" id="dt-export" title="Save this table as a CSV in your Downloads folder">Export CSV</button>
       </div>${clientNote ? `<p class="dt-caption">${esc(clientNote)}</p>` : ""}`;
-  return `${chart}${hint}${editor}`;
+  return `${chart}${budgets}${hint}${editor}`;
 }
 
 function readDraft(root: HTMLElement): ClientRule[] {
@@ -440,7 +452,12 @@ function readDraft(root: HTMLElement): ClientRule[] {
   return names.map((el) => {
     const i = el.dataset.ruleClient!;
     const patterns = root.querySelector<HTMLInputElement>(`[data-rule-patterns="${i}"]`)?.value ?? "";
-    return { client: el.value, patterns: patterns.split(",").map((p) => p.trim()).filter(Boolean) };
+    const budget = Number(root.querySelector<HTMLInputElement>(`[data-rule-budget="${i}"]`)?.value ?? "");
+    return {
+      client: el.value,
+      patterns: patterns.split(",").map((p) => p.trim()).filter(Boolean),
+      monthlyBudget: Number.isFinite(budget) && budget > 0 ? budget : null,
+    };
   });
 }
 
@@ -502,6 +519,11 @@ async function openDrill(next: { title: string; area?: string; day?: string }): 
 // ---------------------------------------------------------------------------
 
 function bars(rows: { label: string; tip: string; cost: number; tokens: number; drillArea?: string }[]): string {
+  lastTable = {
+    name: `spend by ${groupKey} ${windowKey}`,
+    headers: [groupKey === "model" ? "Model" : groupKey === "client" ? "Client" : groupKey === "project" ? "Project" : "Work area", "Cost (USD)", "Tokens"],
+    rows: rows.map((r) => [r.tip, r.cost.toFixed(2), String(Math.round(r.tokens))]),
+  };
   const max = Math.max(...rows.map((r) => r.cost), 0.0001);
   return `<div class="dt-bars">${rows
     .map(
@@ -518,6 +540,15 @@ function bars(rows: { label: string; tip: string; cost: number; tokens: number; 
 function dayBars(daily: number[]): string {
   const max = Math.max(...daily, 0.0001);
   const today = new Date();
+  lastTable = {
+    name: "spend by day",
+    headers: ["Date", "Cost (USD)"],
+    rows: daily.map((cost, i) => {
+      const d = new Date(today);
+      d.setDate(today.getDate() - (daily.length - 1 - i));
+      return [`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, cost.toFixed(2)];
+    }),
+  };
   const cols = daily
     .map((cost, i) => {
       const d = new Date(today);
@@ -607,7 +638,11 @@ function spendSection(sp: ProviderSpend | undefined): string {
   const w = sp[windowKey];
   const headline =
     groupKey === "day" ? "" : `<div class="dt-headline"><b>${money(w.cost)}</b><span>${tokens(w.tokens)} tokens</span></div>`;
-  return `${controls}${headline}${body}
+  const exportBtn =
+    groupKey === "client" || !lastTable
+      ? ""
+      : `<div class="dt-rule-actions"><span class="spacer"></span><button class="inv-learn" id="dt-export-table" title="Save what is shown here as a CSV in your Downloads folder">Export CSV</button></div>${clientNote ? `<p class="dt-caption">${esc(clientNote)}</p>` : ""}`;
+  return `${controls}${headline}${body}${exportBtn}
     <p class="dt-caption">From local logs, priced at API rates. On a flat-rate plan this is equivalent value, not a charge.</p>`;
 }
 
@@ -886,6 +921,7 @@ export function setupDetail(src: DetailSource): void {
       void loadClients();
       return;
     }
+    clientNote = "";
     if (t.id === "dt-depth") areaDepth = t.value as "1" | "2";
     else if (t.id === "dt-metric") metricFilter = t.value;
     else if (t.id === "dt-window") windowKey = t.value as WindowKey;
@@ -927,6 +963,13 @@ export function setupDetail(src: DetailSource): void {
           clientNote = String(err);
           render();
         },
+      );
+      return;
+    } else if (target.closest("#dt-export-table")) {
+      if (!lastTable) return;
+      void invoke<string>("export_table", lastTable).then(
+        (path) => { clientNote = `Saved ${path}`; render(); },
+        (err) => { clientNote = String(err); render(); },
       );
       return;
     } else if (target.closest("#dt-export")) {

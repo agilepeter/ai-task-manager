@@ -229,6 +229,16 @@
             </select>
           </div>
           <div class="setting-row">
+            <label for="weekly-digest" title="One notification a week: what the week cost, where it went, what renews next.">Weekly digest</label>
+            <select id="weekly-digest">
+              <option value="off" data-i18n="settings.alertOff">Off</option>
+              <option value="mon">Monday</option>
+              <option value="wed">Wednesday</option>
+              <option value="fri">Friday</option>
+              <option value="sun">Sunday</option>
+            </select>
+          </div>
+          <div class="setting-row">
             <label for="spend-alert" data-i18n="settings.spendAlert" title="Today's total across every tool, from your local logs. On a flat-rate plan this is the API-equivalent value, not a charge." data-i18n-title="settings.spendAlertTip">Daily spend</label>
             <select id="spend-alert">
               <option value="0" data-i18n="settings.alertOff">Off</option>

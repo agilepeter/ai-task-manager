@@ -46,6 +46,7 @@ let loadError = "";
 let editing: Subscription | null = null;
 let formError = "";
 let confirmDelete = "";
+let exportNote = "";
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -178,8 +179,12 @@ function render(): void {
   el.innerHTML = `
     <div class="inv-toolbar">
       <p class="inv-note">Your own numbers, kept on this computer. Prices are never guessed.</p>
-      ${editing ? "" : `<button class="inv-rescan" id="lg-add">Add</button>`}
+      <span class="lg-toolbar">
+        ${lg.items.length && !editing ? `<button class="inv-rescan" id="lg-export" title="Save the ledger as a CSV in your Downloads folder">Export CSV</button>` : ""}
+        ${editing ? "" : `<button class="inv-rescan" id="lg-add">Add</button>`}
+      </span>
     </div>
+    ${exportNote ? `<p class="inv-note">${esc(exportNote)}</p>` : ""}
     ${headline}
     ${editing && !editing.id ? form(editing) : ""}
     ${empty}
@@ -243,6 +248,22 @@ export function setupLedger(src: LedgerSource): void {
     const suggestId = pick("suggest");
     const editId = pick("edit");
     const deleteId = pick("delete");
+    if (target.closest("#lg-export")) {
+      if (!ledger) return;
+      void invoke<string>("export_table", {
+        name: "ai subscriptions",
+        headers: ["Name", "Price", "Billed", "Monthly cost", "Next renewal", "Pays for", "30-day API-equivalent usage", "Notes"],
+        rows: ledger.items.map((i) => [
+          i.name, i.price.toFixed(2), i.cycle, i.monthlyCost.toFixed(2), i.nextRenewal ?? "", i.provider ?? "",
+          i.usage30 === null ? "" : i.usage30.toFixed(2), i.notes ?? "",
+        ]),
+      }).then(
+        (path) => { exportNote = `Saved ${path}`; render(); },
+        (err) => { exportNote = String(err); render(); },
+      );
+      return;
+    }
+    exportNote = "";
     if (target.closest("#lg-add")) {
       editing = blank();
     } else if (target.closest("#lg-cancel")) {

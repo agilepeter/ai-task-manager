@@ -21,6 +21,9 @@ pub struct ClientRule {
     /// Area patterns. `*` matches any run of characters; a pattern with no
     /// `*` matches that folder and everything beneath it.
     pub patterns: Vec<String>,
+    /// Optional ceiling for a calendar month, in dollars. Crossing it alerts.
+    #[serde(default)]
+    pub monthly_budget: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -154,6 +157,55 @@ pub fn rollup(areas: &[AreaSpend], rules: &[ClientRule], today: NaiveDate) -> Ve
 // CSV
 // ---------------------------------------------------------------------------
 
+/// A whole table as CSV, every cell made safe. For exports built from
+/// whatever a view is showing.
+pub fn table_csv(headers: &[String], rows: &[Vec<String>]) -> String {
+    let line = |cells: &[String]| cells.iter().map(|c| cell(c)).collect::<Vec<_>>().join(",");
+    let mut out = line(headers);
+    out.push_str("\r\n");
+    for row in rows.iter().take(10_000) {
+        out.push_str(&line(row));
+        out.push_str("\r\n");
+    }
+    out
+}
+
+/// A file name from free text: letters, digits and dashes only.
+pub fn safe_stem(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect();
+    let joined = cleaned.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+    let short: String = joined.chars().take(60).collect();
+    if short.is_empty() { "export".to_string() } else { short }
+}
+
+/// Clients whose month to date has passed their budget and that have not
+/// alerted for this month yet. `fired` holds "client|YYYY-MM" marks and is
+/// updated in place, so each client alerts once a month.
+pub fn over_budget(
+    rows: &[ClientSpend],
+    rules: &[ClientRule],
+    today: NaiveDate,
+    fired: &mut Vec<String>,
+) -> Vec<(String, f64, f64)> {
+    let month = today.format("%Y-%m").to_string();
+    // Marks from earlier months are done with.
+    fired.retain(|m| m.ends_with(&format!("|{month}")));
+    let mut out = Vec::new();
+    for rule in rules {
+        let Some(budget) = rule.monthly_budget.filter(|b| b.is_finite() && *b > 0.0) else { continue };
+        let Some(row) = rows.iter().find(|r| r.client == rule.client) else { continue };
+        let mark = format!("{}|{month}", rule.client);
+        if row.month_to_date >= budget && !fired.contains(&mark) {
+            fired.push(mark);
+            out.push((rule.client.clone(), row.month_to_date, budget));
+        }
+    }
+    out
+}
+
 /// One CSV cell. Quoted when it must be, and a leading `= + - @` (or tab /
 /// CR) is defused with an apostrophe: area and client names are free text,
 /// and a spreadsheet would otherwise run them as formulas.
@@ -221,7 +273,8 @@ pub fn validate(rules: Vec<ClientRule>) -> Result<Vec<ClientRule>, String> {
         if patterns.is_empty() {
             return Err(format!("{client} needs at least one folder pattern."));
         }
-        out.push(ClientRule { client, patterns });
+        let monthly_budget = rule.monthly_budget.filter(|b| b.is_finite() && *b > 0.0 && *b <= 10_000_000.0);
+        out.push(ClientRule { client, patterns, monthly_budget });
     }
     Ok(out)
 }
@@ -265,7 +318,41 @@ mod tests {
     }
 
     fn rule(client: &str, patterns: &[&str]) -> ClientRule {
-        ClientRule { client: client.into(), patterns: patterns.iter().map(|p| p.to_string()).collect() }
+        ClientRule {
+            client: client.into(),
+            patterns: patterns.iter().map(|p| p.to_string()).collect(),
+            monthly_budget: None,
+        }
+    }
+
+    #[test]
+    fn a_client_alerts_once_a_month_when_it_passes_its_budget() {
+        let today = NaiveDate::from_ymd_opt(2026, 9, 3).unwrap();
+        let areas = [area("site/acme-x", 100.0, 5.0, &[10.0, 20.0, 15.0])]; // Sep 1-3 = 45
+        let mut rules = vec![rule("Acme", &["site/acme*"]), rule("Quiet", &["nowhere"])];
+        rules[0].monthly_budget = Some(40.0);
+        rules[1].monthly_budget = Some(1.0);
+        let rows = rollup(&areas, &rules, today);
+        let mut fired = vec!["Acme|2026-08".to_string()];
+        assert_eq!(over_budget(&rows, &rules, today, &mut fired), [("Acme".to_string(), 45.0, 40.0)]);
+        assert_eq!(fired, ["Acme|2026-09"], "last month's mark is cleared, this month's set");
+        assert!(over_budget(&rows, &rules, today, &mut fired).is_empty(), "once a month");
+        rules[0].monthly_budget = Some(100.0);
+        assert!(over_budget(&rows, &rules, today, &mut Vec::new()).is_empty(), "under budget");
+        rules[0].monthly_budget = None;
+        assert!(over_budget(&rows, &rules, today, &mut Vec::new()).is_empty(), "no budget, no alert");
+    }
+
+    #[test]
+    fn any_table_exports_safely_under_a_safe_file_name() {
+        let csv = table_csv(
+            &["Area".to_string(), "Cost".to_string()],
+            &[vec!["=cmd|x".to_string(), "12.50".to_string()], vec!["a, b".to_string(), "1".to_string()]],
+        );
+        assert_eq!(csv, "Area,Cost\r\n'=cmd|x,12.50\r\n\"a, b\",1\r\n");
+        assert_eq!(safe_stem("Spend by Work area (Last 30 days)"), "spend-by-work-area-last-30-days");
+        assert_eq!(safe_stem("../../etc/passwd"), "etc-passwd");
+        assert_eq!(safe_stem("///"), "export");
     }
 
     #[test]
