@@ -38,7 +38,22 @@ interface ProviderSpend {
   yesterday: SpendWindow;
   last30: SpendWindow;
   daily_cost?: number[];
-  projects?: { project: string; today: SpendWindow; yesterday: SpendWindow; last30: SpendWindow }[];
+  projects?: ProjectSpend[];
+}
+
+interface AreaSpend {
+  area: string;
+  today: SpendWindow;
+  yesterday: SpendWindow;
+  last30: SpendWindow;
+}
+
+interface ProjectSpend {
+  project: string;
+  today: SpendWindow;
+  yesterday: SpendWindow;
+  last30: SpendWindow;
+  areas?: AreaSpend[];
 }
 
 interface Series {
@@ -57,7 +72,10 @@ export interface DetailSource {
 }
 
 type WindowKey = "today" | "yesterday" | "last30";
-type GroupKey = "model" | "project" | "day";
+type GroupKey = "model" | "area" | "project" | "day";
+
+/** Rows shown before the rest fold into one "Other" row. */
+const MAX_BAR_ROWS = 12;
 
 const RANGES: [hours: number, label: string][] = [
   [24, "Last 24 hours"],
@@ -294,8 +312,11 @@ function spendSection(sp: ProviderSpend | undefined): string {
     return `<p class="dt-empty">No local spend logs for this tool. Spend is read from the logs a command-line tool writes on this computer.</p>`;
   }
   const hasProjects = (sp.projects?.length ?? 0) > 0;
+  const hasAreas = (sp.projects ?? []).some((p) => (p.areas?.length ?? 0) > 0);
   if (groupKey === "project" && !hasProjects) groupKey = "model";
+  if (groupKey === "area" && !hasAreas) groupKey = "model";
   const groups: [string, string][] = [["model", "Model"]];
+  if (hasAreas) groups.push(["area", "Work area"]);
   if (hasProjects) groups.push(["project", "Project"]);
   groups.push(["day", "Day"]);
   const controls = `<div class="dt-controls">
@@ -306,6 +327,32 @@ function spendSection(sp: ProviderSpend | undefined): string {
   let body: string;
   if (groupKey === "day") {
     body = dayBars(sp.daily_cost ?? []);
+  } else if (groupKey === "area") {
+    const many = (sp.projects?.length ?? 0) > 1;
+    const all = (sp.projects ?? [])
+      .flatMap((p) =>
+        (p.areas ?? []).map((a) => ({
+          // With several projects an area name alone is ambiguous.
+          label: many ? `${projectLabel(p.project)} / ${a.area}` : a.area,
+          tip: `${p.project} / ${a.area}`,
+          cost: a[windowKey].cost,
+          tokens: a[windowKey].tokens,
+        })),
+      )
+      .filter((r) => r.cost > 0.004 || r.tokens > 0)
+      .sort((a, b) => b.cost - a.cost);
+    const top = all.slice(0, MAX_BAR_ROWS);
+    const rest = all.slice(MAX_BAR_ROWS);
+    if (rest.length) {
+      top.push({
+        label: `Other (${rest.length})`,
+        tip: `${rest.length} smaller areas`,
+        cost: rest.reduce((n, r) => n + r.cost, 0),
+        tokens: rest.reduce((n, r) => n + r.tokens, 0),
+      });
+    }
+    body = top.length ? bars(top) : `<p class="dt-empty">Nothing in this period.</p>`;
+    body += `<p class="dt-caption">A work area is the top-level folder a session was working in: where its shell was, or the files it touched. "(unsorted)" is spend before a session had gone anywhere.</p>`;
   } else if (groupKey === "project") {
     const rows = (sp.projects ?? [])
       .map((p) => ({ label: projectLabel(p.project), tip: p.project, cost: p[windowKey].cost, tokens: p[windowKey].tokens }))

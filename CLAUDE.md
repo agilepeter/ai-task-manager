@@ -58,6 +58,15 @@ and computed Opportunities). Usage stays the default view.
   the `--viz-*` colours were validated per theme, so re-run the validator if they change.
   Project = the folder Claude Code was started in, matched against paths it still knows
   (folder names are lossy and cannot be decoded).
+- **Work areas** (`claude_area` in `crates/core/src/spend.rs`): spend inside a project, by
+  top-level folder. Signals in order: the log line's `cwd` relative to the session's first
+  `cwd`, then the first path under that root in the message's tool calls (path inputs, or
+  paths inside a Bash command); otherwise the last area stands. Runs BEFORE the duplicate
+  check, because Claude Code logs one content block per line and a tool call arrives on a
+  later "duplicate" line. `_` and `.` folders never switch the area from a tool path. Areas
+  are a second view of the same dollars and must sum to the project total. Names are bounded
+  like model names. Any change to this logic needs a `PERSIST_VERSION` bump. Folder names
+  stay on the machine: never add them to the local HTTP API or a share card.
 - **Card expander extras** (`cardExtras` in `src/detail.ts`): every live card's chevron opens
   a 24-hour sparkline, today's spend with the leading model, and a Details button. The card
   renderer is synchronous, so extras draw from a cache and patch themselves in place when the

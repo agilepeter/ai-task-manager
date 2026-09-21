@@ -68,6 +68,18 @@ pub struct ProjectSpend {
     pub today: Window,
     pub yesterday: Window,
     pub last30: Window,
+    /// Where inside the project the spend went, largest 30-day cost first.
+    pub areas: Vec<AreaSpend>,
+}
+
+/// One work area's share of a project: a top-level folder, or `(unsorted)`
+/// for spend before the session had been anywhere.
+#[derive(Serialize, Clone)]
+pub struct AreaSpend {
+    pub area: String,
+    pub today: Window,
+    pub yesterday: Window,
+    pub last30: Window,
 }
 
 impl ProviderSpend {
@@ -93,6 +105,14 @@ const MAX_MODEL_KEY: usize = MAX_PROBE_KEY;
 /// cap stops a hostile log from inflating the maps (and spend_cache.json).
 const MAX_MODELS_PER_FILE: usize = 4096;
 
+/// Work-area names come from paths in the logs, so they are capped the same
+/// way model names are: a bounded length and a bounded count per file.
+const MAX_AREA_KEY: usize = 64;
+const MAX_AREAS_PER_FILE: usize = 48;
+const OTHER_AREA: &str = "(other)";
+/// Spend before the session has been anywhere but its starting folder.
+const UNSORTED_AREA: &str = "(unsorted)";
+
 /// Fixed bucket for model names refused by the two caps above. Spend and
 /// token totals stay exact — only the per-model attribution merges.
 const OVERFLOW_MODEL_KEY: &str = "[over-limit model name]";
@@ -103,6 +123,9 @@ const OVERFLOW_MODEL_KEY: &str = "[over-limit model name]";
 #[derive(Default, Clone)]
 struct FileData {
     days: DayMap,
+    /// Claude Code only: the same dollars keyed by (day, work area). A second
+    /// view of `days`, never extra spend. See `claude_area`.
+    areas: DayMap,
     unpriced: HashMap<String, u64>,
     /// Distinct model keys admitted by `model_key` during this file's
     /// parse — the state behind MAX_MODELS_PER_FILE. Consulted only while
@@ -290,7 +313,7 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 4; // bump on cache format *or* parser-logic changes
+const PERSIST_VERSION: u32 = 6; // bump on cache format *or* parser-logic changes
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -312,6 +335,10 @@ struct PersistEntry {
     mtime_nanos: u32,
     size: u64,
     days: Vec<(i32, String, f64, f64)>,
+    /// Claude work areas, same shape as `days`. Absent in older caches,
+    /// which the PERSIST_VERSION bump discards anyway.
+    #[serde(default)]
+    areas: Vec<(i32, String, f64, f64)>,
     unpriced: Vec<(String, u64)>,
     /// Pricing questions this file's parse asked (see `PriceProbe`).
     /// Older caches without the field deserialize as empty — safe, because
@@ -375,6 +402,9 @@ fn load_persisted_cache() {
             for (day, model, cost, tokens) in e.days {
                 data.days.insert((day, model), (cost, tokens));
             }
+            for (day, area, cost, tokens) in e.areas {
+                data.areas.insert((day, area), (cost, tokens));
+            }
             data.unpriced = e.unpriced.into_iter().collect();
             if !stamp_matches && !probes_still_vouch(&e.probes, &data) {
                 continue; // a price this file used changed — re-parse it
@@ -432,6 +462,12 @@ fn save_persisted_cache() {
                     .iter()
                     .map(|((day, model), (cost, tokens))| (*day, model.clone(), *cost, *tokens))
                     .collect(),
+                areas: e
+                    .data
+                    .areas
+                    .iter()
+                    .map(|((day, area), (cost, tokens))| (*day, area.clone(), *cost, *tokens))
+                    .collect(),
                 unpriced: e.data.unpriced.iter().map(|(m, c)| (m.clone(), *c)).collect(),
                 probes: e.probes.clone(),
                 prefix_head: e.prefix_head.clone(),
@@ -481,6 +517,11 @@ fn note_unpriced(data: &mut FileData, ts: DateTime<Utc>, model: &str, tokens: f6
 fn merge_data(target: &mut FileData, source: FileData) {
     for (key, (cost, tokens)) in source.days {
         let entry = target.days.entry(key).or_insert((0.0, 0.0));
+        entry.0 += cost;
+        entry.1 += tokens;
+    }
+    for (key, (cost, tokens)) in source.areas {
+        let entry = target.areas.entry(key).or_insert((0.0, 0.0));
         entry.0 += cost;
         entry.1 += tokens;
     }
@@ -1442,12 +1483,107 @@ struct ClaudeFileState {
     seen: HashSet<String>,
     /// message id → whether its first occurrence was a sidechain line.
     seen_mids: HashMap<String, bool>,
+    /// The first working directory the session logged: its project root.
+    #[serde(default)]
+    root: Option<String>,
+    /// The work area in force. Sticky: it changes when the session moves.
+    #[serde(default)]
+    area: Option<String>,
 }
 
 /// Parse one Claude Code session-log line into spend events. Persisted
 /// `claude -p` runs write the same assistant records (entrypoint "sdk-cli"),
 /// so they count like interactive usage; `--no-session-persistence` runs
 /// write no log at all.
+/// The first folder of `path` beneath `root`: the work area it belongs to.
+/// `is_dir` says the path is itself a folder (a working directory), so a
+/// single component counts; a lone file sitting in the root names no area.
+fn area_under(path: &str, root: &str, is_dir: bool) -> Option<String> {
+    let path = path.replace('\\', "/");
+    let root = root.replace('\\', "/");
+    let root = root.trim_end_matches('/');
+    let rel = path.strip_prefix(root)?.strip_prefix('/')?.trim_end_matches('/');
+    let mut parts = rel.split('/');
+    let first = parts.next().filter(|p| !p.is_empty())?;
+    (is_dir || parts.next().is_some()).then(|| first.to_string())
+}
+
+/// Folders named like scratch or tooling space (`_screenshots`, `.cache`).
+/// A tool call that merely reads from one does not move the work there;
+/// only a working directory inside it does.
+fn is_scratch_area(area: &str) -> bool {
+    area.starts_with('_') || area.starts_with('.')
+}
+
+/// The first path in a shell command that falls under `root`.
+fn area_in_command(command: &str, root: &str, home: Option<&str>) -> Option<String> {
+    static PATHS: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let paths = PATHS.get_or_init(|| regex::Regex::new(r"(?:~|/)[A-Za-z0-9_.~/\-]+").expect("path regex"));
+    paths.find_iter(command).take(64).find_map(|m| {
+        let raw = m.as_str();
+        let expanded = match (raw.strip_prefix('~'), home) {
+            (Some(rest), Some(home)) => format!("{home}{rest}"),
+            _ => raw.to_string(),
+        };
+        // A command names folders as readily as files (`cd …/acme`).
+        area_under(&expanded, root, true).filter(|a| !is_scratch_area(a))
+    })
+}
+
+/// Tracks which part of the project a session is working in. Claude Code is
+/// often started once at the top of a workspace and then roams, so the
+/// project folder alone says little. Two signals, in order: the line's
+/// working directory relative to where the session began, then the first
+/// path under that root in the message's tool calls (`file_path`-style
+/// inputs, or paths inside a Bash command). With neither, the last area
+/// stands: work tends to stay where it was.
+fn claude_area(st: &mut ClaudeFileState, v: &Value, data: &FileData) {
+    let Some(cwd) = v.get("cwd").and_then(Value::as_str).filter(|c| !c.is_empty()) else { return };
+    let root = st.root.get_or_insert_with(|| cwd.to_string()).clone();
+    let mut found = area_under(cwd, &root, true);
+    if found.is_none() {
+        let home = dirs::home_dir();
+        let home = home.as_deref().and_then(Path::to_str);
+        let blocks = v.pointer("/message/content").and_then(Value::as_array);
+        found = blocks.into_iter().flatten().find_map(|block| {
+            if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+                return None;
+            }
+            let input = block.get("input")?;
+            ["file_path", "path", "notebook_path"]
+                .iter()
+                .find_map(|k| input.get(*k).and_then(Value::as_str))
+                .and_then(|p| area_under(p, &root, false))
+                .filter(|a| !is_scratch_area(a))
+                .or_else(|| {
+                    input
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .and_then(|c| area_in_command(c, &root, home))
+                })
+        });
+    }
+    let Some(found) = found else { return };
+    // Names come from the log: bound their length and their number.
+    let distinct: HashSet<&String> = data.areas.keys().map(|(_, a)| a).collect();
+    let over = found.len() > MAX_AREA_KEY
+        || (!distinct.contains(&found) && distinct.len() >= MAX_AREAS_PER_FILE);
+    st.area = Some(if over { OTHER_AREA.to_string() } else { found });
+}
+
+/// Books a priced event to the area in force. Only models billed to the
+/// Claude card: rows that `split_models` later moves to another card must
+/// not stay behind in this card's areas.
+fn add_area(st: &ClaudeFileState, data: &mut FileData, ts: DateTime<Utc>, model: &str, cost: f64, tokens: f64) {
+    if !model.starts_with("claude") && model != "unattributed" {
+        return;
+    }
+    let area = st.area.clone().unwrap_or_else(|| UNSORTED_AREA.to_string());
+    let entry = data.areas.entry((day_of_utc(ts), area)).or_insert((0.0, 0.0));
+    entry.0 += cost;
+    entry.1 += tokens;
+}
+
 fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
     if !line.contains("\"type\":\"assistant\"") {
         return;
@@ -1456,6 +1592,10 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
     if v.get("type").and_then(Value::as_str) != Some("assistant") {
         return;
     }
+    // Before the duplicate check on purpose: Claude Code logs one content
+    // block per line, so a message's tool call arrives on a later line than
+    // the one that carried its cost, and that later line is a "duplicate".
+    claude_area(st, &v, data);
     let Some(ts) = parse_ts(v.get("timestamp")) else { return };
     let usage = v.pointer("/message/usage").cloned().unwrap_or(Value::Null);
     let Some(t) = claude_tokens(&usage) else { return };
@@ -1496,6 +1636,7 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
             let name = if synthetic { "unattributed" } else { model.as_str() };
             if t.total() > 0.0 || c > 0.0 {
                 add_event(data, ts, name, c, t.total());
+                add_area(st, data, ts, name, c, t.total());
             }
         }
         None if synthetic => {}
@@ -1503,6 +1644,7 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
             Some(c) => {
                 if t.total() > 0.0 || c > 0.0 {
                     add_event(data, ts, &model, c, t.total());
+                    add_area(st, data, ts, &model, c, t.total());
                 }
             }
             None => {
@@ -1534,7 +1676,10 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
             continue;
         }
         match claude_cost(advisor, &at, ts) {
-            Some(c) => add_event(data, ts, advisor, c, at.total()),
+            Some(c) => {
+                add_event(data, ts, advisor, c, at.total());
+                add_area(st, data, ts, advisor, c, at.total());
+            }
             None => note_unpriced(data, ts, advisor, at.total()),
         }
     }
@@ -1636,32 +1781,54 @@ fn project_of(root: &Path, file: &Path) -> Option<String> {
 
 /// Per-project windows, cut exactly like a card's. Projects with no spend in
 /// the last 30 days are left out; the rest sort by 30-day cost.
+/// Today / yesterday / last-30-days totals for each key of a day map.
+fn windows_by_key(days: DayMap, today: i32) -> HashMap<String, [Window; 3]> {
+    let mut out: HashMap<String, [Window; 3]> = HashMap::new();
+    for ((day, key), (cost, tokens)) in days {
+        let windows = out.entry(key).or_default();
+        let bump = |w: &mut Window| {
+            w.cost += cost;
+            w.tokens += tokens;
+        };
+        if day == today {
+            bump(&mut windows[0]);
+        }
+        if day == today - 1 {
+            bump(&mut windows[1]);
+        }
+        if day > today - TREND_DAYS as i32 && day <= today {
+            bump(&mut windows[2]);
+        }
+    }
+    out
+}
+
 fn project_spends(per_project: Vec<(String, FileData)>, today: i32) -> Vec<ProjectSpend> {
     let mut out: Vec<ProjectSpend> = per_project
         .into_iter()
         .filter_map(|(project, data)| {
-            let mut windows = [Window::default(), Window::default(), Window::default()];
-            for ((day, _model), (cost, tokens)) in data.days {
-                let bump = |w: &mut Window| {
-                    w.cost += cost;
-                    w.tokens += tokens;
-                };
-                if day == today {
-                    bump(&mut windows[0]);
-                }
-                if day == today - 1 {
-                    bump(&mut windows[1]);
-                }
-                if day > today - TREND_DAYS as i32 && day <= today {
-                    bump(&mut windows[2]);
-                }
+            // Every model folds into one key: the project's own totals.
+            let folded = data.days.into_iter().map(|((day, _), v)| ((day, String::new()), v));
+            let mut totals: DayMap = HashMap::new();
+            for (key, (cost, tokens)) in folded {
+                let entry = totals.entry(key).or_insert((0.0, 0.0));
+                entry.0 += cost;
+                entry.1 += tokens;
             }
-            let [today_w, yesterday, last30] = windows;
+            let [today_w, yesterday, last30] =
+                windows_by_key(totals, today).remove("").unwrap_or_default();
+            let mut areas: Vec<AreaSpend> = windows_by_key(data.areas, today)
+                .into_iter()
+                .filter(|(_, w)| w[2].cost > 0.004 || w[2].tokens > 0.0)
+                .map(|(area, [today, yesterday, last30])| AreaSpend { area, today, yesterday, last30 })
+                .collect();
+            areas.sort_by(|a, b| b.last30.cost.total_cmp(&a.last30.cost).then_with(|| a.area.cmp(&b.area)));
             (last30.cost > 0.004 || last30.tokens > 0.0).then_some(ProjectSpend {
                 project,
                 today: today_w,
                 yesterday,
                 last30,
+                areas,
             })
         })
         .collect();
@@ -3241,6 +3408,7 @@ mod tests {
                 mtime_nanos: 123_456_700, // NTFS 100ns precision must survive
                 size: 4096,
                 days: vec![(739_000, "claude-fable-5".into(), 1.25, 40_000.0)],
+                areas: vec![(739_000, "acme".into(), 1.25, 40_000.0)],
                 unpriced: vec![("mystery-model".into(), 3)],
                 probes: vec![
                     PriceProbe::Lookup {
@@ -3257,6 +3425,8 @@ mod tests {
                 claude: Some(ClaudeFileState {
                     seen: ["msg_1:req_1".into()].into_iter().collect(),
                     seen_mids: [("msg_1".into(), false)].into_iter().collect(),
+                    root: Some("/work".into()),
+                    area: Some("acme".into()),
                 }),
                 pi_seen: vec!["pi-msg-1".into()],
             }],
@@ -3270,6 +3440,7 @@ mod tests {
         assert_eq!(a.path, b.path);
         assert_eq!((a.mtime_secs, a.mtime_nanos, a.size), (b.mtime_secs, b.mtime_nanos, b.size));
         assert_eq!(a.days, b.days);
+        assert_eq!(a.areas, b.areas);
         assert_eq!(a.unpriced, b.unpriced);
         assert_eq!(a.probes, b.probes);
         assert_eq!(a.prefix_head, b.prefix_head);
@@ -3281,6 +3452,10 @@ mod tests {
             b.claude.as_ref().map(|s| s.seen.len())
         );
         assert_eq!(a.pi_seen, b.pi_seen);
+        // A tail parse resumes from this checkpoint: the area in force has
+        // to survive, or the next lines would book to "(unsorted)".
+        let (sa, sb) = (a.claude.as_ref().unwrap(), b.claude.as_ref().unwrap());
+        assert_eq!((&sa.root, &sa.area), (&sb.root, &sb.area));
     }
 
     /// A v2 cache (no probes/corrections fields) must not load as v3 —
@@ -4157,6 +4332,153 @@ mod tests {
             claude_line(&mut st, line, &mut data);
         }
         data
+    }
+
+    // ---- Claude: work areas ---------------------------------------------
+
+    #[test]
+    fn area_is_the_first_folder_under_the_session_root() {
+        let root = "/Users/me/work";
+        assert_eq!(area_under("/Users/me/work/acme/src/a.rs", root, false).as_deref(), Some("acme"));
+        assert_eq!(area_under("/Users/me/work/acme", root, true).as_deref(), Some("acme"), "a cwd is a folder");
+        assert_eq!(area_under("/Users/me/work/notes.md", root, false), None, "a file in the root names no area");
+        assert_eq!(area_under("/Users/me/work", root, true), None);
+        assert_eq!(area_under("/Users/me/workshop/x.rs", root, false), None, "prefix must end at a separator");
+        assert_eq!(area_under("/tmp/scratch/x.rs", root, false), None);
+        // Windows separators are normalised; the area keeps its spelling.
+        assert_eq!(area_under(r"C:\work\Acme\a.rs", r"C:\work", false).as_deref(), Some("Acme"));
+    }
+
+    #[test]
+    fn bash_commands_yield_the_first_path_under_the_root() {
+        let root = "/Users/me/work";
+        assert_eq!(
+            area_in_command("cd /Users/me/work/acme && cargo test 2>&1 | tail -3", root, None).as_deref(),
+            Some("acme")
+        );
+        assert_eq!(
+            area_in_command("ls /tmp/x; cat ~/work/beta/README.md", root, Some("/Users/me")).as_deref(),
+            Some("beta"),
+            "~ expands to the home directory"
+        );
+        assert_eq!(area_in_command("git status", root, None), None);
+    }
+
+    fn area_line(mid: &str, cwd: &str, cost: f64, tool: Option<(&str, &str, &str)>) -> String {
+        let content = match tool {
+            Some((name, key, value)) => json!([{"type": "tool_use", "name": name, "input": {key: value}}]),
+            None => json!([{"type": "text", "text": "ok"}]),
+        };
+        json!({
+            "type": "assistant", "timestamp": "2026-09-20T12:00:00Z", "cwd": cwd, "requestId": format!("r-{mid}"),
+            "costUSD": cost,
+            "message": {"id": mid, "model": "claude-opus-5", "content": content,
+                        "usage": {"input_tokens": 10, "output_tokens": 5}}
+        })
+        .to_string()
+    }
+
+    fn area_costs(data: &FileData) -> Vec<(String, f64)> {
+        let mut out: HashMap<String, f64> = HashMap::new();
+        for ((_, area), (cost, _)) in &data.areas {
+            *out.entry(area.clone()).or_insert(0.0) += cost;
+        }
+        let mut out: Vec<_> = out.into_iter().collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    #[test]
+    fn spend_follows_the_working_directory_then_the_files_touched() {
+        let root = "/Users/me/work";
+        let data = claude_run(&[
+            area_line("m1", root, 1.0, None),                                     // nothing known yet
+            area_line("m2", "/Users/me/work/acme/src", 2.0, None),                // cwd moved into acme
+            area_line("m3", root, 4.0, None),                                     // back at the root: sticky
+            // Same message as m3 (a later content block): not counted again,
+            // but the file it touches moves the session to beta.
+            area_line("m3", root, 4.0, Some(("Read", "file_path", "/Users/me/work/beta/x.md"))),
+            area_line("m4", root, 8.0, None),
+            // Cost and tool call on the SAME line: the message that reaches
+            // into gamma is gamma work, so its own dollars go there too.
+            area_line("m5", root, 16.0, Some(("Bash", "command", "cd /Users/me/work/gamma && ls"))),
+            area_line("m6", root, 32.0, None),
+        ]);
+        assert_eq!(
+            area_costs(&data),
+            [
+                ("(unsorted)".to_string(), 1.0),
+                ("acme".to_string(), 6.0), // m2 by cwd, m3 sticky (its tool call came on a later line)
+                ("beta".to_string(), 8.0), // m4, after m3's later block touched beta
+                ("gamma".to_string(), 48.0), // m5 and m6
+            ]
+        );
+        // Areas are a second view of the same dollars, never extra ones.
+        let total: f64 = data.days.values().map(|(c, _)| c).sum();
+        let by_area: f64 = data.areas.values().map(|(c, _)| c).sum();
+        assert_eq!(total, 63.0);
+        assert_eq!(by_area, total);
+    }
+
+    #[test]
+    fn touching_a_scratch_folder_does_not_change_the_work_area() {
+        let root = "/w";
+        let data = claude_run(&[
+            area_line("m0", root, 0.5, None), // the first line fixes the session root
+            area_line("m1", "/w/acme", 1.0, None),
+            // Reading a screenshot or a dotfile is part of the acme work.
+            area_line("m2", root, 2.0, Some(("Read", "file_path", "/w/_screenshots/shot.png"))),
+            area_line("m3", root, 4.0, Some(("Bash", "command", "cat /w/.cache/x && ls /w/beta/src"))),
+            area_line("m4", root, 8.0, None),
+        ]);
+        assert_eq!(
+            area_costs(&data),
+            [("(unsorted)".to_string(), 0.5), ("acme".to_string(), 3.0), ("beta".to_string(), 12.0)],
+            "m2 stays in acme; m3's command skips .cache and lands in beta"
+        );
+        // Working *inside* such a folder is still a deliberate place to be.
+        let inside = claude_run(&[
+            area_line("m0", root, 0.5, None),
+            area_line("m1", "/w/_screenshots", 1.0, None),
+        ]);
+        assert_eq!(
+            area_costs(&inside),
+            [("(unsorted)".to_string(), 0.5), ("_screenshots".to_string(), 1.0)]
+        );
+    }
+
+    #[test]
+    fn area_names_from_logs_are_bounded() {
+        let root = "/w";
+        let mut lines = Vec::new();
+        for i in 0..(MAX_AREAS_PER_FILE + 10) {
+            lines.push(area_line(&format!("m{i}"), &format!("/w/area{i}"), 1.0, None));
+        }
+        lines.insert(0, area_line("first", root, 1.0, None));
+        lines.push(area_line("long", &format!("/w/{}", "x".repeat(MAX_AREA_KEY + 5)), 1.0, None));
+        let data = claude_run(&lines);
+        let names: HashSet<&String> = data.areas.keys().map(|(_, a)| a).collect();
+        assert!(names.len() <= MAX_AREAS_PER_FILE + 2, "{}", names.len());
+        assert!(names.contains(&OTHER_AREA.to_string()));
+        assert!(names.iter().all(|n| n.len() <= MAX_AREA_KEY));
+    }
+
+    #[test]
+    fn areas_survive_a_merge_and_reach_the_project_rows() {
+        let today = 800_000;
+        let mut a = FileData::default();
+        a.areas.insert((today, "acme".into()), (5.0, 50.0));
+        let mut b = FileData::default();
+        b.areas.insert((today, "acme".into()), (1.0, 10.0));
+        b.areas.insert((today - 3, "beta".into()), (9.0, 90.0));
+        b.days.insert((today, "claude-opus-5".into()), (15.0, 150.0));
+        merge_data(&mut a, b);
+        let rows = project_spends(vec![("/w".into(), a)], today);
+        let areas = &rows[0].areas;
+        assert_eq!(areas.iter().map(|x| x.area.as_str()).collect::<Vec<_>>(), ["beta", "acme"], "by 30-day cost");
+        assert_eq!(areas[1].today.cost, 6.0);
+        assert_eq!(areas[0].today.cost, 0.0);
+        assert_eq!(areas[0].last30.cost, 9.0);
     }
 
     #[test]
