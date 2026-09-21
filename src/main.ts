@@ -2301,8 +2301,14 @@ function generateLensMap(w: number, h: number): string | null {
   return canvas.toDataURL();
 }
 
+/// SVG `url()` filters inside backdrop-filter only render on Chromium
+/// (WebView2). WebKit (the macOS webview) accepts the value but paints no
+/// backdrop at all, which also kills the plain CSS blur it overrides and
+/// leaves glass surfaces see-through. There the stylesheet blur stays.
+const SVG_BACKDROP_OK = /Chrome\//.test(navigator.userAgent);
+
 function applyLens(el: HTMLElement | null, filterId: string, imgId: string): void {
-  if (!el) return;
+  if (!el || !SVG_BACKDROP_OK) return;
   const w = 4 * Math.round(el.offsetWidth / 4);
   const h = 4 * Math.round(el.offsetHeight / 4);
   if (w < 8 || h < 8) return;
@@ -2347,6 +2353,8 @@ let lensReady = false;
 function initLiquidLens(): void {
   if (config.glassEffects === false || lensReady) return;
   lensReady = true;
+  document.body.classList.toggle("no-svg-lens", !SVG_BACKDROP_OK);
+  if (!SVG_BACKDROP_OK) return;
   const surfaces: [string, string, HTMLElement | null][] = [
     ["lens-side", "lens-map-side", document.querySelector(".sidebar")],
     ["lens-footer", "lens-map-footer", document.querySelector(".main-col footer")],
@@ -2414,6 +2422,11 @@ function setupTooltips(): void {
     clearTimeout(timer);
     timer = window.setTimeout(() => {
       if (anchor !== el || !document.contains(el)) return;
+      // A bubble that repeats text already fully on screen only covers
+      // its neighbours. Show it when it adds something or the text is cut off.
+      const shown = (el.textContent ?? "").trim();
+      const clipped = el.scrollWidth > el.clientWidth + 1;
+      if (shown === (el.dataset.tip ?? "").trim() && !clipped) return;
       tip.textContent = el.dataset.tip ?? "";
       tip.hidden = false;
       const r = el.getBoundingClientRect();

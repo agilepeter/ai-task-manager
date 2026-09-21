@@ -1715,6 +1715,15 @@ footer {
     inset -1.5px 0 1.5px rgba(255, 255, 255, 0.1);
 }
 
+/* WebKit (macOS): no SVG lens behind the bar, so the tint carries more of
+   the separation and scrolling rows never read through it. */
+body.no-svg-lens footer {
+  background: rgba(9, 9, 11, 0.78);
+}
+:root[data-theme="light"] body.no-svg-lens footer {
+  background: rgba(255, 255, 255, 0.86);
+}
+
 :root[data-theme="light"] footer {
   background: rgba(255, 255, 255, 0.55);
   border-top: 1px solid rgba(0, 0, 0, 0.08);

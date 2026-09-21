@@ -175,6 +175,13 @@ fn push_quota(metrics: &mut Vec<Metric>, node: Option<&Value>, label: &str, rese
         metrics.push(Metric::text(label, "Unlimited".into()));
         return;
     }
+    // An entitlement of 0 means the plan carries none of this quota. GitHub
+    // still reports 0% remaining for it, which would meter as a reached
+    // limit and trip the "almost out" alert for something never owned.
+    if node.get("entitlement").and_then(Value::as_f64) == Some(0.0) {
+        metrics.push(Metric::text(label, "Not included in plan".into()));
+        return;
+    }
     let Some(percent_remaining) = node.get("percent_remaining").and_then(Value::as_f64) else {
         return;
     };
@@ -191,7 +198,31 @@ fn push_quota(metrics: &mut Vec<Metric>, node: Option<&Value>, label: &str, rese
 
 #[cfg(test)]
 mod tests {
-    use super::{copilot_json_token, hosts_yml_token};
+    use super::{copilot_json_token, hosts_yml_token, push_quota};
+    use serde_json::json;
+
+    #[test]
+    fn zero_entitlement_is_not_included_rather_than_a_reached_limit() {
+        // A plan with no premium credits reports 0 of 0 and 0% remaining.
+        // That is "nothing to run out of", not "limit reached".
+        let node = json!({"entitlement": 0, "remaining": 0, "percent_remaining": 0.0});
+        let mut metrics = Vec::new();
+        push_quota(&mut metrics, Some(&node), "Credits", None);
+        assert_eq!(metrics.len(), 1);
+        assert_eq!(metrics[0].kind, "text");
+        assert_eq!(metrics[0].value.as_deref(), Some("Not included in plan"));
+        assert_eq!(metrics[0].used_percent, None);
+    }
+
+    #[test]
+    fn a_real_quota_still_meters_as_progress() {
+        let node = json!({"entitlement": 300, "remaining": 75, "percent_remaining": 25.0});
+        let mut metrics = Vec::new();
+        push_quota(&mut metrics, Some(&node), "Credits", None);
+        assert_eq!(metrics[0].kind, "progress");
+        assert_eq!(metrics[0].used_percent, Some(75.0));
+        assert_eq!(metrics[0].detail.as_deref(), Some("75 of 300 left"));
+    }
 
     #[test]
     fn copilot_json_is_host_scoped() {
