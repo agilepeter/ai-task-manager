@@ -8,8 +8,9 @@
 //! one, and `never_carries_*` plants such values in the inputs and checks
 //! the serialized report for them.
 //!
-//! Version 1 covers the local picture: inventory, guardrails, spend, and the
-//! computed opportunities. Live plan limits are not included yet.
+//! It covers the local picture (inventory, guardrails, spend, the computed
+//! opportunities) and live plan limits for the tools that sign in through a
+//! local credential: how much of each limit is used and when it resets.
 
 use crate::inventory::Inventory;
 use crate::spend::ProviderSpend;
@@ -39,6 +40,17 @@ pub struct SeatSpend {
     pub today: f64,
     /// Up to five (model, 30-day cost), largest first.
     pub top_models: Vec<(String, f64)>,
+}
+
+/// One plan limit on one tool: enough to see headroom and right-size seats.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatLimit {
+    pub provider: String,
+    pub plan: Option<String>,
+    pub metric: String,
+    pub used_percent: f64,
+    pub resets_at: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -71,6 +83,9 @@ pub struct SeatReport {
     pub deny_rules: usize,
     pub spend: Vec<SeatSpend>,
     pub findings: Vec<SeatFinding>,
+    /// Absent in reports from agents that predate it.
+    #[serde(default)]
+    pub limits: Vec<SeatLimit>,
 }
 
 fn pinned(package: &str) -> bool {
@@ -80,6 +95,29 @@ fn pinned(package: &str) -> bool {
 /// Titles are built from counts and server names. The detail text is left
 /// out: it can quote a dollar figure next to a folder-derived phrase, and the
 /// dashboard does not need it.
+/// Limits from live snapshots. Only signed-in tools with real progress
+/// readings; a provider id is cut to its family so no account hash goes out,
+/// and metric labels that a server could have made up are bounded.
+pub fn limits_from(snapshots: &[crate::providers::Snapshot]) -> Vec<SeatLimit> {
+    snapshots
+        .iter()
+        .filter(|s| s.status == "ok" && !s.stale)
+        .flat_map(|s| {
+            s.metrics.iter().filter(|m| m.kind == "progress").filter_map(move |m| {
+                let used = m.used_percent.filter(|u| u.is_finite())?;
+                Some(SeatLimit {
+                    provider: crate::family_of(&s.id),
+                    plan: s.plan.as_ref().map(|p| p.chars().take(40).collect()),
+                    metric: m.label.chars().take(40).collect(),
+                    used_percent: used.clamp(0.0, 100.0),
+                    resets_at: m.resets_at,
+                })
+            })
+        })
+        .take(60)
+        .collect()
+}
+
 pub fn build(
     seat_id: &str,
     label: &str,
@@ -138,6 +176,7 @@ pub fn build(
             .iter()
             .map(|o| SeatFinding { id: o.id.clone(), kind: o.kind.clone(), title: o.title.clone() })
             .collect(),
+        limits: Vec::new(),
     }
 }
 
@@ -155,7 +194,7 @@ pub fn parse(raw: &str) -> Result<SeatReport, String> {
     if !id_ok {
         return Err("bad seat id".into());
     }
-    if report.servers.len() > 500 || report.tools.len() > 100 || report.findings.len() > 100 {
+    if report.servers.len() > 500 || report.tools.len() > 100 || report.findings.len() > 100 || report.limits.len() > 100 {
         return Err("report has too many entries".into());
     }
     Ok(report)
@@ -270,6 +309,41 @@ mod tests {
         assert_eq!(r.spend[0].provider, "claude", "the account hash is dropped");
         assert_eq!(r.spend[0].last30, 120.0);
         assert_eq!(r.findings[0].title, "30% of spend has no work area");
+    }
+
+    #[test]
+    fn limits_carry_headroom_and_no_account_identity() {
+        use crate::providers::{Metric, Snapshot};
+        let mut stale = Snapshot::ok("codex", "Codex", None, vec![Metric::progress("Weekly", 10.0, None)]);
+        stale.stale = true;
+        let snaps = [
+            Snapshot::ok(
+                "claude@ab12cd34",
+                "Claude · dana@acme-portal",
+                Some("max".into()),
+                vec![
+                    Metric::progress("Weekly", 140.0, Some("dana@acme-portal".into())).with_reset(Some(99), None),
+                    Metric::text("Plan", "Max".into()),
+                    Metric::progress("Broken", f64::NAN, None),
+                ],
+            ),
+            stale,
+            Snapshot::no_credentials("cursor", "Cursor", "sign in"),
+        ];
+        let limits = limits_from(&snaps);
+        assert_eq!(limits, [SeatLimit {
+            provider: "claude".into(), plan: Some("max".into()), metric: "Weekly".into(), used_percent: 100.0, resets_at: Some(99),
+        }]);
+        let wire = serde_json::to_string(&limits).unwrap();
+        for secret in PRIVATE {
+            assert!(!wire.contains(secret), "{secret} leaked into {wire}");
+        }
+        assert!(!wire.contains("dana"), "the card name and the metric detail stay behind");
+        // A report from an older agent has no limits field and still parses.
+        let (inv, spend) = inputs();
+        let mut old = serde_json::to_value(build("seat-abcdefgh", "x", 1, &inv, &spend)).unwrap();
+        old.as_object_mut().unwrap().remove("limits");
+        assert!(parse(&old.to_string()).unwrap().limits.is_empty());
     }
 
     #[test]

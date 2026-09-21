@@ -13,12 +13,14 @@ pub mod i18n;
 pub mod inventory;
 pub mod ledger;
 pub mod pin;
+pub mod policy;
 pub mod pricing;
 pub mod providers;
 pub mod rt;
 pub mod seat;
 pub mod spend;
 pub mod trust;
+pub mod usage;
 
 /// The provider family of a card id: "claude@ab12cd34" → "claude".
 pub fn family_of(id: &str) -> String {

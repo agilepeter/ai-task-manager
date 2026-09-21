@@ -2,15 +2,15 @@
 //! (see `aitm_core::seat` for exactly what that holds, and what it never
 //! holds) and either prints it or sends it to a team's own collector.
 //!
-//!   aitm-agent report [--label "Dana's MacBook"]
-//!   aitm-agent push --to https://collector.example.com [--label …]
+//!   aitm-agent report [--label "Dana's MacBook"] [--no-limits]
+//!   aitm-agent push --to https://collector.example.com [--label …] [--no-limits]
 //!
 //! The collector token comes from the AITM_COLLECTOR_TOKEN environment
 //! variable, never from an argument: arguments show up in process lists.
 //! There is no daemon and no schedule in here on purpose. Run it from cron,
 //! launchd or Task Scheduler, so IT decides when a seat reports.
 
-use aitm_core::{coaching, inventory, providers, rt, seat, spend};
+use aitm_core::{coaching, inventory, providers, rt, seat, spend, usage};
 
 fn arg(args: &[String], flag: &str) -> Option<String> {
     args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
@@ -28,7 +28,7 @@ fn transport_ok(url: &str) -> bool {
     })
 }
 
-fn build_report(label: Option<String>) -> Result<seat::SeatReport, String> {
+fn build_report(label: Option<String>, no_limits: bool) -> Result<seat::SeatReport, String> {
     let mut inv = inventory::scan();
     let spend = spend::collect(None);
     let claude = spend.iter().find(|p| p.id == "claude");
@@ -38,14 +38,21 @@ fn build_report(label: Option<String>) -> Result<seat::SeatReport, String> {
         .or_else(|| std::env::var("AITM_SEAT_LABEL").ok())
         .filter(|l| !l.trim().is_empty())
         .unwrap_or_else(|| "Unnamed seat".to_string());
-    Ok(seat::build(&seat_id, label.trim(), chrono::Utc::now().timestamp_millis(), &inv, &spend))
+    let mut report = seat::build(&seat_id, label.trim(), chrono::Utc::now().timestamp_millis(), &inv, &spend);
+    // Live limits talk to each tool's own vendor API, as the tools do. An
+    // offline seat, or --no-limits, still reports everything that is local.
+    if !no_limits {
+        report.limits = seat::limits_from(&rt::block_on(usage::local_credential_snapshots()));
+    }
+    Ok(report)
 }
 
 fn run(args: &[String]) -> Result<String, String> {
     let label = arg(args, "--label");
+    let no_limits = args.iter().any(|a| a == "--no-limits");
     match args.first().map(String::as_str) {
         Some("report") => {
-            serde_json::to_string_pretty(&build_report(label)?).map_err(|e| e.to_string())
+            serde_json::to_string_pretty(&build_report(label, no_limits)?).map_err(|e| e.to_string())
         }
         Some("push") => {
             let to = arg(args, "--to").ok_or("push needs --to <collector url>")?;
@@ -56,7 +63,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 .ok()
                 .filter(|t| !t.is_empty())
                 .ok_or("set AITM_COLLECTOR_TOKEN to the collector's token")?;
-            let report = build_report(label)?;
+            let report = build_report(label, no_limits)?;
             let url = format!("{}/v1/report", to.trim_end_matches('/'));
             rt::block_on(async {
                 let resp = providers::http()

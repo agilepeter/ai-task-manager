@@ -15,10 +15,18 @@ limits, spend, and the local AI setup. Cargo workspace:
   one folder of JSON, token on every request, binds to localhost by default.
 - `src/`: vanilla TS UI.
 
+The collector reads an optional `policy.json` from its data folder on every request
+(`crates/core/src/policy.rs`: allowed / blocked packages with `*`, require pinned, allow remote,
+minimum deny rules, allowed tools). **Conformance is computed on the collector from what a
+seat reported**; seats never receive the policy and cannot claim to conform. A broken policy
+file means "no policy", never an error page.
+
 **The seat report (`crates/core/src/seat.rs`) is the privacy boundary of the enterprise half.**
 It has no field that could hold a prompt, path, folder, work area, client name, session id or
 credential, and `never_carries_*` plants those in its inputs. Add a field only with a reason
-an organisation needs it, and extend that test. Finding *titles* go out; *details* do not.
+an organisation needs it, and extend that test. Finding *titles* go out; *details* do not. Live limits go out as provider family, plan,
+metric label, percent and reset time only: never the card name or a metric's detail text,
+which can hold an account email. `aitm-agent --no-limits` skips the vendor calls entirely.
 
 ## Provenance
 

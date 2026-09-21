@@ -72,6 +72,11 @@ fn glob(pattern: &str, text: &str) -> bool {
     p[pi..].iter().all(|c| *c == '*')
 }
 
+/// The same `*` matcher, for other rule sets (the team policy).
+pub fn glob_match(pattern: &str, text: &str) -> bool {
+    !pattern.is_empty() && glob(pattern, text)
+}
+
 pub fn pattern_matches(pattern: &str, area: &str) -> bool {
     let pattern = pattern.trim().trim_matches('/');
     if pattern.is_empty() {

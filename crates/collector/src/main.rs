@@ -2,6 +2,10 @@
 //!
 //!   AITM_COLLECTOR_TOKEN=… aitm-collector [--bind 127.0.0.1:8787] [--data ./aitm-data]
 //!
+//! A `policy.json` in the data folder (see `aitm_core::policy`) turns the
+//! dashboard into a conformance view. It is read on each request, so editing
+//! the file is all it takes; seats never receive it.
+//!
 //! Self-hosted and small on purpose: one process, one folder of JSON files
 //! (the latest report per seat), no database, no accounts. Every request
 //! needs the token, the dashboard included. It binds to this machine unless
@@ -9,6 +13,7 @@
 //! controls before binding it wider. What a report can contain is fixed by
 //! `aitm_core::seat`: no prompts, paths, folder or client names, credentials.
 
+use aitm_core::policy::{self, Policy};
 use aitm_core::seat::{self, SeatReport};
 use std::path::{Path, PathBuf};
 
@@ -101,12 +106,30 @@ fn top_tier_share(report: &SeatReport) -> Option<f64> {
     (all > 0.0).then(|| top / all)
 }
 
+fn load_policy(dir: &Path) -> Option<Policy> {
+    policy::parse(&std::fs::read_to_string(dir.join("policy.json")).ok()?)
+}
+
+/// The limit closest to its ceiling: what decides whether a seat is squeezed.
+fn tightest(report: &SeatReport) -> Option<String> {
+    report
+        .limits
+        .iter()
+        .max_by(|a, b| a.used_percent.total_cmp(&b.used_percent))
+        .map(|l| format!("{} {} {:.0}%", l.provider, l.metric, l.used_percent))
+}
+
 pub fn dashboard(reports: &[SeatReport], now: i64) -> String {
+    dashboard_with(reports, None, now)
+}
+
+pub fn dashboard_with(reports: &[SeatReport], policy: Option<&Policy>, now: i64) -> String {
     let spend: f64 = reports.iter().flat_map(|r| r.spend.iter()).map(|s| s.last30).sum();
     let servers: usize = reports.iter().map(|r| r.servers.len()).sum();
     let unpinned: usize =
         reports.iter().flat_map(|r| r.servers.iter()).filter(|s| s.pinned == Some(false)).count();
     let unguarded = reports.iter().filter(|r| r.allow_rules + r.ask_rules + r.deny_rules == 0).count();
+    let out_of_policy = policy.map(|p| reports.iter().filter(|r| !policy::check(r, p).is_empty()).count());
 
     // Which servers are in use across the team, most common first. Counted
     // in seats: one machine running a server in two apps is still one seat.
@@ -135,8 +158,18 @@ pub fn dashboard(reports: &[SeatReport], now: i64) -> String {
             let spend: f64 = r.spend.iter().map(|s| s.last30).sum();
             let loose = r.servers.iter().filter(|s| s.pinned == Some(false)).count();
             let rules = r.allow_rules + r.ask_rules + r.deny_rules;
+            let verdict = match policy.map(|p| policy::check(r, p)) {
+                None => "–".to_string(),
+                Some(v) if v.is_empty() => "Conforms".to_string(),
+                Some(v) => format!(
+                    "<b class=warn>{} issue{}</b><ul>{}</ul>",
+                    v.len(),
+                    if v.len() == 1 { "" } else { "s" },
+                    v.iter().take(12).map(|x| format!("<li>{}</li>", esc(&x.detail))).collect::<String>()
+                ),
+            };
             format!(
-                "<tr{}><td>{}</td><td>{}</td><td>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td>{}</td></tr>",
+                "<tr{}><td>{}</td><td>{}</td><td>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
                 if stale { " class=stale" } else { "" },
                 esc(&r.label),
                 esc(&seen),
@@ -146,6 +179,8 @@ pub fn dashboard(reports: &[SeatReport], now: i64) -> String {
                 if rules == 0 { "<b class=warn>none</b>".to_string() } else { rules.to_string() },
                 dollars(spend),
                 top_tier_share(r).map_or("–".to_string(), |s| format!("{:.0}%", s * 100.0)),
+                esc(&tightest(r).unwrap_or_else(|| "–".to_string())),
+                verdict,
                 esc(&r.findings.iter().map(|f| f.title.as_str()).collect::<Vec<_>>().join(" · ")),
             )
         })
@@ -175,7 +210,7 @@ p.sub{{margin:0 0 20px;color:var(--mut)}}
 .tile{{background:var(--card);border-radius:12px;padding:12px 14px}} .tile b{{display:block;font-size:22px;letter-spacing:-.02em}} .tile span{{color:var(--mut);font-size:12px}}
 .scroll{{overflow-x:auto}} table{{border-collapse:collapse;width:100%;min-width:720px}}
 th,td{{text-align:left;padding:8px 10px;border-top:1px solid var(--line);vertical-align:top}} th{{color:var(--mut);font-weight:500;font-size:12px;border-top:none}}
-td:nth-child(-n+2){{white-space:nowrap}} td.n,th.n{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}} .warn{{color:var(--warn)}} tr.stale td{{color:var(--mut)}}
+td:nth-child(-n+2){{white-space:nowrap}} td ul{{margin:4px 0 0;padding-left:16px;color:var(--mut);font-size:12px}} td.n,th.n{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}} .warn{{color:var(--warn)}} tr.stale td{{color:var(--mut)}}
 footer{{margin-top:28px;color:var(--mut);font-size:12px}}
 </style></head><body><main>
 <h1>AI tooling across the team</h1>
@@ -185,9 +220,10 @@ footer{{margin-top:28px;color:var(--mut);font-size:12px}}
 <div class="tile"><b>{}</b><span>MCP servers in use</span></div>
 <div class="tile"><b>{}</b><span>of them unpinned</span></div>
 <div class="tile"><b>{}</b><span>seats with no permission rules</span></div>
+<div class="tile"><b>{}</b><span>{}</span></div>
 <div class="tile"><b>{}</b><span>API-equivalent usage, 30 days</span></div>
 </div>
-<h2>Seats</h2><div class="scroll"><table><thead><tr><th>Seat</th><th>Last report</th><th>AI tools</th><th class=n>MCP servers</th><th class=n>Unpinned</th><th class=n>Permission rules</th><th class=n>30-day usage</th><th class=n>Largest models</th><th>Findings</th></tr></thead><tbody>{}</tbody></table></div>
+<h2>Seats</h2><div class="scroll"><table><thead><tr><th>Seat</th><th>Last report</th><th>AI tools</th><th class=n>MCP servers</th><th class=n>Unpinned</th><th class=n>Permission rules</th><th class=n>30-day usage</th><th class=n>Largest models</th><th>Tightest limit</th><th>Policy</th><th>Findings</th></tr></thead><tbody>{}</tbody></table></div>
 <h2>MCP servers across the team</h2><div class="scroll"><table><thead><tr><th>Server</th><th class=n>Seats</th><th></th></tr></thead><tbody>{}</tbody></table></div>
 <footer>Usage is priced at API rates from each seat's local logs: on flat-rate plans it is equivalent value, not a charge. A greyed seat has not reported in over a week.</footer>
 </main></body></html>"#,
@@ -197,8 +233,10 @@ footer{{margin-top:28px;color:var(--mut);font-size:12px}}
         servers,
         unpinned,
         unguarded,
+        out_of_policy.map_or("–".to_string(), |n| n.to_string()),
+        if policy.is_some() { "seats out of policy" } else { "no policy.json set" },
         dollars(spend),
-        if seat_rows.is_empty() { "<tr><td colspan=9>No seat has reported yet.</td></tr>".to_string() } else { seat_rows },
+        if seat_rows.is_empty() { "<tr><td colspan=11>No seat has reported yet.</td></tr>".to_string() } else { seat_rows },
         if fleet_rows.is_empty() { "<tr><td colspan=3>None yet.</td></tr>".to_string() } else { fleet_rows },
     )
 }
@@ -226,7 +264,18 @@ pub fn handle(method: &str, url: &str, auth: Option<&str>, body: &str, dir: &Pat
             Ok(json) => reply(200, "application/json", json),
             Err(e) => reply(500, "text/plain", e.to_string()),
         },
-        ("GET", "/") => reply(200, "text/html; charset=utf-8", dashboard(&load_all(dir), now)),
+        ("GET", "/") => {
+            reply(200, "text/html; charset=utf-8", dashboard_with(&load_all(dir), load_policy(dir).as_ref(), now))
+        }
+        // Conformance as data, for a team's own tooling.
+        ("GET", "/v1/conformance") => {
+            let Some(p) = load_policy(dir) else { return reply(404, "text/plain", "no policy.json in the data folder") };
+            let rows: Vec<serde_json::Value> = load_all(dir)
+                .iter()
+                .map(|r| serde_json::json!({"seatId": r.seat_id, "label": r.label, "violations": policy::check(r, &p)}))
+                .collect();
+            reply(200, "application/json", serde_json::Value::Array(rows).to_string())
+        }
         _ => reply(404, "text/plain", "not found"),
     }
 }
@@ -309,6 +358,10 @@ mod tests {
             spend: vec![SeatSpend { provider: "claude".into(), last30: 250.0, today: 4.0,
                 top_models: vec![("claude-opus-5".into(), 200.0), ("claude-sonnet-5".into(), 50.0)] }],
             findings: vec![SeatFinding { id: "mcp-unpinned".into(), kind: "tighten".into(), title: "1 MCP server runs an unpinned package".into() }],
+            limits: vec![
+                seat::SeatLimit { provider: "claude".into(), plan: Some("max".into()), metric: "Session".into(), used_percent: 12.0, resets_at: None },
+                seat::SeatLimit { provider: "claude".into(), plan: Some("max".into()), metric: "Weekly".into(), used_percent: 91.0, resets_at: None },
+            ],
         }
     }
 
@@ -344,6 +397,30 @@ mod tests {
         assert_eq!(handle("POST", "/v1/report", auth, "{}", &dir, TOKEN, 0).status, 400);
         assert_eq!(handle("POST", "/v1/report", auth, &"x".repeat(MAX_BODY + 1), &dir, TOKEN, 0).status, 413);
         assert_eq!(handle("GET", "/nope", auth, "", &dir, TOKEN, 0).status, 404);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_policy_file_turns_the_dashboard_into_a_conformance_view() {
+        let dir = tmp();
+        let auth = Some("Bearer correct-horse-battery");
+        let body = serde_json::to_string(&report("seat-aaaaaaaa", "Dana", 1)).unwrap();
+        assert_eq!(handle("POST", "/v1/report", auth, &body, &dir, TOKEN, 1).status, 200);
+        // No policy yet: the column is a dash and the data endpoint says so.
+        let html = handle("GET", "/", auth, "", &dir, TOKEN, 1).body;
+        assert!(html.contains("no policy.json set") && html.contains("claude Weekly 91%"), "the tightest limit, not the first");
+        assert_eq!(handle("GET", "/v1/conformance", auth, "", &dir, TOKEN, 1).status, 404);
+
+        std::fs::write(dir.join("policy.json"), r#"{"requirePinned": true, "minDenyRules": 3}"#).unwrap();
+        let html = handle("GET", "/", auth, "", &dir, TOKEN, 1).body;
+        assert!(html.contains("<b>1</b><span>seats out of policy</span>"));
+        assert!(html.contains("2 issues") && html.contains("docs-mcp without a pinned version"));
+        let data = handle("GET", "/v1/conformance", auth, "", &dir, TOKEN, 1).body;
+        assert!(data.contains("\"rule\":\"unpinned\"") && data.contains("\"rule\":\"deny-rules\""));
+        assert_eq!(handle("GET", "/v1/conformance", None, "", &dir, TOKEN, 1).status, 401);
+
+        std::fs::write(dir.join("policy.json"), "{broken").unwrap();
+        assert!(handle("GET", "/", auth, "", &dir, TOKEN, 1).body.contains("no policy.json set"), "a broken file is no policy, not an error page");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
