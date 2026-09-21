@@ -1,4 +1,5 @@
 import { setupViews } from "./inventory";
+import { setupLedger } from "./ledger";
 import { applySavedWide, cardExtras, refreshDetail, setupDetail } from "./detail";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -209,6 +210,8 @@ interface Config {
   dailySpendAlert: number;
   /** Window grown to show the list and the detail page side by side. */
   wideMode: boolean;
+  /** Days before a renewal to send its one reminder; 0 = off. */
+  renewalReminderDays: number;
   spendTab: SpendTab;
   spendMetric: "cost" | "tokens" | "mtok";
   showUsed: boolean;
@@ -246,6 +249,7 @@ const FRONTEND_CONFIG_KEYS = [
   "burnAlertPoints",
   "dailySpendAlert",
   "wideMode",
+  "renewalReminderDays",
   "spendTab",
   "spendMetric",
   "showUsed",
@@ -438,6 +442,7 @@ let config: Config = {
   burnAlertPoints: 15,
   dailySpendAlert: 0,
   wideMode: false,
+  renewalReminderDays: 3,
   spendTab: "today",
   spendMetric: "cost",
   showUsed: false,
@@ -4831,6 +4836,7 @@ async function initSettings(): Promise<void> {
   for (const [sel, key] of [
     ["#burn-alert", "burnAlertPoints"],
     ["#spend-alert", "dailySpendAlert"],
+    ["#renewal-reminder", "renewalReminderDays"],
   ] as const) {
     const el = document.querySelector<HTMLSelectElement>(sel)!;
     el.value = String(config[key]);
@@ -5029,6 +5035,7 @@ function syncSettingsControls(): void {
   setSelect("#timeformat", config.timeFormat);
   setSelect("#burn-alert", String(config.burnAlertPoints));
   setSelect("#spend-alert", String(config.dailySpendAlert));
+  setSelect("#renewal-reminder", String(config.renewalReminderDays));
   setSelect("#locale", config.locale);
   setCheck("#notify-reset", config.notifyReset);
   setCheck("#notify-almost", config.notifyAlmostOut);
@@ -5075,6 +5082,13 @@ window.addEventListener("DOMContentLoaded", () => {
   setupTrailFisheye();
   setupTooltips();
   setupViews();
+  setupLedger({
+    usage30: () => Object.fromEntries(lastSpend.map((s) => [s.id, s.last30.cost])),
+    tools: () =>
+      orderedSnapshots()
+        .filter((s) => s.status === "ok")
+        .map((s) => ({ id: s.id, name: s.name, plan: s.plan })),
+  });
   setupDetail({
     snapshot: (id) => lastSnapshots.find((s) => s.id === id),
     spend: (id) => lastSpend.find((s) => s.id === id),

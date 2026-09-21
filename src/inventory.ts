@@ -3,6 +3,7 @@
 // hands over names, shapes and counts only, never a config value.
 
 import { invoke } from "@tauri-apps/api/core";
+import { showLedger } from "./ledger";
 
 interface McpServer {
   name: string;
@@ -40,7 +41,7 @@ interface Inventory {
   opportunities: Opportunity[];
 }
 
-type View = "usage" | "inventory";
+type View = "usage" | "inventory" | "ledger";
 type KindFilter = "all" | "tighten" | "learn";
 
 const ALL_SCOPES = "__all__";
@@ -252,10 +253,11 @@ async function load(): Promise<void> {
 }
 
 function show(view: View): void {
-  const usage = document.querySelector<HTMLElement>("#providers");
-  const inv = document.querySelector<HTMLElement>("#inventory");
-  if (usage) usage.hidden = view !== "usage";
-  if (inv) inv.hidden = view !== "inventory";
+  const sections: [View, string][] = [["usage", "#providers"], ["inventory", "#inventory"], ["ledger", "#ledger"]];
+  for (const [name, selector] of sections) {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (el) el.hidden = view !== name;
+  }
   document.querySelectorAll<HTMLElement>("#view-tabs .tab").forEach((b) => {
     const active = b.dataset.view === view;
     b.classList.toggle("active", active);
@@ -265,6 +267,7 @@ function show(view: View): void {
     render();
     void load();
   }
+  if (view === "ledger") showLedger();
 }
 
 /// Wires the Usage / Inventory switch. Usage is the default view every time

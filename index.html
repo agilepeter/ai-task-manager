@@ -59,9 +59,11 @@
         <div id="view-tabs" class="tabs view-tabs" role="tablist" aria-label="Views">
           <button class="tab active" role="tab" aria-selected="true" data-view="usage">Usage</button>
           <button class="tab" role="tab" aria-selected="false" data-view="inventory">Inventory</button>
+          <button class="tab" role="tab" aria-selected="false" data-view="ledger">Subscriptions</button>
         </div>
         <div class="content">
           <section id="inventory" hidden></section>
+          <section id="ledger" hidden></section>
           <section id="providers">
             <div class="skeleton-card">
               <div class="skeleton-line title"></div>
@@ -215,6 +217,15 @@
               <option value="10" data-i18n="settings.burn10">10% of a weekly limit in 30 min</option>
               <option value="15" data-i18n="settings.burn15">15% in 30 min</option>
               <option value="25" data-i18n="settings.burn25">25% in 30 min</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="renewal-reminder" title="One reminder before each renewal in the Subscriptions tab.">Renewal reminder</label>
+            <select id="renewal-reminder">
+              <option value="0" data-i18n="settings.alertOff">Off</option>
+              <option value="1">1 day before</option>
+              <option value="3">3 days before</option>
+              <option value="7">7 days before</option>
             </select>
           </div>
           <div class="setting-row">

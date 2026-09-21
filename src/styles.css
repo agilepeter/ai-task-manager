@@ -3379,3 +3379,176 @@ body.wide #drawer .panel-head {
   margin-left: 0;
   flex: none;
 }
+
+/* ------------------------------------------------------------ subscriptions */
+#ledger[hidden] {
+  display: none;
+}
+#ledger {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 10px 12px 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scrollbar-width: none;
+}
+#ledger::-webkit-scrollbar {
+  display: none;
+}
+.view-tabs .tab {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.lg-total .dt-headline {
+  margin: 6px 0;
+}
+.lg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lg-item,
+.lg-form {
+  padding: 10px 14px;
+}
+.lg-soon {
+  box-shadow: inset 0 0 0 1px #eab308;
+}
+.lg-item-head,
+.lg-item-sub {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.lg-price {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.lg-price small {
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.lg-item-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.lg-actions {
+  display: flex;
+  gap: 10px;
+  flex: none;
+}
+.lg-link {
+  all: unset;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--secondary-foreground);
+}
+.lg-link:hover {
+  text-decoration: underline;
+}
+.lg-link:focus-visible {
+  outline: 1px solid var(--chart-blue);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.lg-danger {
+  color: var(--destructive);
+}
+.lg-flag,
+.lg-notes {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--secondary-foreground);
+}
+.lg-flag-idle {
+  color: #eab308;
+}
+.lg-notes {
+  color: var(--muted-foreground);
+}
+.lg-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lg-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  min-width: 0;
+  flex: 1;
+}
+.lg-form input,
+.lg-form select {
+  font: inherit;
+  font-size: 12.5px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  color: var(--foreground);
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 8px;
+  /* Native selects and date inputs size themselves differently per engine. */
+  height: 30px;
+}
+.lg-form-row {
+  display: flex;
+  gap: 8px;
+}
+.lg-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+.lg-form-actions .inv-learn {
+  margin-left: 0;
+}
+.lg-save {
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--primary-foreground);
+  background: var(--primary);
+  border: none;
+  border-radius: 7px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.lg-error {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--destructive);
+}
+.lg-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.lg-chip {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  max-width: none;
+  padding: 3px 9px;
+}
+.lg-chip:hover {
+  color: var(--foreground);
+}
+body.wide #ledger {
+  max-width: 380px;
+}

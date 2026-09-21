@@ -47,7 +47,8 @@ file under `src-tauri/src/providers/` and port it by hand.
 
 ## Views
 
-One product, tabs at the top: **Usage** (default; limits, pace, spend) and **Inventory**
+One product, tabs at the top: **Usage** (default; limits, pace, spend), **Subscriptions**
+(`src/ledger.ts` + `crates/core/src/ledger.rs`) and **Inventory**
 (`src/inventory.ts` + `src-tauri/src/inventory.rs`: MCP servers, agents, skills, guardrails,
 and computed Opportunities). Usage stays the default view.
 
@@ -58,6 +59,13 @@ and computed Opportunities). Usage stays the default view.
   the `--viz-*` colours were validated per theme, so re-run the validator if they change.
   Project = the folder Claude Code was started in, matched against paths it still knows
   (folder names are lossy and cannot be decoded).
+- **Subscriptions ledger.** The user's own numbers in `ledger.json`. **Never guess a price**:
+  a detected plan names a tier, not what someone pays, so suggestions pre-fill the name and
+  the linked tool only. Renewals step from the anchor date (Jan 31 -> Feb 28 -> Mar 31, no
+  drift). "Idle" needs a MEASURED low usage; a tool with no spend data is "no data". One
+  reminder per renewal, persisted as sent (`renewalReminderDays`, 0 = off). Value = the
+  linked card's 30-day API-equivalent spend over the monthly cost; the frontend passes that
+  map in so the command does not rescan.
 - **Work areas** (`claude_area` in `crates/core/src/spend.rs`): spend inside a project, by
   top-level folder. Signals in order: the log line's `cwd` relative to the session's first
   `cwd`, then the first path under that root in the message's tool calls (path inputs, or

@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, history, httpapi, i18n, inventory, pricing, providers, spend};
+pub(crate) use aitm_core::{alerts, history, httpapi, i18n, inventory, ledger, pricing, providers, spend};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -117,6 +117,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // minutes (0 = off). Spend: dollars in one local day (0 = off; there is
     // no universal default for what a day should cost).
     obj.entry("wideMode").or_insert(json!(false));
+    // Days before a renewal to send its one reminder (0 = off).
+    obj.entry("renewalReminderDays").or_insert(json!(3));
     obj.entry("burnAlertPoints").or_insert(json!(15));
     obj.entry("dailySpendAlert").or_insert(json!(0));
     obj.entry("spendTab").or_insert(json!("today"));
@@ -167,6 +169,25 @@ async fn get_inventory() -> Result<inventory::Inventory, String> {
         .map_err(|e| format!("inventory scan: {e}"))
 }
 
+/// The subscription ledger with totals, renewals and value against usage.
+/// `usage30` is each card's 30-day API-equivalent spend, which the frontend
+/// already holds from the spend scan; passing it in avoids a second scan.
+#[tauri::command]
+fn get_ledger(usage30: std::collections::HashMap<String, f64>) -> ledger::LedgerView {
+    let today = chrono::Local::now().date_naive();
+    ledger::view(&ledger::load_from(&ledger::path()), today, &usage30)
+}
+
+#[tauri::command]
+fn save_subscription(subscription: ledger::Subscription) -> Result<ledger::Subscription, String> {
+    ledger::upsert_in(&ledger::path(), subscription)
+}
+
+#[tauri::command]
+fn delete_subscription(id: String) -> Result<(), String> {
+    ledger::delete_in(&ledger::path(), &id)
+}
+
 /// Limit readings for one card over the last `hours`, for the detail view.
 #[tauri::command]
 async fn get_history(provider_id: String, hours: u32) -> Result<Vec<history::Series>, String> {
@@ -201,6 +222,7 @@ const CONFIG_KEYS: &[&str] = &[
     "burnAlertPoints",
     "dailySpendAlert",
     "wideMode",
+    "renewalReminderDays",
     "spendMetric",
     "spendTab",
     "showUsed",
@@ -2087,6 +2109,32 @@ async fn fetch_usage(
     // Local history for the detail view's charts. Never fails a refresh.
     history::record(&all);
 
+    // Renewal reminders: one per renewal, persisted as sent.
+    let remind_days = cfg.get("renewalReminderDays").and_then(Value::as_i64).unwrap_or(0);
+    for due in ledger::take_reminders_in(&ledger::path(), chrono::Local::now().date_naive(), remind_days) {
+        use tauri_plugin_notification::NotificationExt;
+        let when = match due.days_left {
+            Some(0) => "today".to_string(),
+            Some(1) => "tomorrow".to_string(),
+            Some(n) => format!("in {n} days"),
+            None => continue,
+        };
+        let _ = app
+            .notification()
+            .builder()
+            .title("Renewal coming up")
+            .body(format!(
+                "{} renews {when} ({:.2} {}).",
+                due.subscription.name,
+                due.subscription.price,
+                match due.subscription.cycle {
+                    ledger::Cycle::Monthly => "monthly",
+                    ledger::Cycle::Yearly => "yearly",
+                }
+            ))
+            .show();
+    }
+
     for alert in alerts::evaluate(&all, &cfg) {
         use tauri_plugin_notification::NotificationExt;
         let _ = app
@@ -3035,6 +3083,9 @@ pub fn run() {
             fetch_usage,
             get_inventory,
             get_history,
+            get_ledger,
+            save_subscription,
+            delete_subscription,
             set_wide,
             cached_usage,
             fetch_spend,
