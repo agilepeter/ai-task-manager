@@ -1,0 +1,2823 @@
+/* Design tokens lifted from shadcn/ui's dark zinc theme (ui.shadcn.com) —
+   the palette and component treatments, hand-ported to plain CSS. */
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #18181b;
+  --border: #27272a;
+  --input: #27272a;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --secondary-foreground: #d4d4d8;
+  --primary: #fafafa;
+  --primary-foreground: #09090b;
+  --accent: #27272a;
+  --destructive: #ef4444;
+  --chart-blue: #3b82f6;
+  /* Cursor's brand black flips to white on the dark theme (like the Mac
+     ring and our recolored Cursor mark) — pure black vanishes on a dark
+     card. */
+  --spend-cursor: #ececef;
+  --radius: 10px;
+
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  color-scheme: dark;
+}
+
+/* Light theme — shadcn's zinc palette, light side. Applied via
+   <html data-theme="light">; "System" follows prefers-color-scheme. */
+:root[data-theme="light"] {
+  --background: #ffffff;
+  --foreground: #09090b;
+  --card: #fafafa;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --secondary-foreground: #3f3f46;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --accent: #f4f4f5;
+  --spend-cursor: #18181b;
+  color-scheme: light;
+}
+
+/* Compact density: tighter rows, smaller type, thinner meters. */
+:root[data-density="compact"] {
+  font-size: 13px;
+}
+:root[data-density="compact"] .provider {
+  padding: 5px 2px 2px;
+}
+:root[data-density="compact"] .card-panel {
+  padding: 3px 14px;
+}
+:root[data-density="compact"] .metric {
+  padding: 5px 0;
+}
+:root[data-density="compact"] .metric.trend {
+  padding: 4px 0;
+}
+:root[data-density="compact"] .metric-label {
+  font-size: 12px;
+}
+:root[data-density="compact"] .metric-foot .detail,
+:root[data-density="compact"] .left-val,
+:root[data-density="compact"] .pace-note,
+:root[data-density="compact"] .metric-text,
+:root[data-density="compact"] .metric-text .detail {
+  font-size: 11px;
+}
+:root[data-density="compact"] .metric-text {
+  padding: 4px 4px;
+}
+:root[data-density="compact"] .metric-text + .metric-text {
+  padding-top: 1px;
+}
+:root[data-density="compact"] .bar {
+  height: 4px;
+}
+:root[data-density="compact"] .provider-head {
+  margin-bottom: 2px;
+}
+:root[data-density="compact"] .provider-head .provider-icon {
+  width: 14px;
+  height: 14px;
+}
+:root[data-density="compact"] .plan {
+  font-size: 10px;
+}
+
+/* Minimal view: one meter per ordinary card. Total Spend and Welcome
+   keep their own chrome (including share / dismiss). */
+:root[data-minimal="true"] .provider:not(.total-spend):not(.welcome-card) {
+  padding: 2px 2px 0;
+}
+:root[data-minimal="true"] .provider:not(.total-spend):not(.welcome-card) .card-panel {
+  padding: 2px 12px 4px;
+}
+:root[data-minimal="true"] .provider:not(.total-spend):not(.welcome-card) .metric {
+  padding: 2px 0;
+}
+:root[data-minimal="true"] .provider:not(.total-spend):not(.welcome-card) .provider-head {
+  margin-bottom: 0;
+}
+:root[data-minimal="true"] .provider:not(.total-spend):not(.welcome-card) .plan,
+:root[data-minimal="true"] .provider:not(.total-spend):not(.welcome-card) .quick-links,
+:root[data-minimal="true"] .provider:not(.total-spend):not(.welcome-card) .card-caret,
+:root[data-minimal="true"] .provider:not(.total-spend):not(.welcome-card) .on-demand {
+  display: none;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  user-select: none;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+.popover {
+  display: flex;
+  height: 100vh;
+}
+
+/* ---------------------------------------------------------------- sidebar */
+/* Auto-hiding: a 4px sliver lives on the left edge; moving the cursor to
+   the edge slides the full sidebar out over the cards. */
+
+#side-zone {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  /* Above Settings/Customize (50) and the footer (55) so Refresh stays
+     clickable while a panel is open or the status line is long. */
+  z-index: 65;
+}
+
+#side-zone:hover,
+#side-zone:focus-within {
+  width: 42px;
+}
+
+/* Liquid glass, same recipe as jazii.dev's floating dock. */
+.sidebar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 42px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Bottom padding clears the glass footer (z 55, ~34px tall) that floats
+     over the sidebar's lower edge — otherwise ⚙ sits under it, unclickable. */
+  padding: 12px 0 42px;
+  background: rgba(24, 24, 27, 0.4);
+  backdrop-filter: blur(20px) saturate(1.4) brightness(1.02);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4) brightness(1.02);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.4),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.12),
+    inset 1.5px 0 1.5px rgba(255, 255, 255, 0.1),
+    inset -1.5px 0 1.5px rgba(255, 255, 255, 0.1);
+  transform: translateX(calc(-100% + 4px));
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.24s ease;
+}
+
+:root[data-theme="light"] .sidebar {
+  background: rgba(255, 255, 255, 0.55);
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: inset 0 1px 1.5px rgba(255, 255, 255, 0.6);
+}
+
+#side-zone:hover .sidebar,
+.sidebar:focus-within {
+  transform: none;
+  box-shadow:
+    8px 0 32px -8px rgba(0, 0, 0, 0.4),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.4),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.12),
+    inset 1.5px 0 1.5px rgba(255, 255, 255, 0.1),
+    inset -1.5px 0 1.5px rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="light"] #side-zone:hover .sidebar,
+:root[data-theme="light"] .sidebar:focus-within {
+  box-shadow:
+    8px 0 32px -8px rgba(0, 0, 0, 0.12),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.6),
+    inset 0 -0.5px 1px rgba(255, 255, 255, 0.2);
+}
+
+.main-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.sidebar-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-logo,
+.provider-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--foreground);
+  flex: none;
+}
+
+.app-logo svg,
+.app-logo img,
+.provider-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Recolor the marks like macOS template icons: one tint, ours. */
+.app-logo svg path,
+.provider-icon svg path {
+  fill: currentColor;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.titlebar-buttons {
+  display: flex;
+  gap: 2px;
+}
+
+#refresh,
+#settings-btn,
+#customize-btn,
+#theme-btn {
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 7px;
+  transition: background 0.15s, color 0.15s;
+}
+
+#refresh:hover,
+#settings-btn:hover,
+#customize-btn:hover,
+#customize-btn.active,
+#theme-btn:hover,
+body.refreshing #refresh {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+/* ---------------------------------------------------------------- settings */
+/* Full-window panel sliding in from the right, sections as an accordion. */
+
+#settings {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--background);
+  padding: 12px 14px;
+  overflow-y: auto;
+  transform: translateX(103%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  scrollbar-width: none;
+}
+
+#settings::-webkit-scrollbar {
+  display: none;
+}
+
+body.settings-open #settings {
+  transform: none;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.panel-title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.acc-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.acc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 11px 13px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.acc-head:hover {
+  background: var(--accent);
+}
+
+.acc-head .chev {
+  color: var(--muted-foreground);
+  line-height: 0.4;
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.acc-group.open .acc-head .chev {
+  transform: rotate(180deg) translateY(-4px);
+}
+
+/* Animated open/close via the 0fr→1fr grid trick. */
+.acc-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.acc-group.open .acc-body {
+  grid-template-rows: 1fr;
+}
+
+.acc-inner {
+  overflow: hidden;
+  min-height: 0;
+  padding: 0 13px;
+}
+
+.acc-group.open .acc-inner {
+  padding-bottom: 10px;
+}
+
+.settings-note {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.45;
+}
+
+.settings-sub {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 14px 0 6px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: var(--secondary-foreground);
+}
+
+input[type="number"],
+input[type="password"],
+select {
+  background: transparent;
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 9px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+input[type="number"]:focus-visible,
+input[type="password"]:focus-visible,
+select:focus-visible {
+  border-color: #52525b;
+  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
+}
+
+.setting-row input[type="number"] {
+  width: 56px;
+}
+
+.setting-row select {
+  flex: 1;
+  min-width: 0;
+  background: var(--background);
+}
+
+.unit {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+/* shadcn-style switch, applied to every toggle checkbox. */
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--secondary-foreground);
+  cursor: pointer;
+}
+
+.toggle input[type="checkbox"] {
+  appearance: none;
+  margin: 0;
+  width: 34px;
+  height: 19px;
+  flex: none;
+  border-radius: 999px;
+  background-color: var(--input);
+  background-image: radial-gradient(circle 7px at 10px 9.5px, #a1a1aa 98%, transparent);
+  cursor: pointer;
+  transition: background-color 0.18s;
+  outline: none;
+}
+
+.toggle input[type="checkbox"]:checked {
+  background-color: var(--primary);
+  background-image: radial-gradient(circle 7px at 24px 9.5px, var(--primary-foreground) 98%, transparent);
+}
+
+.toggle input[type="checkbox"]:focus-visible {
+  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.2);
+}
+
+.toggles-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px 12px;
+}
+
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.key-row label {
+  width: 78px;
+  font-size: 12px;
+  color: var(--secondary-foreground);
+}
+
+.key-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.key-row button {
+  background: var(--muted);
+  border: none;
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 11.5px;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.key-row button:hover {
+  background: #3f3f46;
+}
+
+.ona-site {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.ona-site-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ona-site-head .mini-btn {
+  flex: none;
+}
+
+.ona-site-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--foreground);
+  border-radius: 6px;
+}
+
+.ona-site-toggle:hover {
+  background: var(--accent);
+}
+
+.ona-site-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ona-site-toggle .chev {
+  color: var(--muted-foreground);
+  line-height: 0.4;
+  font-size: 13px;
+  flex: none;
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ona-site.open .ona-site-toggle .chev {
+  transform: rotate(180deg) translateY(-4px);
+}
+
+.ona-site .acc-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ona-site.open .acc-body {
+  grid-template-rows: 1fr;
+}
+
+.ona-site .acc-inner {
+  overflow: hidden;
+  min-height: 0;
+  padding: 0;
+}
+
+.ona-site.open .acc-inner {
+  padding-top: 8px;
+}
+
+.ona-site-url {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  word-break: break-all;
+}
+
+.ona-keys {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.ona-key {
+  margin-bottom: 6px;
+}
+
+.ona-key-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ona-key-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--secondary-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ona-key-has {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.ona-key .mini-btn {
+  flex: none;
+}
+
+.ona-keys-empty {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.ona-key-hint {
+  margin: 0;
+}
+
+.ona-site .mini-btn.danger {
+  color: var(--destructive);
+}
+
+.ona-add,
+.ona-edit,
+.ona-key-add,
+.ona-key-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ona-add-row,
+.ona-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ona-add input[type="text"],
+.ona-add input[type="password"],
+.ona-edit input[type="text"],
+.ona-key-add input[type="text"],
+.ona-key-add input[type="password"],
+.ona-key-edit input[type="text"],
+.ona-key-edit input[type="password"] {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 9px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+.ona-add input[type="text"]:focus-visible,
+.ona-edit input[type="text"]:focus-visible,
+.ona-key-add input[type="text"]:focus-visible,
+.ona-key-add input[type="password"]:focus-visible,
+.ona-key-edit input[type="text"]:focus-visible,
+.ona-key-edit input[type="password"]:focus-visible {
+  border-color: #52525b;
+  box-shadow: 0 0 0 3px rgb(212 212 216 / 0.12);
+}
+
+.ona-add button,
+.ona-edit-actions button,
+.ona-key-add button {
+  background: var(--muted);
+  border: none;
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 11.5px;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ona-add button:hover,
+.ona-edit-actions button:hover,
+.ona-key-add button:hover {
+  background: #3f3f46;
+}
+
+/* ---------------------------------------------------------------- cards */
+
+.content {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* Navigation trail: a Codex-style minimap rail. Tick widths follow card
+   heights; ticks near the cursor stretch and brighten (fisheye applied by
+   JS via inline transform/background). Click a tick to jump. */
+#trail {
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 0 6px 12px;
+  align-self: stretch;
+}
+
+.trail-tick {
+  width: 12px;
+  height: 2.5px;
+  border-radius: 999px;
+  background: #3f3f46;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transform-origin: left center;
+  transition: transform 0.09s linear, background 0.12s ease;
+}
+
+:root[data-theme="light"] .trail-tick {
+  background: #d4d4d8;
+}
+
+.trail-tick.active {
+  background: var(--foreground);
+}
+
+#providers {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow-y: auto;
+  padding: 10px 12px 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scrollbar-width: none;
+}
+
+#providers::-webkit-scrollbar {
+  display: none;
+}
+
+/* Cards: header floats on the background, the metrics live in an inset
+   panel below it (the Mac popover composition). Customize keeps the old
+   solid-card look via .customize-block overrides further down. */
+.provider {
+  background: transparent;
+  border: none;
+  padding: 7px 3px 3px;
+}
+
+/* Borderless grouped fill (upstream's metric panel): the card chrome is
+   the fill, not an outline. */
+.card-panel {
+  background: rgba(255, 255, 255, 0.05);
+  border: none;
+  border-radius: 12px;
+  padding: 5px 14px;
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.provider:hover .card-panel {
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+:root[data-theme="light"] .card-panel {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+:root[data-theme="light"] .provider:hover .card-panel {
+  background: rgba(0, 0, 0, 0.055);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.07);
+}
+
+.customize-block {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+}
+
+/* The provider icon doubles as the drag handle (upstream header). */
+.drag-handle {
+  cursor: grab;
+}
+/* Iconless providers still need a visible grip to grab. */
+.grip-glyph {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.provider.dragging {
+  opacity: 0.45;
+}
+
+/* Usage Trend as a compact sparkline row: label left, chart right. */
+.metric.trend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.metric.trend .metric-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+.metric.trend .trend-chart {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+}
+
+.provider-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+  padding-left: 2px;
+}
+
+.provider-name {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.stale {
+  font-size: 10.5px;
+  color: #eab308;
+  white-space: nowrap;
+  cursor: default;
+}
+
+/* Plain grey text beside the name — no pill — matching the Mac header. */
+.plan {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.metric {
+  padding: 10px 0;
+}
+
+.metric-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.metric-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pace-note {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.pace-note.warn {
+  color: #eab308;
+}
+
+.pace-note.danger {
+  color: var(--destructive);
+}
+
+.detail {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.left-val {
+  font-size: 12px;
+  color: var(--foreground);
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/* Quick links row (Status · Dashboard) at the bottom of a card. */
+.quick-links {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.quick-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.quick-link:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.quick-sep {
+  color: var(--border);
+  font-size: 11px;
+}
+
+/* Share (copy as image) button — appears on card hover. */
+.share-btn {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.provider:hover .share-btn {
+  opacity: 1;
+}
+
+.share-btn:hover {
+  color: var(--foreground);
+}
+
+/* Action row (e.g. One/New API "Expiry"): right-aligned detail text. */
+.action-row .action-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bar {
+  position: relative;
+  height: 6px;
+  background: var(--muted);
+  border-radius: 999px;
+}
+
+.fill {
+  height: 100%;
+  background: var(--chart-blue);
+  border-radius: 999px;
+  transition: width 0.4s ease, background 0.3s ease;
+}
+
+.fill.warn {
+  background: #eab308;
+}
+
+.fill.low {
+  background: var(--destructive);
+}
+
+/* Even-pace marker: where usage would sit if burned evenly across the window. */
+.tick {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--foreground);
+  opacity: 0.55;
+  transform: translateX(-1px);
+}
+
+.metric-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 4px;
+}
+
+.metric-foot .detail {
+  font-size: 12px;
+}
+
+.metric-text {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  /* Side inset matches the spend rows' hover chip so every text row's
+     label starts on the same x. */
+  margin: 0 -4px;
+  padding: 6px 4px;
+}
+
+/* Text rows: bold label left, full-contrast value right (upstream's
+   secondary row — the value is data, not annotation). */
+.metric-text > span:first-child {
+  font-weight: 600;
+}
+
+.metric-text .detail {
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+/* Neighboring text rows (Today · Yesterday · Rate Limit Resets · …)
+   cluster tighter than a row gap. */
+.metric-text + .metric-text {
+  padding-top: 2px;
+}
+
+.placeholder {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.placeholder.loading {
+  padding: 8px;
+}
+
+.provider.muted {
+  padding: 7px 13px;
+  opacity: 0.7;
+}
+
+.provider.muted .provider-head {
+  margin-bottom: 2px;
+}
+
+.provider.muted .placeholder {
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------- spend */
+
+.tabs {
+  display: flex;
+  gap: 3px;
+  background: var(--muted);
+  border-radius: 9px;
+  padding: 3px;
+  margin-bottom: 4px;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  font-size: 11.5px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tab.active {
+  background: var(--background);
+  color: var(--foreground);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+}
+
+.donut-wrap {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 10px;
+}
+
+.legend {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.legend-name {
+  color: var(--secondary-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legend-val {
+  margin-left: auto;
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.info {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- customize */
+
+.card-caret {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 16px;
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  padding: 0;
+  margin-top: 2px;
+  line-height: 1;
+  border-radius: 6px;
+}
+
+.card-caret .caret-svg {
+  display: block;
+  transition: transform 0.15s ease;
+}
+
+.card-caret.expanded .caret-svg {
+  transform: rotate(180deg);
+}
+
+.card-caret:hover {
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+.on-demand {
+  border-top: 1px dashed var(--border);
+  margin-top: 6px;
+  padding-top: 8px;
+}
+
+.customize-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 2px 4px;
+}
+
+.mini-btn {
+  background: var(--muted);
+  border: none;
+  border-radius: 7px;
+  color: var(--foreground);
+  font-size: 11.5px;
+  font-family: inherit;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.mini-btn:hover {
+  background: #3f3f46;
+}
+
+.mini-btn.danger:hover {
+  background: #7f1d1d;
+}
+
+.grip {
+  color: var(--muted-foreground);
+  cursor: grab;
+  font-size: 11px;
+  flex: none;
+  user-select: none;
+}
+
+/* Custom drag image: a full-width clone of the dragged card handed to
+   setDragImage() so Chromium never snapshots the glass layers behind the
+   real card (which smeared a ghost of the whole list across the screen).
+   Parked off-screen — the browser copies it into the drag image, the
+   element itself stays hidden. Opaque background is what kills the smear. */
+.drag-ghost {
+  position: fixed !important;
+  top: -1000px;
+  left: -1000px;
+  margin: 0;
+  background: var(--card);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  pointer-events: none;
+  z-index: 200;
+}
+
+/* The card being dragged fades so the drop spot reads clearly. */
+.drag-src {
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+
+.cust-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cust-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  font-size: 12px;
+  background: var(--background);
+  border: 1px solid transparent;
+}
+
+.cust-row:hover {
+  border-color: var(--border);
+}
+
+.cust-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toggle.mini input[type="checkbox"] {
+  width: 28px;
+  height: 16px;
+  background-image: radial-gradient(circle 5.5px at 8px 8px, #a1a1aa 98%, transparent);
+}
+
+.toggle.mini input[type="checkbox"]:checked {
+  background-image: radial-gradient(circle 5.5px at 20px 8px, var(--primary-foreground) 98%, transparent);
+}
+
+.star {
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  opacity: 0.45;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.star:hover {
+  opacity: 1;
+}
+
+.star.on {
+  color: #eab308;
+  opacity: 1;
+}
+
+.cust-divider {
+  text-align: center;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  border-top: 1px dashed var(--border);
+  margin: 4px 0 2px;
+  padding-top: 5px;
+}
+
+.customize-block .provider-head {
+  margin-bottom: 8px;
+}
+
+.trend-chart {
+  width: 100%;
+  height: 32px;
+  display: block;
+}
+
+.spend-row {
+  cursor: default;
+  border-radius: 6px;
+}
+
+.spend-row:hover {
+  background: var(--accent);
+}
+
+/* Floating per-model breakdown panel */
+#model-tip {
+  position: fixed;
+  z-index: 50;
+  width: 230px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+  padding: 9px 11px;
+  pointer-events: none;
+}
+
+.tip-model {
+  margin-bottom: 8px;
+}
+
+.tip-model:last-child {
+  margin-bottom: 0;
+}
+
+.tip-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  gap: 8px;
+}
+
+.tip-line.detail {
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+}
+
+.tip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tip-bar {
+  height: 3px;
+  background: var(--muted);
+  border-radius: 999px;
+  margin-top: 3px;
+  overflow: hidden;
+}
+
+.tip-bar div {
+  height: 100%;
+  background: var(--chart-blue);
+  border-radius: 999px;
+}
+
+/* ------------------------------------------------- rate-limit resets row */
+
+/* Severity dot in the row's "N available" value, off the soonest expiry. */
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.status-dot.normal {
+  background: var(--chart-blue);
+}
+
+.status-dot.warning {
+  background: #eab308;
+}
+
+.status-dot.critical {
+  background: var(--destructive);
+}
+
+/* The value lights up as a chip while its popover is open or hovered. */
+.resets-value {
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin: -2px -6px;
+}
+
+.resets-value.hot {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+/* Same surface as #model-tip, but interactive (Use/confirm/buttons). */
+#resets-pop {
+  position: fixed;
+  z-index: 60;
+  width: 230px;
+  box-sizing: border-box;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+  padding: 9px 11px;
+  font-size: 11.5px;
+}
+
+/* Vertical timeline: numbered severity dot on a hairline rail. */
+.rs-node {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.rs-rail {
+  width: 16px;
+  flex: none;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-self: stretch;
+}
+
+.rs-rail::before,
+.rs-rail::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  margin-left: -0.75px;
+  width: 1.5px;
+  background: var(--border);
+}
+
+.rs-rail::before {
+  top: 0;
+  height: 5px;
+}
+
+.rs-rail::after {
+  top: 21px;
+  bottom: 0;
+}
+
+.rs-node.first .rs-rail::before,
+.rs-node.last .rs-rail::after {
+  display: none;
+}
+
+.rs-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 500;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 5px;
+  flex: none;
+}
+
+.rs-dot.normal {
+  background: var(--chart-blue);
+}
+
+.rs-dot.warning {
+  background: #eab308;
+  color: #000;
+}
+
+.rs-dot.critical {
+  background: var(--destructive);
+}
+
+/* Fixed height so the countdown ⇄ Use swap can't move the row. */
+.rs-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  font-size: 11.5px;
+}
+
+.rs-body:has(.rs-confirm) {
+  height: auto;
+}
+
+/* Detached in-flight row (its credit already left the data): no rail. */
+.rs-detached {
+  margin-left: 24px;
+}
+
+.rs-trail {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.rs-use {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--foreground);
+  font-size: 10.5px;
+  font-family: inherit;
+  padding: 2px 8px;
+  cursor: pointer;
+  animation: fade-in 0.12s ease;
+}
+
+.rs-use:hover {
+  background: var(--accent);
+}
+
+.rs-use:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Other nodes freeze while one is confirming or claiming. */
+.rs-node.dim {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* Inline confirm card replacing the node's one-line body. */
+.rs-confirm {
+  flex: 1;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--accent);
+  margin: 4px 0;
+}
+
+.rs-q {
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.rs-sub {
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+  margin-top: 4px;
+}
+
+.rs-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.rs-actions button {
+  flex: 1;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.rs-go {
+  background: var(--chart-blue);
+  color: #fff;
+  border: none;
+}
+
+.rs-go:hover {
+  opacity: 0.9;
+}
+
+.rs-cancel {
+  background: none;
+  color: var(--foreground);
+  border: 1px solid var(--border);
+}
+
+.rs-cancel:hover {
+  background: var(--accent);
+}
+
+.rs-spinner {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--foreground);
+  animation: rs-spin 0.8s linear infinite;
+}
+
+@keyframes rs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Claim outcome banner above the timeline. */
+.rs-banner {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  transition: opacity 0.12s ease;
+}
+
+.rs-banner.success {
+  color: #22c55e;
+  background: rgb(34 197 94 / 0.12);
+}
+
+.rs-banner.info {
+  color: var(--chart-blue);
+  background: rgb(59 130 246 / 0.12);
+}
+
+.rs-banner.warn {
+  color: #f59e0b;
+  background: rgb(245 158 11 / 0.12);
+}
+
+.rs-banner.error {
+  color: var(--destructive);
+  background: rgb(239 68 68 / 0.12);
+}
+
+/* Empty and unknown-expiry states. */
+.rs-empty {
+  text-align: center;
+  padding: 8px 0;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.rs-empty .detail {
+  font-size: 10.5px;
+}
+
+/* ---------------------------------------------------------------- footer */
+
+/* Floats over the card list so content scrolls behind the glass,
+   like the jazii.dev dock. */
+/* Above the Customize/Settings panels (z 50) so the live status + build
+   stamp stays visible at the bottom of every screen. */
+footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 55;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  background: rgba(9, 9, 11, 0.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 -8px 32px -8px rgba(0, 0, 0, 0.22),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.4),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.12),
+    inset 1.5px 0 1.5px rgba(255, 255, 255, 0.1),
+    inset -1.5px 0 1.5px rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="light"] footer {
+  background: rgba(255, 255, 255, 0.55);
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 -4px 24px -4px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+#build-info {
+  font-size: 10px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- motion */
+/* Entrance animations play only when the popover opens (the .reveal class
+   is added for one pass), never on background re-renders or 30s ticks. */
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fill-in {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+#providers.reveal > article {
+  animation: card-in 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#providers.reveal > article:nth-child(2)  { animation-delay: 0.04s; }
+#providers.reveal > article:nth-child(3)  { animation-delay: 0.08s; }
+#providers.reveal > article:nth-child(4)  { animation-delay: 0.12s; }
+#providers.reveal > article:nth-child(5)  { animation-delay: 0.16s; }
+#providers.reveal > article:nth-child(6)  { animation-delay: 0.20s; }
+#providers.reveal > article:nth-child(7)  { animation-delay: 0.24s; }
+#providers.reveal > article:nth-child(8)  { animation-delay: 0.28s; }
+#providers.reveal > article:nth-child(9)  { animation-delay: 0.32s; }
+#providers.reveal > article:nth-child(10) { animation-delay: 0.36s; }
+#providers.reveal > article:nth-child(n + 11) { animation-delay: 0.4s; }
+
+#providers.reveal .fill {
+  transform-origin: left;
+  animation: fill-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.18s both;
+}
+
+#providers.reveal .donut-wrap,
+#providers.reveal .trend-chart {
+  animation: fade-in 0.45s ease 0.2s both;
+}
+
+/* Animates only when the caret was just clicked (.anim set for one render)
+   so 30s background re-renders don't flicker. */
+.on-demand.anim {
+  animation: rise-in 0.18s ease both;
+}
+
+#model-tip {
+  animation: fade-in 0.14s ease both;
+}
+
+.sidebar-buttons button {
+  transition: color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.sidebar-buttons button:active {
+  transform: scale(0.88);
+}
+
+.share-btn:active,
+.card-caret:active,
+.quick-link:active {
+  transform: scale(0.9);
+}
+
+.tabs .tab {
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.trail-tick {
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+/* Usage Trend hover: brighten the day's bar under the cursor. */
+.trend-hit {
+  cursor: pointer;
+}
+
+.trend-day:hover rect:first-child {
+  fill: #60a5fa;
+}
+
+/* Skeleton cards shown before the first data arrives. */
+.skeleton-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  animation: card-in 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.skeleton-card:nth-child(2) { animation-delay: 0.05s; }
+.skeleton-card:nth-child(3) { animation-delay: 0.1s; }
+
+.skeleton-line {
+  height: 10px;
+  border-radius: 999px;
+  margin: 10px 0;
+  background: linear-gradient(90deg, var(--muted) 25%, var(--border) 50%, var(--muted) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.skeleton-line.title {
+  width: 40%;
+  height: 12px;
+  margin-top: 2px;
+}
+
+.skeleton-line.bar {
+  width: 100%;
+}
+
+.skeleton-line.short {
+  width: 65%;
+}
+
+/* Respect Windows' "show animations" accessibility setting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body.reduce-anim *,
+body.reduce-anim *::before,
+body.reduce-anim *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* -------------------------------------------------------- customize drawer */
+
+#drawer {
+  position: fixed;
+  inset: 0;
+  background: var(--background);
+  z-index: 50;
+  transform: translateX(-103%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow-y: auto;
+  padding: 12px 14px;
+  scrollbar-width: none;
+}
+
+#drawer::-webkit-scrollbar {
+  display: none;
+}
+
+body.drawer-open #drawer {
+  transform: none;
+}
+
+/* ------------------------------------------------ theme wipe + light audit */
+
+/* The circular wipe drives the whole transition; disable the default
+   cross-fade so the circle edge stays crisp (same setup as jazii.dev). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* Chart colors routed through theme variables so light mode reads right. */
+.donut-total {
+  fill: var(--foreground);
+}
+
+.trend-bar {
+  fill: var(--chart-blue);
+}
+
+.trend-zero {
+  fill: var(--muted);
+}
+
+/* Light-mode versions of the few remaining hardcoded dark greys. */
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: #a1a1aa;
+}
+
+:root[data-theme="light"] .key-row button:hover,
+:root[data-theme="light"] .ona-add button:hover,
+:root[data-theme="light"] .ona-edit-actions button:hover {
+  background: #e4e4e7;
+}
+
+:root[data-theme="light"] #side-zone:hover .sidebar,
+:root[data-theme="light"] .sidebar:focus-within {
+  box-shadow: 6px 0 24px rgba(0, 0, 0, 0.12);
+}
+
+:root[data-theme="light"] .skeleton-line {
+  background: linear-gradient(90deg, var(--muted) 25%, #e9e9ec 50%, var(--muted) 75%);
+  background-size: 200% 100%;
+}
+
+/* ------------------------------------------------------------- wave 10 */
+
+/* Tooltip bubble replacing native titles: 400ms dwell, balanced wrap. */
+#hover-tip {
+  position: fixed;
+  z-index: 90;
+  max-width: 240px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--secondary-foreground);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  pointer-events: none;
+  text-wrap: balance;
+  animation: fade-in 0.12s ease both;
+}
+
+:root[data-theme="light"] #hover-tip {
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+/* Action-row expiry within 24h. */
+.warn-dot {
+  color: #eab308;
+  font-size: 8px;
+  vertical-align: 1px;
+  cursor: default;
+}
+
+/* Donut wedges morph between spend tabs (`d` tweens in Chromium when the
+   path structure matches) and pop outward on hover. */
+.total-spend path.seg {
+  transition:
+    d 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.18s ease,
+    opacity 0.18s ease;
+  cursor: pointer;
+}
+
+/* Empty-window ring: a quiet track instead of a vanished card. */
+.total-spend path.seg.donut-zero {
+  fill: var(--muted);
+  cursor: default;
+}
+.donut-wrap.donut-empty .donut-total {
+  opacity: 0.55;
+}
+
+/* First-run welcome card. */
+.welcome-card {
+  border-color: #3f3f46;
+}
+
+.welcome-card .welcome-close {
+  opacity: 0.7;
+}
+
+/* Party mode 🎉 (Konami code). Cosmetic only; respects reduced motion via
+   the global override at the bottom of this sheet. */
+@keyframes party-hue {
+  to {
+    filter: hue-rotate(360deg);
+  }
+}
+
+@keyframes party-slide {
+  to {
+    background-position: 300% 0;
+  }
+}
+
+@keyframes party-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+body.party .provider {
+  animation: party-hue 6s linear infinite;
+}
+
+body.party .fill {
+  background: linear-gradient(90deg, #f472b6, #60a5fa, #facc15, #f472b6);
+  background-size: 300% 100%;
+  animation: party-slide 2s linear infinite;
+}
+
+body.party .app-logo {
+  animation: party-spin 2.5s linear infinite;
+}
+
+body.party .trail-tick.active {
+  animation: party-hue 3s linear infinite;
+}
+
+/* --------------------------------------------- customize dock + accordion */
+
+/* Floating liquid-glass dock: appears when the Customize panel is scrolled,
+   keeping "← Done" reachable from anywhere in the list. */
+.cust-dock {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translate(-50%, -16px) scale(0.96);
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(24, 24, 27, 0.55);
+  backdrop-filter: blur(20px) saturate(1.4) brightness(1.02);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4) brightness(1.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 8px 32px -8px rgba(0, 0, 0, 0.45),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.35),
+    inset 0 -0.5px 1px rgba(255, 255, 255, 0.08);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cust-dock.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0) scale(1);
+}
+
+.dock-btn {
+  background: none;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 13px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--foreground);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.dock-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dock-btn.danger {
+  color: #f0a5a5;
+}
+
+.dock-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.22);
+  color: #fecaca;
+}
+
+.dock-sep {
+  width: 1px;
+  height: 16px;
+  flex: none;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+:root[data-theme="light"] .cust-dock {
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 8px 32px -8px rgba(0, 0, 0, 0.14),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.6);
+}
+
+:root[data-theme="light"] .dock-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+:root[data-theme="light"] .dock-btn.danger {
+  color: #b91c1c;
+}
+
+:root[data-theme="light"] .dock-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+:root[data-theme="light"] .dock-sep {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+/* Collapsed provider blocks: name + chevron; rows unfold on demand. */
+.cust-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--foreground);
+  border-radius: 6px;
+}
+
+.cust-expand:hover {
+  background: var(--accent);
+}
+
+.cust-expand .chev {
+  color: var(--muted-foreground);
+  line-height: 0.4;
+  font-size: 13px;
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.customize-block.open .cust-expand .chev {
+  transform: rotate(180deg) translateY(-4px);
+}
+
+.customize-block .acc-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.customize-block.open .acc-body {
+  grid-template-rows: 1fr;
+}
+
+.customize-block .acc-inner {
+  overflow: hidden;
+  min-height: 0;
+  padding: 0;
+}
+
+.customize-block.open .acc-inner {
+  padding-top: 6px;
+}
+
+.customize-block .provider-head {
+  margin-bottom: 0;
+}
+
+/* ------------------------------------------------------ panel glass bars */
+/* Customize and Settings each pin a liquid-glass header bar; the panel
+   content scrolls underneath it, same material as the main footer. */
+
+:root {
+  --bar-filter: blur(20px) saturate(1.4) brightness(1.02);
+}
+
+.glass-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 0;
+  background: rgba(9, 9, 11, 0.4);
+  backdrop-filter: var(--bar-filter);
+  -webkit-backdrop-filter: var(--bar-filter);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 8px 32px -8px rgba(0, 0, 0, 0.22),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.35),
+    inset 0 -0.5px 1px rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme="light"] .glass-bar {
+  background: rgba(255, 255, 255, 0.55);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 8px 32px -8px rgba(0, 0, 0, 0.1),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.6);
+}
+
+.customize-bar.glass-bar {
+  justify-content: space-between;
+}
+
+.customize-bar.glass-bar .detail {
+  white-space: nowrap;
+}
+
+.panel-head.glass-bar .panel-title {
+  flex: 1;
+  text-align: center;
+  /* optically balance the Done button on the left */
+  margin-right: 64px;
+}
+
+/* Content clears the pinned bars and the footer. */
+#drawer {
+  padding-top: 56px;
+  padding-bottom: 48px;
+}
+
+#settings {
+  padding-top: 56px;
+  padding-bottom: 48px;
+}
+
+/* Update button: replaces the version stamp in the footer when a newer
+   release exists — blue so it reads as the one actionable thing there. */
+#update-btn {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: none;
+  background: var(--chart-blue);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+#update-btn:hover {
+  filter: brightness(1.15);
+}
+#update-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+/* ---------------------------------------------------------------------------
+   Reduced effects ("Liquid glass effects" off): flat, opaque surfaces and no
+   displacement/blur filters. !important beats the inline backdrop-filter
+   applyLens() sets, so toggling needs no JS style cleanup. The win is real
+   on iGPU laptops — the SDF lens runs 9 displacement passes per paint.
+--------------------------------------------------------------------------- */
+body.no-glass .sidebar,
+body.no-glass .main-col footer,
+body.no-glass .glass-bar,
+body.no-glass .cust-dock {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+body.no-glass .sidebar,
+body.no-glass .main-col footer,
+body.no-glass .glass-bar,
+body.no-glass .cust-dock {
+  background: var(--background) !important;
+}
+
+/* Share-card composition (used only inside ⧉ snapshots): the header sits
+   directly on the snapshot background and only the metrics get a panel —
+   upstream's share layout, framed by #snap-root's padding. */
+.snap-card {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+.snap-card .provider-head {
+  padding: 0 2px;
+  margin-bottom: 12px;
+}
+.snap-card .provider-icon {
+  width: 20px;
+  height: 20px;
+}
+.snap-card .provider-name {
+  font-size: 15px;
+}
+.snap-card .card-panel {
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  padding: 14px 16px 12px;
+}
+/* Light snapshots: white page with a faint grey panel, like upstream's
+   light share — with no outer card any more, grey-on-grey would blur. */
+:root[data-theme="light"] #snap-root {
+  background: #ffffff;
+}
+:root[data-theme="light"] .snap-card .card-panel {
+  background: rgba(0, 0, 0, 0.045);
+}
+
+/* Donut hover: the pointed-at wedge slides outward along its bisector
+   (--tx/--ty precomputed per segment), the rest fade back; the matching
+   legend row lights up. [data-pid] pairs wedge and row. */
+.total-spend path.seg.hot {
+  transform: translate(var(--tx, 0px), var(--ty, 0px));
+}
+.total-spend svg:has(.hot) path.seg:not(.hot) {
+  opacity: 0.45;
+}
+.total-spend .legend-row {
+  border-radius: 6px;
+  padding: 1px 5px;
+  margin: 0 -5px;
+  transition: background 0.15s ease;
+}
+.total-spend .legend-row.hot {
+  background: var(--accent);
+}
+.donut-sub {
+  fill: var(--muted-foreground);
+}
+
+/* ---------------------------------------------------------------------------
+   In-app confirm dialog (replaces the native "localhost says" popup)
+--------------------------------------------------------------------------- */
+
+#confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(6px) saturate(1.2);
+  -webkit-backdrop-filter: blur(6px) saturate(1.2);
+  animation: confirm-fade 0.16s ease;
+}
+
+/* Same liquid-glass material as the What's-new dialog. */
+#confirm-box {
+  width: min(88%, 300px);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 38%),
+    rgba(24, 24, 27, 0.55);
+  backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 18px 18px 14px;
+  box-shadow:
+    0 24px 60px rgb(0 0 0 / 0.5),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.35),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.08),
+    inset 1.5px 0 1.5px rgba(255, 255, 255, 0.06),
+    inset -1.5px 0 1.5px rgba(255, 255, 255, 0.06);
+  animation: confirm-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+#confirm-box h3 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 0 0 6px;
+}
+
+#confirm-box p {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  margin: 0 0 14px;
+}
+
+#confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#confirm-actions button {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+#confirm-actions button:active {
+  transform: scale(0.95);
+}
+
+#confirm-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--secondary-foreground);
+}
+
+#confirm-cancel:hover {
+  background: var(--accent);
+}
+
+#confirm-ok {
+  background: var(--primary);
+  border: 1px solid transparent;
+  color: var(--primary-foreground);
+}
+
+#confirm-ok:hover {
+  opacity: 0.85;
+}
+
+#confirm-ok.danger {
+  background: var(--destructive);
+  color: #fff;
+}
+
+@keyframes confirm-fade {
+  from { opacity: 0; }
+}
+
+@keyframes confirm-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #confirm-overlay,
+  #confirm-box,
+  #star-overlay,
+  #star-box {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   What's new / Changelog dialog — confirm-dialog styling, scrollable body
+--------------------------------------------------------------------------- */
+
+#whatsnew-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(6px) saturate(1.2);
+  -webkit-backdrop-filter: blur(6px) saturate(1.2);
+  animation: confirm-fade 0.16s ease;
+}
+
+/* Liquid glass — the sidebar/footer/dock recipe, plus a soft top sheen. */
+#whatsnew-box {
+  display: flex;
+  flex-direction: column;
+  width: min(92%, 340px);
+  max-height: 78vh;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 38%),
+    rgba(24, 24, 27, 0.55);
+  backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 18px 18px 14px;
+  box-shadow:
+    0 24px 60px rgb(0 0 0 / 0.5),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.35),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.08),
+    inset 1.5px 0 1.5px rgba(255, 255, 255, 0.06),
+    inset -1.5px 0 1.5px rgba(255, 255, 255, 0.06);
+  animation: confirm-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+#whatsnew-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+#whatsnew-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+}
+
+#whatsnew-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#whatsnew-box h3 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 0 0 10px;
+}
+
+#whatsnew-body {
+  overflow-y: auto;
+  min-height: 0;
+  margin: 0 -6px 12px 0;
+  padding-right: 6px;
+}
+
+#whatsnew-body section + section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+#whatsnew-body h4 {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 0 0 4px;
+}
+
+#whatsnew-body h4 span {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  margin-left: 8px;
+}
+
+#whatsnew-body h5 {
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  margin: 8px 0 4px;
+}
+
+#whatsnew-body ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+#whatsnew-body li,
+#whatsnew-body p {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--secondary-foreground);
+  margin: 4px 0;
+}
+
+#whatsnew-body p strong {
+  color: var(--foreground);
+}
+
+#whatsnew-body li strong {
+  color: var(--foreground);
+}
+
+#whatsnew-body code {
+  font-size: 11px;
+  background: var(--accent);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+#whatsnew-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+#whatsnew-actions button {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 5px 14px;
+  cursor: pointer;
+  background: var(--primary);
+  border: 1px solid transparent;
+  color: var(--primary-foreground);
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+#whatsnew-actions button:hover {
+  opacity: 0.85;
+}
+
+#whatsnew-actions button:active {
+  transform: scale(0.95);
+}
+
+/* The Settings entry point: a quiet full-width pill above the footer note. */
+#changelog-btn {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--secondary-foreground);
+  transition: background 0.15s ease;
+}
+
+#changelog-btn:hover {
+  background: var(--accent);
+}
+
+#reset-all-settings {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--destructive, #ef4444) 55%, var(--border));
+  color: var(--destructive, #ef4444);
+}
+
+#reset-all-settings:hover {
+  background: color-mix(in srgb, var(--destructive, #ef4444) 12%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   Star prompt — same liquid-glass material as the confirm dialog
+--------------------------------------------------------------------------- */
+
+#star-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(6px) saturate(1.2);
+  -webkit-backdrop-filter: blur(6px) saturate(1.2);
+  animation: confirm-fade 0.16s ease;
+}
+
+#star-box {
+  width: min(88%, 300px);
+  text-align: center;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 38%),
+    rgba(24, 24, 27, 0.55);
+  backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 18px 18px 14px;
+  box-shadow:
+    0 24px 60px rgb(0 0 0 / 0.5),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.35),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.08),
+    inset 1.5px 0 1.5px rgba(255, 255, 255, 0.06),
+    inset -1.5px 0 1.5px rgba(255, 255, 255, 0.06);
+  animation: confirm-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+#star-box .star-glyph {
+  font-size: 36px;
+  line-height: 1.2;
+  color: #f5c451;
+  text-shadow: 0 0 18px rgba(245, 196, 81, 0.45);
+}
+
+#star-box h3 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 4px 0 6px;
+}
+
+#star-box p {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  margin: 0 0 14px;
+}
+
+#star-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+#star-actions button {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+#star-actions button:active {
+  transform: scale(0.95);
+}
+
+#star-go {
+  background: var(--primary);
+  border: 1px solid transparent;
+  color: var(--primary-foreground);
+}
+
+#star-go:hover {
+  opacity: 0.85;
+}
+
+#star-later {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--secondary-foreground);
+}
+
+#star-later:hover {
+  background: var(--accent);
+}
+
+/* Borderless quiet button — "Don't ask again". */
+.linkish {
+  display: block;
+  margin: 10px auto 0;
+  font-family: inherit;
+  font-size: 11.5px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--muted-foreground);
+}
+
+.linkish:hover {
+  text-decoration: underline;
+}
+
+/* Light theme: white glass, same as the sidebar's light recipe. */
+:root[data-theme="light"] #whatsnew-box,
+:root[data-theme="light"] #confirm-box,
+:root[data-theme="light"] #star-box {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 38%),
+    rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 24px 60px rgb(0 0 0 / 0.3),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.7);
+}
+
+:root[data-theme="light"] #whatsnew-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* Glass effects off: flat opaque surfaces, like every other glass layer. */
+body.no-glass #whatsnew-box,
+body.no-glass #confirm-box,
+body.no-glass #star-box {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #whatsnew-overlay,
+  #whatsnew-box {
+    animation: none;
+  }
+}

@@ -1,0 +1,1361 @@
+# Changelog
+
+## Unreleased
+
+### Added
+- **Toast when a weekly limit resets.** Any provider's weekly or
+  monthly window rolling over posts a Windows notification within about
+  a minute — "Codex Weekly is back to 100%. Next reset in 6d 23h." Pane
+  must be running (tray). Settings → Notifications, on by default.
+- **Star prompt.** Once the install is a few days old, Pane occasionally
+  (at most twice a day) asks for a GitHub star when the popover opens;
+  Star or "Don't ask again" retires it for good.
+
+## 0.4.52 — 2026-09-16
+
+### Added
+- **Rate Limit Resets row.** Codex (and Grok, read-only) reset credits
+  are one row — `● N available`, the dot blue / yellow within 7 days /
+  red within 48 hours of the soonest expiry — instead of a "Reset credit
+  1/2/3" row each. Hovering the value opens a timeline of every credit
+  with its exact expiry and countdown; hovering a credit reveals **Use**,
+  which confirms inline and reports the outcome right there (claimed,
+  not needed yet, no longer available, failed). Saved layouts migrate
+  automatically.
+- **Cards follow the OpenUsage design.** Provider icon on the left (it
+  is the drag handle now), bolder row labels, full-contrast values,
+  borderless grouped metric panel, upstream type sizes and spacing in
+  both densities. Share images put the header on the background with
+  only the metrics in a panel and a tighter footer.
+- **Cursor card shows the Grok Bot weekly allowance.** Ultra accounts
+  get a "Grok Bot" bar (percent used, weekly reset) from Cursor's
+  `GetSandUsageStatus` endpoint, between the bucket bars and the total.
+  Pooled-enterprise and no-allowance accounts show nothing extra.
+- **MiniMax card works through the MiniMax Code (mcode) login.** No key
+  needed when mcode is signed in — the card matches mcode's own Usage
+  screen: plan tier plus the 5 Hours, Weekly, and Video bars (the old
+  "Session" label migrates to "5 Hours" in saved layouts). The plan tier
+  is remembered so the chip survives the login token lapsing; a saved
+  key still works and is the fallback.
+- **Settings simplified.** The Privacy section is gone — the anonymous
+  once-a-day statistic is always on and the "hide tray numbers while
+  screen sharing" option was removed; the sidebar Minimal-view button is
+  gone (Settings → General keeps the toggle); One/New API and Sub2API
+  sites live under API keys.
+
+### Fixed
+- **MiniMax spend reads mcode's new ledger.** Usage since July lives in
+  `v2/sqlite/runtime-state.sqlite` (`local_runtime_token_usage`), not the
+  old `sqlite.db`; both are read, and the model comes from the turn's
+  assistant-message telemetry.
+- **Kimi Code card shows its plan name again.** Kimi's usage endpoint
+  stopped sending the membership level; the name (Moderato / Allegretto /
+  Allegro / Vivace) now comes from the account endpoint on the same login.
+- **Using a Codex reset credit reported success even when nothing was
+  reset.** The consume endpoint's `nothing_to_reset` / `no_credit`
+  answers are now shown as such; `already_redeemed` counts as done.
+- **Devin spend no longer re-reads the whole `sessions.db` on every
+  refresh.** The Devin CLI's local store is multi-GB and its WAL changes
+  constantly, so the old stamp cache missed every time and each refresh
+  parsed ~3 GB of message JSON (80 s, one core pinned; 5+ min cold at
+  login). Pane now remembers the last message rowid it processed in
+  `devin_spend_cache.json` and only reads new rows — the first scan after
+  this update still indexes the store once, every later refresh and every
+  launch is milliseconds. Short reads also let the Devin CLI reclaim its
+  WAL.
+
+## 0.4.51 — 2026-09-12
+
+### Added
+- **OpenCode extra profiles each get their own card.** `OPENCODE_HOME`
+  and `~\.local\share\opencode-*` are discovered like Claude/Codex
+  extra logins. Swapping `auth.json` no longer restores the previous
+  account's numbers — a fingerprint of the current key (never the key
+  itself) stamps the snapshot cache (closes #218).
+- **Minimal view: one starred meter per card.** A Settings toggle (and
+  a sidebar button) hides plan chips, extra rows, quick-links, and
+  share. The percentage, reset countdown, Outdated chip, and drag
+  grip stay. Total Spend is unchanged (closes #212).
+
+### Fixed
+- **Spend scan no longer re-reads whole session logs (or the whole
+  OpenCode ledger) on every refresh.** Growing JSONL files only parse
+  the new tail, OpenCode spend queries the last 31 days (integer clock
+  first — not a JSON walk of the whole table) and caches the live db
+  stamp, Claude/Codex/OpenCode/Devin run in parallel, and Cursor's CSV
+  export no longer blocks the local walk. The popover used to sit on
+  "Scanning session logs…" for minutes on a busy Codex/OpenCode machine.
+  Tail scans warm parser state from the last 1 MB of the cached prefix
+  only for stateful logs (Codex/Claude/Grok/Pi) — Kimi/Qwen skip that
+  extra read. Cache only complete JSONL lines; a legacy mid-line offset
+  backs up at most 64 KB instead of discarding the persist file.
+  Full-parse when a larger rewrite fails a 64+32-byte prefix check
+  (one file open). OpenCode takes the newest ledger rows via `rowid`
+  (no filesort). Overlapping spend collects wait rather than clobber
+  `touched`. A failed OpenCode read keeps the last good rows instead
+  of caching empty. Cursor-only unknown models still flag the catalog.
+  OpenCode skips a malformed message blob instead of dropping the
+  query. Codex/Grok/Claude/Pi restore a compact checkpoint so a tail
+  does not re-read 200 MB or double-count an older replay. A closed
+  JSONL file that ends without a newline still counts its last
+  record; a later append does not count that record twice. A
+  catalog refresh that changes a file's prices re-parses it
+  instead of wiping the card. A failed warmup keeps the cached
+  prefix instead of
+  full-rescanning with dirty parser state. OpenCode/Devin stamp
+  caches drop rows that age out of the window. One provider panic
+  no longer dumps every card.
+- **The local HTTP API no longer stamps restored snapshots as fresh.**
+  `fetchedAt` is the last successful fetch, and every provider now
+  reports `status` / `stale`. A failed refresh during the 3-minute
+  UI grace still looks current in the popover, but widgets see
+  `stale: true`. Alerts skip explicitly stale cards for every
+  provider, not just Sub2API (closes #216).
+- **Mainland GLM keys work on the Z.ai card.** The quota call used to
+  hit only `api.z.ai`, so a `open.bigmodel.cn` key got a 401 and an
+  error card — and some mainland networks cannot reach z.ai at all.
+  The card now tries the international site then the mainland host
+  (closes #214).
+
+## 0.4.50 — 2026-09-11
+
+### Changed
+- **Update checks are eager again.** Opening the popover asks the
+  update server every time, like it did before 0.4.49's 4 h gate, so
+  a just-published release shows up on the next tray click. A quiet
+  background check still runs every 4 h if the popover never opens.
+
+### Fixed
+- **A corrupt config.json can no longer eat the last good backup.**
+  Saves used to copy the main file over `config.json.bak` first. If
+  the main file was already garbage, that clobbered the only
+  recoverable copy — and a failed write after that left both files
+  bad. The backup now refreshes only while the main file still
+  parses (closes #203).
+- **Pasting a new API key no longer keeps the old account's numbers.**
+  Rotating a plain key (DeepSeek, Moonshot, OpenRouter, …) now drops
+  that card's cached snapshot, cooldown, alerts, and credit high-water
+  mark. Moonshot and Kimi share a folded wallet, so rotating either
+  key clears both. In-flight results from the old key cannot bench or
+  restore the new one (closes #204).
+
+### Security
+- **Vendor JSON bodies are capped while they stream in.** `json_body`
+  used to download the whole response, then check the size cap, so a
+  chunked or lying Content-Length could fill RAM. The read now stops
+  at the running cap (closes #202).
+
+## 0.4.49 — 2026-09-10
+
+### Added
+- **Sub2API usage tracking with multiple sites and keys.** Each saved
+  site+key pair gets a stable card with total and rolling key quotas,
+  daily/weekly/monthly subscription allowances, wallet balances
+  (including debt), expiry, and collapsible request/token/cost
+  summaries. Cards survive edits, failed refreshes keep explicitly
+  stale history, and the tightest allowance projects into the tray
+  with quota alerts.
+
+### Changed
+- **DeepSeek V4.1 Flash repriced to the new official card.** Effective
+  2026-09-10: off-peak is $0.15 in / $0.60 out / $0.003 cache read, and
+  weekday peak hours (01:00–04:00 and 06:00–10:00 UTC) bill at 2× the
+  whole card — Pane's first time-of-day pricing, applied per spend
+  event. Events before the changeover keep the flat launch card, and
+  AihubMix-routed spend bills that gateway's own ~3% markup. Session-
+  aggregated logs (Hermes) split boundary-crossing sessions by
+  duration. Cached spend from before this update is discarded.
+
+### Security
+- **Bundled SQLite moved past the public FTS5 CVEs.** Pane opens
+  databases that several CLIs own, so the SQLite vendored through
+  `rusqlite` is now a release carrying the disclosed FTS5 fixes.
+- **Every pasted-key file is owner-only and written atomically.** What
+  One/New API and Sub2API already had now covers every
+  `%APPDATA%\Pane\<provider>.json`: an owner-only ACL (Windows
+  protected DACL / Unix `0600`) never inherited from a permissive
+  parent, and a temp-file-then-rename write so a crash mid-save cannot
+  truncate your keys.
+- **Webview permissions cut to the minimum.** The main window's Tauri
+  capability is down to event listen/unlisten and app version — the UI
+  only ever talks to Rust through app commands, so every plugin
+  permission (including the arbitrary image-file reader) is denied by
+  default.
+- **Antigravity's loopback client no longer follows redirects.** A legit
+  language server never redirects, and one could have carried the
+  client's csrf header cross-origin; redirects are now refused and
+  plaintext loopback never rides a proxy.
+- **Pricing-supplement values are range-checked.** The supplement is
+  fetched from a third-party URL, so rates and multipliers outside a
+  sane range are dropped before they touch spend math.
+- **Spend scanner caps line, file, and model-key growth.** A hostile or
+  corrupted log can no longer balloon a scan: individual lines, bytes
+  read per file, and the number of distinct model keys kept per file
+  are all bounded.
+- **Update checks throttled to the documented cadence.** The checker
+  now asks at launch and then every 4 h — what the privacy page has
+  always stated — and no more often.
+- **Assorted lows.** Provider error messages no longer echo saved keys;
+  Kimi's `*.pane-bak` token backup is deleted once the refreshed
+  credential file is safely in place; credential write-backs refuse
+  symlinked targets; the local HTTP API refuses duplicate `Host`
+  headers and answers with `nosniff`; telemetry drops free-text labels
+  from starred metrics and mints its random ID from OS entropy; the
+  updater download has a timeout; and the release pipeline's signing
+  job runs behind a GitHub `release` environment gate.
+
+## 0.4.48 — 2026-09-09
+
+### Fixed
+- **Devin SWE and Penguin spend again.** Cognition's `swe-1.6` /
+  `swe-1.7` / `penguin` slugs (and the 5× `swe-1.7-lightning` tier)
+  were missing from the baked price table, so the Devin tile dropped
+  them into the unpriced ⚠ bucket. Rates are Cognition's published
+  card: $0.50 / $2.50 / $0.20 cache read; Lightning $2.50 / $12.50 /
+  $1.00. Devin's `-fast` / `-max` / `-medium` modes use the same card.
+- **AihubMix DeepSeek V4.1 Flash spend again.** That slug was missing
+  from the baked table. AihubMix's live card is $0.142 / $0.284 /
+  $0.0284 cache read (aihubmix.com/model/deepseek-v4.1-flash).
+- **Devin fast-tier spend no longer underpriced.** The Devin slug
+  normalizer stripped `-fast` from every model, so non-Cognition fast
+  requests (GPT, Grok, …) billed at base rates. Only Cognition's
+  SWE/Penguin stems lose the suffix now — there `-fast` is a Devin mode
+  on the base card; everywhere else the premium multiplier applies.
+
+## 0.4.47 — 2026-09-07
+
+### Fixed
+- **GPT-6 Astra and Gemini 3.8 Flash spend again.** Those slugs were
+  still missing from the baked price table, so Cursor/Codex/Claude
+  tiles dropped them into the unpriced ⚠ bucket. Astra is OpenAI's
+  $10/$50 list (long-context $20/$75 above 272k on Codex); Gemini 3.8
+  Flash is Google's $0.75/$3.75 introductory API rate. Dated Codex
+  slugs (`gpt-6-astra-2026-09-01`) use the same Astra card. Cached
+  unpriced totals from before this update are discarded.
+- **Esc on the dashboard hides the popover.** Customize and Settings
+  still back out first. IME candidate-window Esc is ignored.
+- **Devin spend no longer fills the C: temp folder.** Pane used to copy
+  the whole Devin CLI sessions database into `%TEMP%\pane-devin-<pid>.db`
+  on every spend refresh. That file is often multiple GB and stays in
+  WAL mode, so a leftover journal grew by another full copy each cycle
+  (tens of GB). **No tracked app is copied into Temp anymore** for
+  spend: Devin, MiniMax, Hermes, and OpenCode are read live and
+  read-only. Cursor's `state.vscdb` is also live-first; a temp copy is
+  the last resort and is refused above 64 MB. Leftover `pane-devin-*`,
+  `pane-minimax-*`, `pane-hermes-*`, `openusage-cursor-*`, and
+  `%APPDATA%\Pane\tmp\openusage-oc-*` files (including leftover
+  `-wal` / `-shm` / `-journal` sidecars) are deleted on the next
+  spend scan.
+
+### Changed
+- **Pane's website moved to trypane.xyz.** Public links and install
+  commands use the new domain. Existing `pane.jazii.dev` updater clients
+  and dashboard links remain supported through a permanent domain redirect.
+
+## 0.4.46 — 2026-09-02
+
+### Added
+- **One/New API sites.** Settings has a new **One/New API sites**
+  section: add as many One API / New API hosts as you want, each with
+  its own keys. Each key gets its own quota card (PR #172).
+- **Kimi Code without the CLI.** Settings → API keys has a new **Kimi
+  Code** field for your Kimi For Coding plan key. With no `kimi login` on
+  the PC, Pane sends that key to the same usage endpoint the CLI uses and
+  shows Session / Weekly bars and reset times. A CLI login still wins
+  when both exist. The Z.ai field is now labeled **Z.ai / GLM** — a GLM
+  Coding Plan key already worked there (issue #173).
+
+### Fixed
+- **Cursor card no longer blanks to "Requests this cycle 0".** When
+  Cursor's usage API hiccupped for one refresh, Pane fell back to the
+  old request-count endpoint, which on current plans answers with an
+  empty count, and that empty card replaced your bars until the next
+  good refresh. That fallback now only counts when it carries a real
+  request quota; otherwise Pane keeps the last good card (Outdated only
+  after three minutes of failed refreshes).
+- **Cursor bars stay live when `api2.cursor.sh` is unreachable.** On
+  some networks that host's TLS handshake times out for minutes while
+  `cursor.com` keeps answering. Pane now reads the dashboard's
+  `usage-summary` report in that case — same Cursor Models / Other
+  Models / Total usage / On-demand figures, from the host that works —
+  instead of showing a stale card. Also covers Enterprise/team accounts
+  that hide plan usage from the RPC (what OpenUsage on Mac does),
+  including the live shape that has percentages and on-demand but no
+  pooled dollar cap. Credits and Bonus rows still need the primary API.
+- **Hermes prices Qwen3.8-Max-0902 through AihubMix.** The snapshot
+  logs as `qwen3.8-max-0902` / `qwen3.8-max-2026-09-02`, which missed
+  the rate table, so Today showed tokens at $0.00. Those AihubMix rows
+  now use the gateway card ($1.69 / $5.07, cache $0.169 / $2.1125).
+
+## 0.4.45 — 2026-08-29
+
+### Added
+- **Russian in Settings → Language.** Same surfaces as Chinese: cards,
+  Settings, Customize, tray tooltips, and quota toasts. Auto follows the
+  PC display language (Chinese or Russian). Provider names, plan names,
+  and the changelog stay English.
+
+### Fixed
+- **Hermes recognizes HY4 Preview and Qwen3.8 Flash spend.** New-model
+  sessions routed through AihubMix now use that gateway's live prices,
+  so their tokens no longer collapse into a misleading `$0.00` Other row.
+  The card lists the two most recent user models and leaves Hermes's small
+  title-generation and approval calls out of that summary.
+
+## 0.4.44 — 2026-08-27
+
+### Fixed
+- **Customize keeps progress bars where you put them.** Dragging a
+  meter like Codex Extra credits into Show more used to look like it
+  saved, then the next usage refresh yanked it back above Usage Trend.
+  That "bars stay visible" rule now only places a row the first time
+  it appears. A later refresh no longer undoes the drag (issue #166).
+
+## 0.4.43 — 2026-08-26
+
+### Added
+- **Grok reset credits** show on the card as read-only rows (no Use
+  button). A **Status** link opens [status.x.ai](https://status.x.ai)
+  next to Usage.
+
+### Fixed
+- **Tray follows Customize.** Hide, disable, star, pin, and card order
+  now drive the tray icon and tooltip. A newly enabled provider stays
+  off the tray until a refresh finishes. If a save or tray update fails,
+  the footer says so instead of staying quiet.
+
+## 0.4.42 — 2026-08-23
+
+### Added
+- **Chinese in Settings → Language.** Auto follows the PC language;
+  English and 中文 are explicit. Cards, Settings, Customize, tray
+  tooltips, and quota toasts switch as soon as you pick one. Provider
+  names, plan names, and the changelog stay English. Vendor "connect me"
+  error hints stay English for now.
+
+### Fixed
+- **Refresh responds while usage is updating.** The button used to stay
+  locked until the slow spend scan finished (tens of seconds on a cold
+  start), so clicks looked dead and a just-saved **Kimi API** key left
+  "moonshot key saved" stuck on the footer. Usage unlocks Refresh as soon
+  as the cards update; a click (or key save) during a fetch shows
+  Refreshing… immediately; and the sidebar sits above Settings so Refresh
+  still works with the panel open.
+
+## 0.4.41 — 2026-08-20
+
+### Fixed
+- **Kimi Code plan name matches the membership page** — current paid
+  names on [kimi.ai](https://www.kimi.ai/membership/pricing) are
+  Moderato, Allegretto, Allegro, and Vivace. Pane still printed the old
+  three-name table, so `LEVEL_INTERMEDIATE` showed as Moderato
+  (issue #156; it is Allegretto) and `LEVEL_ADVANCED` showed as
+  Allegretto (it is Allegro). `LEVEL_PREMIUM` is Vivace.
+
+## 0.4.40 — 2026-08-20
+
+### Fixed
+- **Refreshing catalogs no longer re-reads every session log.** The spend
+  cache used to throw itself away whenever LiteLLM / models.dev /
+  the supplement file changed on disk (that happens daily, and hourly
+  while any model is unpriced), then re-parse hundreds of MB of jsonl.
+  Each cached file now records the pricing questions it asked; a catalog
+  refresh only re-reads files whose prices actually moved. A baked-pricing
+  code change still discards the cache. One last full scan migrates to
+  the new format. Probe keys stored in that cache are length-capped so a
+  huge model string cannot inflate the on-disk file.
+- **Pasting an API key actually shows that provider.** Saving a key now
+  turns the provider on if Customize had it off (first-run parks
+  keyless providers there), and a save no longer races an in-flight
+  refresh into a stuck "key saved" status with no fetch. A key pasted
+  during that first refresh is also kept out of the auto-disable list,
+  so the just-saved provider is not parked because the in-flight fetch
+  still said it had no credentials. A failed save or a cleared key drops
+  that exemption immediately, so Customize can turn the provider back
+  off.
+- **Kimi usage routed through Codex (or Claude) lands on the Kimi card.**
+  Sessions that log `kimi-oauth/k3` or `moonshot-ai/…` via a router used
+  to keep those dollars on Codex. They move to Kimi Code (or Moonshot
+  when there's no Kimi login), with the vendor prefix peeled so they
+  merge with the CLI's own logs.
+- **Cursor promo credits and bonus usage show up.** Credit grants
+  (`GetCreditGrantsBalance`) are a used/total progress bar like Codex
+  Extra credits, and Cursor's sponsored bonus usage (`bonusSpend`) is a
+  text row behind Show more — free usage model providers cover, shown
+  as context rather than a meter. Cents-as-strings parse; a failed
+  grants call logs instead of going silent. An expired grant
+  (`hasCreditGrants: false`) stays hidden even if leftover totals are
+  still on the payload. Tucking Bonus behind Show more runs once so a
+  later Customize drag is not undone every refresh.
+- **Kimi Code plan usage now has dollar amounts** — the official CLI logs
+  plan K3 as `kimi-code/k3` (and K2.7 Code as `kimi-for-coding`), which
+  missed the rate table, so Today could show a million tokens at $0.00.
+  Every current Moonshot model now uses the published API card
+  (K3 $3 / $15 / $0.30 cache; K2.7 Code $0.95 / $4 / $0.19; HighSpeed
+  is 2×; K2.6 $0.95 / $4 / $0.16; K2.5 $0.60 / $3 / $0.10; V1 8k/32k/128k
+  at $0.20/$2, $1/$3, $2/$5). Reseller catalog rows no longer override
+  those first-party rates. Codex OAuth (`kimi-oauth/k3`) and prefixed
+  API spellings share the same table. Discontinued K2 / kimi-latest
+  names still come from the public catalogs.
+
+### Changed
+- Customize toggle, Settings key field, leftover dashboard card, and
+  spend card labeled **Kimi API** (was Moonshot). The internal id is
+  still `moonshot` so existing layouts and telemetry keep working. The
+  toggle still gates the wallet fetch and the API bar on the Kimi Code
+  card.
+
+## 0.4.39 — 2026-08-19
+
+### Added
+- **Kimi Code plan card** — one card like OpenCode: Session and Weekly
+  request bars from the official Kimi Code CLI login. If a Moonshot
+  wallet key is saved, an **API** bar (same high-water credits meter)
+  joins them; plan-only installs stay at two bars. Local session spend
+  that used to sit on the Moonshot card lives here. The leftover
+  Moonshot card hides while Kimi Code is connected (and comes back if
+  that login goes away); it still appears for API-only installs. If the
+  Kimi card loads without a wallet bar, a successful Moonshot fetch is
+  kept so the balance doesn't vanish for one cycle.
+  Switching Moonshot off in Customize still stops the wallet fetch — no
+  API bar and no Moonshot network calls. If the Kimi card itself is
+  off, session spend stays on Moonshot so the dollars don't vanish. A
+  starred Moonshot "Credits used" pin moves to the Kimi API bar only
+  when that bar is actually on the card.
+
+## 0.4.38 — 2026-08-15
+
+### Fixed
+- **Refreshes are fast again — sorry 0.4.37 made Pane laggy and slow.**
+  That release's bounded log walk resolved every directory it visited to
+  its canonical path, and on Windows that opens a real handle per
+  directory (with an antivirus round-trip on each), so opening Pane
+  crawled and "Scanning session logs…" could sit for over a minute on
+  every refresh. Sorry for the inconvenience. Only symlinks and
+  junctions pay that cost now — they're the only way a scan cycle can
+  form — and regular files and folders are typed straight from the
+  directory listing with no extra system calls. The 0.4.37 protections
+  (depth cap, directory budget, cycle detection, link-target
+  timestamps) all still hold.
+
+## 0.4.37 — 2026-08-15
+
+### Security
+- **Local log scan can't be turned into a crash or a hang** — the
+  recursive `.jsonl` sweep every spend scanner shares followed symlinks
+  and junctions with no depth limit and no visited set, so a link cycle
+  under a scanned log root (roots come from the CLIs' own `*_CONFIG_DIR`
+  / `*_HOME` variables) grew the call stack until the process aborted,
+  and a link pointing at a huge tree turned a project folder into a
+  drive-wide crawl. The walk is now iterative and bounded: 16 levels
+  deep, 20,000 directories per root (logged when it stops there), and
+  already-seen canonical directories are skipped. Relocated logs behind
+  a link are still found.
+- **Share-card decode is bounded** — copying a share card now caps the
+  base64 payload and the PNG's declared pixel count before decoding, so
+  a decompression-bomb image can't force a multi-gigabyte allocation.
+- **OpenCode's database copy is private** — the scratch copy Pane makes
+  of `opencode.db` now lands in a per-user directory with restricted
+  permissions, partial copies are discarded, and scratch files left by a
+  crashed run are swept.
+
+## 0.4.36 — 2026-08-14
+
+### Added
+- **Hermes desktop card** — Nous Research's Hermes app now has a provider
+  card like the others: last model used, which backend billed it, and
+  session count on the face; Today / Yesterday / Last 30 Days spend
+  (per-model breakdown on hover) sit behind Show more. MiniMax- and
+  OpenRouter-routed sessions still join those slices; AihubMix
+  (including a custom URL pointed at aihubmix.com) stays on the Hermes
+  card; a custom URL pointed at MiniMax or OpenRouter joins those slices.
+  No network calls — Pane reads the local ledger at
+  `%LOCALAPPDATA%\hermes\state.db`.
+- **GLM-5.3 spend prices from day one** — AihubMix's preview rate card
+  for `coding-glm-5.3` ($0.060 in / $0.220 out per MTok; unpublished
+  cache bills at the input rate) is baked in until public catalogs learn
+  the model. Hermes AihubMix rows logged as `glm-5.3` use that SKU;
+  the generic name stays unpriced for other vendors. Gateway-prefixed
+  DeepSeek V4 slugs (`accounts/fireworks/models/deepseek-v4-pro-0813`)
+  also resolve.
+
+## 0.4.35 — 2026-08-13
+
+### Added
+- **Daybreak Blue and Cursor Router spend names price correctly** — Pane
+  now loads the full OpenUsage pricing-alias list (it used to keep only
+  the first 64 rules, which dropped Daybreak, GPT-5.3–5.6 effort slugs,
+  and Cursor Router labels like "Opus 5 (Auto Balanced)").
+- **Codex auto-review stays its own row** — reviewer traffic still shows
+  as `codex-auto-review` in the model breakdown; the dollars use that
+  day's GPT rate (gpt-5.5 from April 2026 onward), matching the Mac app.
+- **Reduce animations** — Settings toggle skips card entrance motion and
+  the day/night wipe. Windows' own Animation effects setting is still
+  respected either way.
+- **Hide tray numbers while screen sharing** — optional Privacy setting
+  (off by default). During Presentation Settings, exclusive fullscreen,
+  or remote control, the main tray percentage and starred strip numbers
+  hide; the Pane icon and starred provider logos stay.
+- **Reset all settings** — Settings → Advanced restores every preference
+  to its default and re-detects installed tools. API keys and usage
+  history stay.
+
+### Fixed
+- **The Cursor card mirrors Cursor's Plan & Usage page** — Cursor's new
+  bucket-era plans show two bars ("Cursor Models" and "Other Models")
+  and no total bar, but Pane's Total usage meter trusted the API's
+  `totalPercentUsed`, which now measures against included *plus free
+  bonus* pools (~$345 on live accounts) — so the bar sat at 0% while
+  the caption said "$2.37 of $20.00 included". Bucket-era cards now
+  show the same two bars as the dashboard, with the exact percentages
+  Cursor shows, plus dollars spent this cycle as a text row (no percent
+  is honest there: Cursor itself reports three contradictory total
+  numbers). Pre-bucket accounts keep the classic included bar, computed
+  as spend ÷ plan limit when Cursor reports spend (the API's own percent
+  otherwise — never a fabricated one). Team accounts keep their bucket
+  bars alongside the dollar Total meter. Saved layouts migrate
+  automatically: stars, pins, hidden flags, and order carry over from
+  "Auto usage" / "API usage" to the new labels, and a star or tray pin
+  on a Total row that became text repoints to Cursor Models instead of
+  silently vanishing from the tray.
+
+## 0.4.34 — 2026-08-13
+
+### Added
+- **OpenCode meters are account-wide now** — OpenCode shipped the
+  official usage API we'd been waiting on
+  ([anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)),
+  and the card now reads Session / Weekly / Monthly percentages and
+  resets straight from OpenCode's servers: the same numbers as the Zen
+  dashboard, including your other devices and anyone sharing the
+  subscription. The old this-PC-only computation from `opencode.db`
+  remains as the offline fallback, and dollar spend stays local.
+
+### Fixed
+- **Grok 4.6 prices from day one** — xAI's launch-day rates
+  ($2 in / $0.50 cached / $6 out per MTok, doubling for ≥200k-token
+  prompts; the fast variant at 2x) are baked in until the public
+  catalogs learn the model, so spend from Grok 4.6 sessions shows
+  dollars instead of the unpriced ⚠ — including Cursor sessions, whose
+  usage export brands the model `cursor-grok-4.6-xhigh`.
+- **DeepSeek V4 spend prices from day one** — AihubMix's rate cards for
+  `deepseek-v4-pro` ($0.464 in / $0.928 out / $0.004 cache read per
+  MTok) and `deepseek-v4-flash` ($0.154 / $0.308 / $0.003) are baked in
+  until public catalogs learn the family, dated snapshots like
+  `-0813` included, so Hermes sessions on these models show dollars
+  instead of the unpriced ⚠.
+
+## 0.4.33 — 2026-08-12
+
+### Fixed
+- **Launch shows your numbers instantly** — the window now paints the
+  previous run's snapshots from disk (marked Outdated) the moment it
+  opens, then swaps in live data as it arrives. Before, the first paint
+  waited for the slowest provider's full network round — at boot, with
+  Wi-Fi still connecting, that was 30-40 seconds of "Refreshing…".
+- **The daily pricing refresh no longer lands at login** — a catalog
+  update discards the spend cache and re-reads every session log
+  (gigabytes on long-lived installs), and with autostart that landed
+  exactly when Windows was busiest. Catalog downloads now wait out the
+  first 10 minutes after launch; a first run with no catalogs on disk
+  still fetches immediately.
+- **Dead networks fail fast** — provider requests now give up on
+  connecting after 5 seconds instead of riding the full 20-second
+  request timeout, so a boot-time refresh with no network settles in
+  seconds.
+
+### Security
+- **Credential provenance hardening** (from an external security
+  report): credential discovery now proves a token belongs
+  to the provider it will be sent to, instead of accepting the first
+  field-shape match. Extra Codex accounts found by the multi-account
+  scan must carry OpenAI's own claim namespace in their `id_token`
+  before any request or refresh (a foreign `auth.json` that merely has
+  a `tokens.account_id` no longer qualifies); Copilot token lookup is
+  scoped to the `github.com` entry in `apps.json`/`hosts.json` and to
+  the `github.com` section of the GitHub CLI's `hosts.yml`, so a
+  GitHub Enterprise token sharing the file is never sent to
+  github.com; the MiniMax CLI fallback reads exactly
+  `provider.minimax.options.apiKey` from `~/.minimax/config.yaml`
+  instead of the first `apiKey:` line anywhere in the file.
+- **Disabled Cursor makes no requests** — the spend scan's Cursor CSV
+  export (an authenticated network call) now honors the provider
+  toggle, matching how usage refresh already skips disabled providers.
+- **Local API rejects non-loopback Host headers** — the read-only
+  usage API on 127.0.0.1:6736 now refuses requests whose Host header
+  isn't a loopback spelling, closing the DNS-rebinding read that CORS
+  alone can't prevent.
+- **Release workflows pin actions to commit SHAs** — third-party
+  GitHub Actions in the signed release and winget pipelines are pinned
+  to exact commits instead of movable tags.
+- **Pricing catalogs download under a hard size cap** — the three
+  third-party pricing feeds are read in bounded chunks (32 MB cap), so
+  a compromised feed can no longer exhaust memory or disk. This also
+  makes SECURITY.md's existing "inputs are size-capped" claim true.
+- **README offers a look-before-you-run install path** — alongside the
+  one-liner, a two-step download-inspect-run variant and a pointer to
+  winget for anyone who prefers not to pipe scripts into PowerShell.
+
+## 0.4.32 — 2026-08-11
+
+### Added
+- **Multi-account Codex** — same treatment for Codex: every discovered
+  `CODEX_HOME`-style login (identified by its ChatGPT account id, named
+  by the account email) gets its own card with its own limits, credits,
+  and spend from its own session logs. Reset-credit redemption routes
+  to the account whose card offered the credit, and each card's Extra
+  credits meter keeps its own high-water baseline. A cache identity
+  stamp also guards both families' default cards: if a different
+  account signs into the default folder between launches, the old
+  account's cached numbers are dropped instead of shown under the new
+  login.
+- **Multi-account Claude** — machines with more than one Claude login
+  (say a personal plan in `~\.claude` and an enterprise seat kept in a
+  second config dir via `CLAUDE_CONFIG_DIR`) now get one card per
+  account, each with its own limits, plan, and spend scoped to its own
+  logs. Discovery scans dot-folders in your home directory and
+  `~\.config` for Claude-shaped config dirs and only makes a card when
+  the dir can name its account (from its `.claude.json`); the same
+  account signed in twice stays one card. Extra cards are named from
+  the account's organization or email ("Claude — Acme"); the default
+  login keeps the plain `claude` identity, so existing layouts, stars,
+  and API consumers are untouched. Design follows upstream OpenUsage's
+  account-first model. Telemetry never learns account identities —
+  a multi-account install reports plain "claude" once.
+
+## 0.4.31 — 2026-08-08
+
+### Changed
+- **Share cards copy exactly what you see, collapsed too** — a collapsed
+  card's ⧉ copy used to drop the Usage Trend and pace hints for a
+  "compact composition"; since both are visible on the card, the copy
+  read as missing data. Every share now includes everything the card
+  currently renders; only buttons, links, and carets stay out. Light
+  mode shares also get a real surface hierarchy — grey frame, white
+  card with a soft shadow — instead of the washed grey-on-white blob.
+
+### Fixed
+- **Devin no longer shows a fresh bar when the weekly quota is spent** —
+  Devin's API drops zero-valued fields from its JSON (proto3), so an
+  exhausted week loses its remaining-percent field entirely and Pane
+  misread that as "no weekly quota", falling back to the untouched
+  hidden daily meter: a 0%-used bar at the exact moment you were rate
+  limited. A missing percent next to a present reset timestamp now
+  correctly reads as 0% left — "Limit reached", real countdown — the
+  same class of fix Grok needed for its omitted usage field.
+
+## 0.4.30 — 2026-08-07
+
+### Fixed
+- **Bought Codex credits show up now** — the ChatGPT API sends the
+  credit balance as a quoted string in some responses, which the parser
+  didn't accept, so buying Extra credits made the row vanish from the
+  card entirely (an empty balance still rendered via a fallback). A
+  funded balance now shows as an **Extra credits** plan-style meter —
+  percent bar against the highest balance Pane has seen (top-ups raise
+  it), feeding pace colors and the Almost Out notification like every
+  other window — with the dollar and credit count in the caption.
+  Devin's Extra balance gets the same meter treatment when funded.
+  Layouts learned a matching rule: progress bars never hide behind
+  Show more and always sit above the Usage Trend, so an upgraded row
+  (or one saved as a text row in an older layout) surfaces properly.
+
+## 0.4.29 — 2026-08-05
+
+### Added
+- **Qwen Code provider (#19)** — Alibaba Model Studio's Coding Plan gets
+  a card: the plan's request-counted 5-hour / weekly / monthly quotas
+  with resets and plan name, read via the Model Studio console's own
+  quota call (key from Settings, `BAILIAN_TOKEN_PLAN_API_KEY`, or
+  `DASHSCOPE_API_KEY`); falls back to local request/token counts when
+  the console won't take the key. Today / Yesterday / 30-day spend, the
+  per-model breakdown, and a donut slice come from the Qwen Code CLI's
+  own per-request ledger.
+- **Claude Code × AihubMix spend lands on the AihubMix card** — sessions
+  run against AihubMix's Anthropic-compatible endpoint log qwen-family
+  models into Claude Code's local history; those rows now re-route to
+  the AihubMix slice (same mechanism as MiniMax-routed sessions)
+  instead of inflating the Claude card.
+
+- **Pi coding agent usage folds into Claude and Codex** — pi is a
+  bring-your-own-account agent, so a Claude or Codex subscription driven
+  through pi never appears in those CLIs' own logs and spend
+  under-reported. Pane now reads pi's session logs
+  (`~\.pi\agent\sessions`) and folds that usage into the account's card:
+  pi's own recorded cost when it carries one, catalog pricing otherwise
+  (ported from OpenUsage 0.7.6).
+
+### Changed
+- **Grok's provider mark updated** — ported upstream's refreshed logo.
+
+### Fixed
+- **Zero-rate catalog placeholders no longer price requests at $0.00** —
+  public catalogs often list brand-new models (e.g. qwen3.8-max) with
+  0/0 placeholder rates, which silently billed every request at zero
+  and could flip a model's spend to $0 after a catalog refresh. Those
+  rows are now skipped: a source with real rates wins, while a model
+  listed 0/0 in every source still prices as genuinely free ($0.00, no
+  warning — ":free" variants and local models keep working).
+  qwen3.8-max (GA'd 2026-08-03, still 0/0 in every public catalog) gets
+  Alibaba's documented rates baked in — $2/$6 per MTok, $0.25 cache
+  reads — consulted only until the live catalogs learn them.
+- **"-priority" model slugs are priced** — Devin logs OpenAI's priority
+  service tier inside the model name (`gpt-5.6-luna-xhigh-priority`),
+  which no catalog carries, so those requests counted tokens but no
+  dollars. They now bill at the base model's rates times the priority
+  multiplier (2× standard, 2.5× for gpt-5.5), matching how Codex
+  priority turns are already priced.
+
+## 0.4.28 — 2026-07-31
+
+### Added
+- **"What's new" after every update** — the first time you open Pane on a
+  new version, a card-styled popup shows that version's changelog (click
+  anywhere outside it to dismiss). Settings also gains a **What's new ·
+  Changelog** button that lists every released version. Fresh installs
+  keep the welcome card only — no double popup.
+- **AihubMix provider (#18)** — the OpenAI-compatible multi-model
+  gateway gets a full card: usage metered against your account's
+  spending limit (key auto-detected from OpenCode, or pasted in
+  Settings), plus Today / Yesterday / 30-day spend, per-model breakdown,
+  and the Usage Trend from requests routed through OpenCode. AihubMix
+  dollars get their own donut slice, separate from the OpenCode plan.
+
+### Fixed
+- **GPT-5.6 Terra and Luna price at OpenAI's new rates** — OpenAI cut
+  both models' prices (Luna is 5× cheaper) and the public price catalogs
+  still carry launch pricing, so spend was overstated. Pane corrects the
+  stale catalog values (a self-retiring override: the moment the
+  catalogs publish updated numbers, live data wins again) and updates
+  the long-context rate table to the new tiers.
+
+### Changed
+- **OpenCode meters drop the "this PC only" tag** — the caveat crowded
+  every row of the card (and its share cards); the local-counting
+  caveat now lives in the docs instead. Also fixed a cosmetic quirk
+  where an idle session could read "$-0.00 of $12".
+- **Confirmations look like Pane now** — using a Codex reset credit or
+  resetting all layouts used to pop the browser's bare "localhost says"
+  dialog; both now use an in-app card-styled dialog matching the app
+  (with a red button where the action is destructive). The reset-credit
+  message also notes that refreshed windows can take a couple of
+  minutes to appear.
+
+## 0.4.27 — 2026-07-30
+
+### Added
+- **Grok card shows your subscription plan** — the header now reads
+  "X Premium", "SuperGrok", and friends, resolved from xAI's settings
+  display name with a tier-code fallback (free tiers stay unbadged; a
+  plan lookup failure can never hide usage data). Contributed by
+  @JaminYe — their second Pane contribution. 🎉
+
+## 0.4.26 — 2026-07-29
+
+### Changed
+- **Share cards copy what you see** — the ⧉ copy of an expanded card now
+  includes everything visible: the usage trend, spend rows, and pace
+  hints. Collapsed cards keep the clean compact composition. Buttons,
+  links, and carets stay out of the image either way.
+
+### Fixed
+- **Daily statistics count on the day they belong to** — the once-a-day
+  telemetry gate used the machine's local date while every consumer
+  buckets by UTC day, so an install east of UTC whose app runs at local
+  midnight always landed in the previous UTC day (Pakistan showed "0
+  today" while actively using Pane). The gate is UTC now, matching the
+  dashboard.
+
+## 0.4.25 — 2026-07-28
+
+### Fixed
+- **The telemetry toggle shows its real state** — the "Share anonymous
+  usage statistics" switch rendered as off for installs that had never
+  touched it, while the default-on sender kept reporting. The default is
+  now stated in the config itself, so the switch reads ON unless you
+  actually turned it off (opting out worked correctly all along; only
+  the display was wrong).
+- **OpenCode meters use OpenCode's real windows and show resets** — the
+  card summed rolling 7-day and 30-day windows, but OpenCode actually
+  meters a UTC Monday-start week and a monthly cycle anchored to your
+  first-ever Go usage (ported from the Mac app's window math, which
+  ported the official opencode-go plugin). All three meters now carry
+  reset countdowns — the session shows when the oldest in-window spend
+  ages out — so they pace and count down like every other card.
+
+## 0.4.24 — 2026-07-27
+
+### Added
+- **Anonymous usage statistics (opt-out)** — Pane now sends at most two
+  events per day: an "alive today" ping (version, enabled providers,
+  starred metrics, appearance settings) and per-provider refresh
+  success/failure counts with error *categories* only — under a random
+  ID derived from nothing, with PostHog person profiles disabled and
+  IP addresses discarded at ingestion. Never sent: usage amounts,
+  spend, model names, keys, paths, or error text. Settings → Privacy →
+  "Share anonymous usage statistics" is a hard stop: turning it off
+  counts nothing, writes nothing, and deletes the stored ID. The whole
+  implementation is one auditable file (src-tauri/src/telemetry.rs, no
+  SDK); docs/privacy.md documents every field.
+
+## 0.4.23 — 2026-07-22
+
+### Changed
+- **Instant startup for the spend engine** — per-file parse summaries now
+  persist across launches (`%APPDATA%\Pane\spend_cache.json`, a few MB at
+  most), so a fresh start re-parses only logs that changed instead of
+  re-reading every session file ever written. The cache is discarded
+  whenever the pricing catalogs update, so costs are never served stale.
+
+### Added
+- **Hermes desktop spend** — Pane now reads the local usage ledger of
+  Nous Research's Hermes app (`%LOCALAPPDATA%\hermes\state.db`, this PC
+  only, nothing sent anywhere). Each session is filed under the backend
+  that actually billed it: MiniMax-routed chats merge into the MiniMax
+  spend slice, OpenRouter-routed into OpenRouter, and anything else shows
+  as a Hermes slice.
+
+### Fixed
+- **Symlinked session logs count their real age** — the spend scanner
+  follows symlinks/junctions when walking log directories, but judged a
+  linked file's recency by the link's own timestamp; logs relocated to
+  another drive could silently vanish from the 31-day window. The
+  target file's timestamp decides now.
+- **Kimi K3 cache reads were overpriced ~10×** — models.dev lists the
+  same model under many resellers and Pane took the alphabetically first
+  entry, which for kimi-k3 was a stub with no cache pricing; cache hits
+  then defaulted to the full $3.00 input rate instead of $0.30. The
+  catalog entry with the most complete pricing wins now.
+
+## 0.4.22 — 2026-07-20
+
+### Changed
+- **"Others" wedge folds more aggressively** — providers now fold into
+  the Others slice under $5 on Today/Yesterday (was $1) and under $10 on
+  Last 30 Days (was $5), keeping the ring focused on the big spenders.
+  A lone under-threshold provider folds too (it used to keep its own
+  legend row); the ring only stays unfolded when everyone is small.
+
+## 0.4.21 — 2026-07-19
+
+### Fixed
+- **Grok no longer shows "Outdated" right after its weekly reset** —
+  xAI's billing API omits the usage-percent field entirely while usage
+  is 0%, which Pane misread as a broken response and kept showing last
+  week's 100%-used bar with an ⚠ Outdated tag. A fresh window with no
+  usage now correctly renders as a 0% bar with the new reset countdown.
+
+## 0.4.20 — 2026-07-18
+
+### Fixed
+- **Disabled providers now do nothing at all** — disabling a provider
+  only hid its card; the work still ran invisibly on every refresh
+  (network calls, file reads, and for Kiro: spawning kiro-cli, whose
+  own auto-updater downloaded a fresh ~25 MB installer to %TEMP% each
+  time — gigabytes within days once Amazon shipped an update). Disabled
+  providers are now skipped before anything runs.
+
+### Removed
+- **Kiro support** — the experimental Kiro provider worked by invoking
+  kiro-cli, and a CLI that self-updates on every invocation is a side
+  effect Pane cannot control. Rather than throttle it, the provider is
+  gone entirely; the card disappears and saved layouts clean themselves
+  up.
+
+### Added
+- **Grok usage bar shows its reset countdown** — the aggregate credit
+  meter now carries the billing period's real end time and duration,
+  so it paces and counts down like the other cards. Contributed by
+  @JaminYe — Pane's first outside contribution. 🎉
+
+### Changed
+- **OpenCode Go meters say "this PC only"** — Go quotas are counted
+  account-wide on OpenCode's servers, and there is no API to read
+  them; the local meters can't see other devices or other participants
+  on a shared subscription, and now say so instead of "local estimate".
+
+## 0.4.18 — 2026-07-17
+
+### Fixed
+- **Update checks report the real app version** — Tauri's
+  `{{current_version}}` URL template arrives percent-encoded and never
+  substitutes in query strings, so 0.4.17 installs literally sent
+  "currentversion". The endpoint URL is now built in Rust with the
+  actual version stamped in.
+
+## 0.4.17 — 2026-07-17
+
+### Changed
+- **Update checks go through pane.jazii.dev first** (GitHub stays as
+  the automatic fallback, and every update remains signature-verified).
+  The endpoint serves the same manifest and counts anonymous daily
+  installs — distinct-install estimate, country code, app version, and
+  nothing else; no IP addresses are stored. Full mechanics in
+  docs/privacy.md ("The update check").
+
+## 0.4.16 — 2026-07-16
+
+### Added
+- **Kimi K3 prices everywhere** — K3 usage through Devin, Cursor, the
+  Kimi Code CLI, or the API now bills at Moonshot's published rates
+  ($3 in / $15 out / $0.30 cache hit per MTok) via a built-in fallback,
+  in every slug spelling the tools use. The live catalogs win
+  automatically once they learn the model.
+
+### Changed
+- **"Others" thresholds scale with the period** — Today and Yesterday
+  fold providers under $1 into the grey Others wedge; 30 Days folds
+  under $5 (was a flat $10 everywhere, which swallowed most of a quiet
+  day's ring). The hover breakdown states the active bar.
+
+## 0.4.15 — 2026-07-16
+
+### Added
+- **Moonshot/Kimi spend** — the Moonshot card gains Today / Yesterday /
+  30-day dollars and tokens, a per-model breakdown, and the usage trend,
+  scanned from the Kimi Code CLI's local session logs (one usage record
+  per turn). Models the price catalogs don't know yet count their
+  tokens with the usual ⚠ until pricing lands.
+- **Credit meters for pay-as-you-go cards** — Moonshot and DeepSeek get
+  a "Credits used" percent bar metered against the highest balance Pane
+  has seen (a top-up raises it automatically), so balance cards read
+  like every other card — and the low-credit case now fires the same
+  "Almost Out" notification the quota providers get.
+
+### Fixed
+- **Devin usage counts under the model that actually ran** — Devin
+  rewrites a session's model label whenever you switch models, which
+  retroactively relabeled (and mispriced) everything the session ran
+  before. Each message's own recorded model now wins, so switching to
+  Fable (or anything else) mid-session shows up correctly, priced at
+  the right rates. Fable's Max mode slug also normalizes now.
+- **Grok no longer shows the same meter twice** — the billing payload
+  repeats one percentage under several keys; the card now keeps one
+  row per label, and layouts saved while the duplicate existed repair
+  themselves on the next refresh.
+
+## 0.4.14 — 2026-07-16
+
+### Changed
+- **Small spenders fold into "Others"** — Total Spend providers under
+  $10 in the visible period group into one grey wedge and legend row;
+  hovering it lists exactly who spent what. Providers at $10 or more
+  keep their own name and color. (A lone small spender stays named —
+  a group of one is just a rename — and if everyone is under $10 the
+  ring stays fully named rather than turning into one grey blob.)
+
+### Fixed
+- **Balance-only cards show their rows** — providers with no usage
+  meters (Moonshot, DeepSeek, and other pay-as-you-go cards) tucked
+  every row behind the "show more" caret, leaving an empty panel with
+  a floating arrow. Their Balance/Voucher rows now stay visible, and
+  already-saved layouts repair themselves on the next refresh.
+
+## 0.4.13 — 2026-07-16
+
+### Fixed
+- **Cursor spend updates within minutes, not an hour** — the dashboard
+  usage export was cached for a full hour, so a live Cursor session
+  could work invisibly for up to 60 minutes while every other provider
+  updated in minutes. The cache is now 5 minutes, and a failed refetch
+  serves the last good export instead of blanking the Cursor spend
+  rows entirely.
+
+## 0.4.12 — 2026-07-16
+
+### Added
+- **MiniMax spend** — the MiniMax card now shows Today / Yesterday /
+  30-day dollars and tokens like the other CLIs, fed by two local
+  sources: the MiniMax Agent CLI's own per-turn usage store (its
+  recorded cost is used as-is), and any Claude Code sessions run
+  against MiniMax's Anthropic-compatible endpoint — that usage used to
+  be counted (mislabeled) under the Claude card and now moves to the
+  MiniMax card where it belongs.
+
+## 0.4.11 — 2026-07-16
+
+### Fixed
+- **⚠ Outdated tooltips explain the problem and the fix** — hovering
+  the warning now classifies what went wrong (sign-in expired, vendor
+  rate limit, vendor outage, no connection) and says exactly what to
+  do about it — including the right re-login command per provider —
+  instead of showing a bare error code.
+- **Total Spend always draws its ring** — a period with no usage now
+  shows a quiet zeroed track with $0.00 in the center instead of
+  collapsing to a bare "No spend in this period" line.
+- **Dead Claude sign-in says what to do** — when another app rotates
+  the Claude Code refresh token (leaving Pane's copy invalid), the card
+  now says "run `claude` in a terminal once and Pane recovers
+  automatically" instead of "token refresh failed: HTTP 400".
+
+## 0.4.10 — 2026-07-14
+
+### Fixed
+- **Claude card recovers faster from rate-limit cooldowns** — when
+  Anthropic's usage endpoint returns 429 (a plan change can trigger a
+  ~25-minute cooldown), Pane now honors the vendor's own Retry-After
+  timing instead of knocking every 5 minutes, and the card's note says
+  how long the wait is.
+- **Codex subagent replays no longer inflate spend** — when Codex spawns
+  a subagent (or forks a session), the child's rollout file replays the
+  parent's entire token history with fresh timestamps. Pane counted
+  those replayed lines as real usage; they're now skipped via the log's
+  own markers (the Mac app shipped the same fix after a ~20x inflation
+  report). Re-emitted stale snapshots are skipped too, and turns that
+  only report cumulative totals are recovered as deltas.
+- **Codex fast/priority turns price at fast rates** — the service tier
+  is read per session from the rollout's `thread_settings_applied`
+  lines (never from `config.toml`, which would retroactively reprice
+  history when toggled) and applies each model's Codex priority
+  multiplier (GPT-5.5 ×2.5; GPT-5.4 and the GPT-5.6 family ×2).
+  Supported Codex models switch to OpenAI's long-context rates above
+  272k prompt tokens — the OpenAI boundary, not Anthropic's 200k.
+- **Claude advisor usage counts under the advisor's model** — Fable-era
+  logs nest advisor work in `usage.iterations`; advisor-message entries
+  now count once under their own model without double-counting the
+  parent totals. `<synthetic>` placeholder turns are never priced,
+  sidechain logs replaying a parent message under a fresh request id
+  are deduplicated, and persisted `claude -p` runs count like
+  interactive usage.
+- **OpenCode free-model usage shows up** — messages on free models
+  record a real cost of $0 with real token counts; those tokens now
+  appear in the token totals and Usage Trend instead of vanishing.
+
+## 0.4.9 — 2026-07-11
+
+### Added
+- **Cost/MTok** — the Total Spend ring's metric now cycles Cost →
+  Cost/MTok → Tokens on click (right-click cycles backward). The center
+  shows your true blended rate — total dollars over total megatokens —
+  and each legend row shows that provider's own $/MTok.
+- Cursor's spend rows say **"estimated"** — its usage export aggregates
+  requests, so per-request exactness isn't possible.
+- Reset countdowns inside a minute read **"Resets soon"** instead of a
+  dying timer.
+
+### Fixed
+- **Long-context requests price correctly** — models with 1M-token
+  context bill the *whole* request at a higher tier once the prompt
+  crosses 200k tokens; Pane now applies those tiers. Claude's 1-hour
+  cache writes bill at twice the input rate (they were priced as
+  ordinary writes before), and Claude fast-mode requests apply the
+  published fast multiplier. Spend histories reprice automatically —
+  expect Claude's 30-day figure to correct upward.
+- **Codex percentages show as reported** — the old "fresh window
+  reads 1%, call it 0" normalization masked real early usage and is
+  gone (the Mac dropped it too). "Not started" now keys on the window
+  still being full-length, and windows under 5% used never flash a
+  red pace projection off a floored reading.
+
+## 0.4.8 — 2026-07-11
+
+### Fixed
+- **The whole model-family surface prices now** — reasoning-effort
+  tiers (light/low/medium/high/xhigh), Max **and Ultra** modes, the
+  fast tier, and any composition of them ("gpt-5.6-sol-max-fast",
+  "…-ultra-high", "…-max-fast-xhigh") resolve to the base model's
+  rates, with fast keeping its real per-family multiplier in every
+  composition. Previously composed slugs fell into the unpriced ⚠
+  bucket — on the test machine that was ~$19 of one day's Cursor
+  Max-fast usage hiding from the totals. Verified by a 51-slug
+  regression matrix across GPT-5.6 Luna/Terra/Sol; the handling is
+  generic, so other families (Grok fast tiers etc.) get the same
+  guarantees.
+- **"Outdated" stopped crying wolf** — a single failed refresh no
+  longer tags every card; data under three minutes old serves
+  silently, and the amber tag (with the real error on hover) appears
+  only when staleness is real. Persistent failures surface exactly as
+  before.
+
+## 0.4.7 — 2026-07-10
+
+### Added
+- **Devin spend** — the Devin CLI's local session store now feeds the
+  Total Spend donut, spend rows, per-model breakdown, and usage trend,
+  priced with the live catalog like the other CLIs. Windsurf-style
+  model names ("gpt-5-6-sol-max") are normalized so they price, and
+  the store is read through SQLite's backup API so numbers stay
+  correct while the Devin app is actively writing. Cloud Devin
+  sessions bill in ACUs and keep no local logs, so only CLI usage
+  appears.
+- **Dollars ⇄ tokens** — click the Total Spend ring (or right-click)
+  to flip the donut, legend, and center total between money and raw
+  token counts; the choice persists.
+- **Reorder without leaving the popover** — every card grows a drag
+  grip in its header; drop it where you want and the order saves to
+  the same layout Customize edits.
+
+### Changed
+- **The popover looks like the Mac's now** — provider cards are a
+  clean header over an inset panel, the usage trend sits in a labeled
+  row, and the Total Spend ring is rebuilt from true wedge segments:
+  radial-cut ends with soft corners, hairline gaps, and tiny spenders
+  that stay thin slivers instead of swelling into dots. Hovering a
+  wedge (or its legend row) slides it outward and dims the rest.
+- **Spend colors** — Codex blue, Grok green, Devin sky blue, and
+  Cursor its brand black (flipped to white in dark mode so it stays
+  visible).
+- **Share cards** — the copied image is a curated composition: buttons,
+  links, and spend chrome stripped, the canvas hugs the content, the
+  header aligns with the panel's text column, and the footer carries
+  the app icon with the full tagline.
+- **Unpriced usage keeps its tokens** — requests on models with no
+  public pricing now count their measured tokens in token totals and
+  the trend; dollars still refuse to guess, and the ⚠ (on the
+  provider's spend row only) explains it in plain words.
+
+### Fixed
+- **Grok spend works again** — the Grok CLI changed its log format and
+  the old scanner silently matched nothing; the new one reads token
+  counts from the CLI's turn events and attributes models per process,
+  like the Mac app.
+- **Cursor Max-mode models price correctly** — "-max" slugs bill
+  token-based at the base model's rates, so they now resolve through
+  the full pricing chain instead of landing in the unpriced bucket.
+- **Kilo fresh accounts** — a just-created account shows a friendly
+  "no credits yet" card instead of an error.
+
+## 0.4.6 — 2026-07-09
+
+### Fixed
+- **Cursor spend tiles work again** — Cursor's usage-events export now
+  requires an explicit date range and token strategy; Pane sends both
+  (last 31 days), so Today / Yesterday / 30 Days dollars populate.
+- **New models price within the hour, not within the day** — when spend
+  events reference models the price catalog doesn't know yet (new Cursor
+  slugs ship often), Pane now rechecks the catalog hourly instead of
+  daily, and a catalog update re-prices already-scanned logs instead of
+  waiting for them to change on disk.
+
+## 0.4.5 — 2026-07-09
+
+### Fixed
+- **Cursor Pro/Pro+/Ultra/Teams accounts now show real usage** — percent
+  of the plan's included usage, Auto/API usage, on-demand spend, and
+  credits, with the actual billing-cycle reset date, via the same API
+  Cursor's own dashboard uses. Previously modern accounts showed only a
+  meaningless "Requests this cycle: 0" from the legacy request-counter
+  era (old request-based plans still fall back to it). Session tokens
+  are auto-refreshed in memory when stale, and reading Cursor's login
+  no longer fails when Cursor briefly holds a lock on its database.
+
+## 0.4.4 — 2026-07-08
+
+### Performance
+- Background refreshes no longer rebuild the popover interface while
+  it's hidden in the tray (~99% of the time) — rendering now happens
+  once, at the moment you open Pane. Same for the 30-second countdown
+  ticks. Less idle CPU, all day.
+- New **Settings → General → "Liquid glass effects"** toggle (on by
+  default). Turn it off on slower PCs: the glass refraction and blurs
+  become clean flat surfaces, and the expensive lens machinery never
+  even initializes — from the very first frame of a cold start.
+
+## 0.4.3 — 2026-07-08
+
+### New
+- **Pane's new logo** 🎯 — the ring, everywhere: installer, app and
+  taskbar icons, tray, popover sidebar, and share-card footers.
+- **Update checks on every open** — the footer version stamp re-checks
+  each time you open Pane and becomes a blue **⬆ Update** button when a
+  new release is out; one click installs and restarts. (Replaces the
+  floating update banner.)
+- Party mode is now a triple-click on the sidebar logo away. 🎉
+
+### Fixed
+- Tray strip pairs now render logo-then-numbers, left to right, like
+  the macOS original (Windows inserts new tray icons leftward).
+- The update flow can no longer freeze at "Installing…" if a release
+  disappears mid-install — it fails visibly with a retry button.
+
+## 0.4.2 — 2026-07-08
+
+**⚠ Installs of 0.4.1 and earlier: this release is signed with a new
+key, so the in-app updater will decline it. Reinstall once via
+`irm https://pane.jazii.dev/install.ps1 | iex` — updates then resume
+normally.**
+
+### Changed (security)
+- **Breaking for browser-page consumers:** the local HTTP API no longer
+  sends CORS headers, so web pages can no longer read
+  `127.0.0.1:6736` through a browser — previously any website you visited
+  could silently read your usage data. PowerShell, curl, Rainmeter, and
+  native apps are unaffected (CORS only constrains browsers). If a
+  legitimate browser integration needs access, open an issue — the plan
+  is an opt-in origin allowlist, not a permissive default.
+- Release binaries are now built and published by GitHub Actions from the
+  pushed tag (public build logs), instead of on the maintainer's machine.
+- The updater signing key was rotated to a passphrase-protected key
+  (2026-07-08). Installs of 0.4.1 and earlier trust the old public key, so
+  their auto-updater will decline the first release signed with the new
+  key — reinstall once via `irm https://pane.jazii.dev/install.ps1 | iex`
+  (or the release installer) and updates resume normally.
+- **Webview hardening pass** (from a community security review): a strict
+  Content-Security-Policy replaces the previous `csp: null`; the Tauri
+  capability set is trimmed to core IPC only (the UI never used the
+  opener/updater/process plugin APIs); `withGlobalTauri` is off; the
+  pinned-metric dropdown is built via DOM instead of HTML strings.
+- **Rust-side input validation:** `set_config` only accepts known config
+  keys; tray-strip updates only accept known provider ids (also fixes
+  unstarred tray icons of newer providers not being removed); pricing
+  supplement alias rules are size- and count-capped.
+- **Credential safety:** CLI credential files are copied to `*.pane-bak`
+  before Pane writes a refreshed token back.
+
+### Added
+- SECURITY.md (private vulnerability reporting), docs/privacy.md (every
+  network call), docs/providers.md (per-provider: files read + endpoints
+  called), docs/local-http-api.md, CONTRIBUTING.md.
+
+### Fixed
+- Share cards (⧉) now copy the card exactly as it looks on screen —
+  donut, tabs, theme and all — framed with a Pane logo footer, instead
+  of a simplified redrawn version that didn't match the UI.
+
+## 0.4.1 — 2026-07-08
+
+First-run and Customize fixes from fresh-install testing.
+
+### Fixed
+- Fresh installs now start with just Claude + Codex enabled (their
+  "connect me" cards are the onboarding); a PC with zero detected AI
+  tools no longer enables all 18 providers.
+- Rapidly toggling several providers off kept only the last change —
+  toggles now apply instantly and save through a serial delta queue.
+- Disabled providers disappear immediately from the dashboard, the
+  Total Spend donut, and the tray strip (previously they lingered until
+  the next refresh).
+- Total Spend shows a quiet "No spend data yet" card on machines whose
+  CLIs haven't logged usage, instead of no card at all.
+
+## 0.4.0 — 2026-07-07
+
+### New
+- **Three CLI-detected providers** (research credit: steipete/CodexBar, MIT):
+  Codebuff (credits + weekly limit, `codebuff login` file or key), Kilo
+  (credit blocks + Kilo Pass, CLI login file or key), and Kiro
+  (experimental — reads `kiro-cli /usage`). **18 providers total.**
+- **Auto-updater** — Pane checks GitHub releases on launch and every 4
+  hours; a banner offers one-click download + restart. Updates are
+  cryptographically signed and verified before install.
+- **Deeper metric rows** (Mac-parity polish): Claude per-model weeklies
+  from Anthropic's new `limits` API (Fable era) + Extra Usage overage
+  dollars; Codex Spark / Spark Weekly windows + Extra Usage credit
+  balance; Z.ai monthly Web Searches quota; Grok pay-as-you-go cap badge.
+- **"Not started"** — untouched 5-hour session windows say so (with an
+  explainer) instead of showing a countdown that hasn't begun; Codex's
+  floored 1%-on-fresh-window quirk is normalized to a true zero.
+- **Keyboard** — Esc backs out of Customize/Settings, Ctrl+R refreshes.
+
+### Removed
+- Deepgram, OpenAI, Venice, Poe, Chutes, Warp, Crof, Amp, Vertex AI, and
+  AWS Bedrock providers — cut to keep the lineup focused on the AI coding
+  tools people actually track. Saved layouts self-clean any retired ids.
+
+### Fixed
+- Terminal windows no longer flash during refreshes (provider CLI checks
+  now run windowless or scan the filesystem instead of spawning `cmd`).
+- Retired providers no longer linger as ghost rows in Customize.
+- Startup crash at higher provider counts (fetch futures now heap-boxed).
+- Clicking the tray icon always reopens on the main page, even if the app
+  was left on Settings or Customize.
+
+## 0.3.0
+
+### Renamed to Pane
+- The app is now **Pane** (formerly OpenUsage for Windows). Installs to
+  `%LOCALAPPDATA%\Pane`; settings move automatically from
+  `%APPDATA%\OpenUsage` to `%APPDATA%\Pane` on first launch — keys, layout,
+  and caches all carry over.
+
+### Accuracy (Wave 9)
+- **Live model pricing** — per-model rates now come from LiteLLM, models.dev,
+  and the OpenUsage pricing supplement (daily refresh, ETag caching, offline
+  fallback) instead of a hardcoded table. Claude spend was overstated ~2.6×
+  at old Opus rates; Codex fast-tier requests now get their real multiplier.
+- **Unpriced events are excluded, not guessed** — models no catalog prices
+  are left out of totals and flagged with ⚠ (count + model names on hover).
+- **Cursor spend** — computed from the dashboard's usage-events CSV export,
+  priced locally.
+- **Codex dedupe** — archived session copies no longer double-count.
+- **Backoff & cooldown** — failing providers are benched 60s (5 min for
+  rate limits) while cached data is served with the reason on hover.
+- **Reset all layouts** also re-detects installed AI tools.
+- **Codex reset credits** — each banked credit shows its exact expiry and a
+  Use button that redeems it (confirm-guarded, idempotent).
+- Single-instance guard; popover reopens scrolled to the top.
+
+### UI
+- Auto-hiding liquid-glass sidebar (prasen.dev lens: SDF rim refraction,
+  chromatic fringe) with magnetic minimap trail; glass footer with build
+  stamp; full-window Customize and accordion Settings panels; ☀/☾ theme
+  toggle with circular wipe; per-day trend tooltips; skeleton loading,
+  staggered card entrances, and a full light-mode audit.
+
+### New
+- **Wave 11 provider pack** — seven providers that authenticate with a pasted
+  API key (Settings → API keys) or nothing at all:
+  DeepSeek (balance), Moonshot/Kimi (balance, .ai + .cn), ElevenLabs
+  (character quota with reset pacing), Deepgram (project balances),
+  OpenAI (org costs — needs an Admin key), Venice (USD/DIEM/VCU balances),
+  and Ollama (local server: installed + loaded models, no key needed).
+  Providers added by an update that have no credentials on this PC start
+  disabled — enable them in Customize.
+- **MiniMax provider** — Coding/Token Plan quota (5-hour Session + Weekly
+  windows) via the same endpoint the official `mmx quota` command uses. Key
+  auto-detected from the MiniMax CLI's config, `MINIMAX_API_KEY`, or the new
+  Settings field.
+- **Copilot CLI / modern gh detection** — GitHub tokens are now also read
+  from Windows Credential Manager (`gh:github.com:<user>`), which is where
+  current gh versions (and the Copilot CLI) keep them. hosts.yml-only setups
+  keep working.
+- **Motion pass** — cards slide in with a stagger and bars fill when the
+  popover opens, skeleton shimmer while first data loads, hover elevation on
+  cards, smooth caret/tab/button transitions. All entrance animations play
+  only on open (never on background refreshes) and respect the system's
+  reduced-motion setting.
+
+### Fixed
+- config.json parsing now tolerates a UTF-8 BOM and logs parse failures
+  instead of silently resetting settings to defaults.
+
+## 0.2.0 — 2026-07-07
+
+Full feature parity with the macOS original, plus Windows-specific polish.
+
+### New
+- **Antigravity support** — reads quota from the IDE's local language server
+  when it's running, and falls back to Google's Cloud Code API (token from
+  Windows Credential Manager) when it isn't. Session / Weekly / Claude /
+  Claude Weekly metrics plus plan name.
+- **Provider quick links** — Status / Dashboard links at the bottom of each
+  card, same targets as the Mac app.
+- **Share cards** — hover a card and click ⧉ to copy it as a PNG image to the
+  clipboard (works for Total Spend too).
+- **Local HTTP API** — `GET http://127.0.0.1:6736/v1/usage` (and
+  `/v1/usage/:providerId`) serves the latest snapshots in the Mac app's
+  documented wire format. Scripts written for the Mac app work unchanged.
+- **Appearance** — System / Light / Dark theme setting.
+- **Compact layout** — tighter density option.
+- **Global shortcut** — e.g. `Ctrl+Shift+U` to toggle the popover from
+  anywhere.
+- **Proxy** — optional `socks5://` / `http(s)://` outbound proxy.
+- **First-launch detection** — a fresh install starts with only the providers
+  that have credentials on the PC; the rest wait in Customize.
+
+### Fixed
+- The popover no longer sits on "Loading usage data…" while the spend engine
+  scans session logs on a cold start — usage cards paint immediately and the
+  Total Spend card fills in when the scan finishes.
+- Last-good snapshots are now cached **on disk**, so a transient provider
+  outage (or rate limit) right after an app restart shows amber "⚠ Outdated"
+  data instead of an error card. Entries expire after 24 hours.
+- Drag-and-drop in Customize works (Tauri's native drag interceptor disabled).
+
+## 0.1.0 — 2026-07-06
+
+First Windows release: 10 providers (Claude, Codex, Cursor, OpenCode,
+Copilot, Grok, Devin, OpenRouter, Z.ai, Antigravity detection), local spend
+engine with model breakdown and 30-day trend, pace projections, toast
+notifications, tray strip with per-provider icons, Customize screen, NSIS
+installer, autostart.

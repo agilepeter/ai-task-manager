@@ -1,0 +1,46 @@
+# Winget auto-publish: opens the version-update PR against
+# microsoft/winget-pkgs (new manifests with the fresh installer URL +
+# SHA-256) — the PR that used to be submitted by hand. Update PRs to an
+# existing package are auto-validated by winget's pipeline and merge
+# without human review, so releases reach winget within hours.
+#
+# Two triggers because of a GitHub Actions rule: events created with the
+# default GITHUB_TOKEN never start other workflows (anti-recursion), and
+# our releases are created BY the Release workflow — so its `release`
+# event is invisible here. The Release workflow therefore dispatches this
+# one explicitly (workflow_dispatch is exempt from that rule); the
+# `release` trigger still covers releases published by hand.
+#
+# Needs a WINGET_TOKEN repository secret: a classic personal access token
+# with ONLY the `public_repo` scope (create at github.com/settings/tokens).
+# The action uses it to push a branch to the ItsJazii/winget-pkgs fork and
+# open the PR. Without the secret the job fails loudly and the release is
+# otherwise unaffected.
+name: Publish to winget
+
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.4.30)"
+        required: true
+        type: string
+
+jobs:
+  winget:
+    runs-on: windows-latest
+    # Minimal token scope: the job only reads this repo's release assets.
+    # The fork push and PR are made with WINGET_TOKEN, not GITHUB_TOKEN.
+    permissions:
+      contents: read
+    steps:
+      # Pinned to a commit SHA (was @v2): this third-party action receives
+      # WINGET_TOKEN, so a hijacked tag could exfiltrate it.
+      - uses: vedantmgoyal9/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
+        with:
+          identifier: Pane.Pane
+          installers-regex: '-setup\.exe$'
+          release-tag: ${{ inputs.tag || github.event.release.tag_name }}
+          token: ${{ secrets.WINGET_TOKEN }}

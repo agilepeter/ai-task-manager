@@ -1,0 +1,521 @@
+# Providers: exactly what Pane reads and calls
+
+One section per provider: which credentials are read from your PC, which
+endpoints they are sent to, and what comes back. Each provider's code
+lives in [`src-tauri/src/providers/`](../src-tauri/src/providers/) in a
+file of the same name — this page is the plain-English version of that
+code.
+
+Ground rules that apply to every provider:
+
+- A credential is only ever sent to **its own vendor's API or its explicitly
+  configured One/New API or Sub2API origin**, over HTTPS
+  (One/New API and Sub2API sites may use `http://` only with private, loopback, or
+  link-local IP addresses).
+- If no credential is found, the provider shows a "connect me" hint (new
+  installs auto-disable everything undetected except Claude and Codex).
+- Expired OAuth tokens are refreshed against the vendor's own token
+  endpoint and written back to the CLI's credential file, keeping the CLI
+  signed in — identical to what the CLI does itself.
+
+---
+
+## Claude (Claude Code)
+
+- **Reads:** `%USERPROFILE%\.claude\.credentials.json` (honors
+  `CLAUDE_CONFIG_DIR`) — the OAuth token Claude Code saved when you logged
+  in. **Multi-account:** dot-folders in your home directory and dirs under
+  `%USERPROFILE%\.config` holding a Claude-shaped `.credentials.json` each
+  become their own card, identified by the `oauthAccount` in that dir's
+  `.claude.json` (a dir that can't name its account is skipped; the same
+  account in two places stays one card). Extra cards are named from the
+  account's organization or email; the default login keeps the plain
+  `claude` id. Each account's spend comes from its own dir's logs.
+- **Calls:** `api.anthropic.com/api/oauth/usage` (usage windows);
+  `platform.claude.com/v1/oauth/token` (refresh, written back).
+- **Shows:** Session + Weekly windows, per-model weeklies, Extra Usage
+  overage; local spend from `~\.claude\projects\` logs. Persisted
+  `claude -p` runs count too (`--no-session-persistence` runs write no
+  log to read). Advisor work nested in a message's `usage.iterations`
+  counts once under the advisor's own model; ordinary iterations stay
+  inside the parent totals. Sidechain (subagent) logs that replay the
+  parent's message under a fresh request id are deduplicated. Sessions
+  of the pi coding agent that drove this Claude account
+  (`~\.pi\agent\sessions`, providers `anthropic`/`claude-agent-sdk`)
+  fold into this card's spend — pi's own recorded cost when present,
+  catalog pricing otherwise.
+
+## Codex (Codex CLI)
+
+- **Reads:** `%USERPROFILE%\.codex\auth.json` (honors `CODEX_HOME`).
+  **Multi-account:** same discovery as Claude — dot-folders and
+  `~\.config` dirs each become their own card, but only when their
+  `auth.json` *proves* it's an OpenAI login (its `id_token` carries
+  OpenAI's own claim namespace) — another app's credential file that
+  merely looks similar is never picked up. Cards are identified by
+  `tokens.account_id` (or the id_token's ChatGPT account claim) and
+  named by the account email; a dir that can't name its account is
+  skipped. Reset-credit redemption always uses the
+  account whose card offered the credit.
+- **Calls:** `chatgpt.com/backend-api/wham/usage` (limits, Spark windows,
+  credits); `.../wham/rate-limit-reset-credits` (reset credits, and
+  `/consume` only when you click Use on a credit); OpenAI token refresh.
+- **Shows:** Session/Weekly, Spark windows, credit balance, redeemable
+  reset credits; local spend from `~\.codex\sessions\` logs. Child
+  sessions (subagent spawns and forks) replay the parent's entire token
+  history at spawn — those replayed lines are skipped, so subagent-heavy
+  use doesn't inflate spend. Turns that ran on the fast/priority service
+  tier (recorded per session in the rollout itself, never inferred from
+  `config.toml`) price at each model's Codex priority multiplier, and
+  supported GPT-5.4/5.5/5.6 requests above 272k prompt tokens use
+  OpenAI's long-context rates for the whole request. Auto-review usage
+  keeps the name `codex-auto-review` in the model breakdown; dollars use
+  the dated GPT fallback for that day (gpt-5.5 from April 2026 onward).
+  Daybreak Blue (`gpt-daybreak-blue-latest`) prices as GPT-5.6 Sol.
+  Pi coding agent sessions that drove this Codex account (provider
+  `openai-codex`) fold into this card's spend the same way they do for
+  Claude. Turns logged as `kimi-oauth/…` or `moonshot-ai/…` (a router
+  pointed at the Kimi plan) move to the Kimi Code card instead.
+
+## Cursor
+
+- **Reads:** Cursor's local state database
+  (`%APPDATA%\Cursor\User\globalStorage\state.vscdb` — read live,
+  read-only; a Temp copy is last-resort only and capped at 64 MB).
+- **Calls:** `api2.cursor.sh` Connect RPCs (`GetCurrentPeriodUsage`,
+  `GetPlanInfo`, `GetCreditGrantsBalance`, `GetSandUsageStatus` — Grok
+  Bot weekly allowance; optional — skipped when the RPC host is
+  unreachable, never delays the card); the dashboard's
+  usage-events CSV export (for spend). `GetCreditGrantsBalance` cents
+  fields may be strings or numbers. A plan name missing from
+  `GetPlanInfo` falls back to `GET cursor.com/api/auth/stripe`
+  (`membershipType`, same `WorkosCursorSessionToken` web cookie). When
+  the RPC host is unreachable or hides `planUsage` (Enterprise/team),
+  `cursor.com/api/usage-summary` (web session cookie) supplies the same
+  plan figures; the pre-2025 request-count endpoint
+  `cursor.com/api/usage` is the last resort and only counts when it
+  reports a real quota.
+- **Shows:** Cursor Models / Other Models bars; a **Credits** progress
+  row when the account has promo grants (`totalCents` vs remaining);
+  a **Bonus** text row behind Show more when `planUsage.bonusSpend` is
+  reported — free provider-sponsored usage, with the pool estimate
+  (derived from `totalPercentUsed`) as context when it is sane; a
+  **Grok Bot** bar (weekly percent used + reset) after Other Models on
+  accounts with an included Grok Bot allowance — hidden for
+  pooled-enterprise / no-allowance accounts; Total usage text on
+  bucket-era personal plans; per-day spend.
+
+## OpenCode (Go plan)
+
+- **Reads:** the Go key from
+  `%USERPROFILE%\.local\share\opencode\auth.json`;
+  extra profiles from `OPENCODE_HOME`, `~\.local\share\opencode-*`,
+  and the same scan roots as Claude/Codex (one card per login).
+  `%USERPROFILE%\.local\share\opencode\opencode.db` (read live,
+  read-only) for spend — message costs your own OpenCode history already
+  contains. Swapping `auth.json` drops the old account's cached
+  snapshot (fingerprint of the current key, never the key itself).
+- **Calls:** `opencode.ai/zen/go/v1/usage` (the official account-wide
+  usage API, shipped in anomalyco/opencode#16513) — Session / Weekly /
+  Monthly percentages and resets counted on OpenCode's servers, the
+  same numbers the Zen dashboard shows, so usage from your other
+  devices and shared-subscription participants is included. If the API
+  is unreachable, meters fall back to the old local computation from
+  `opencode.db` (rolling 5-hour session, UTC Monday-start week, monthly
+  cycle anchored to your first-ever Go usage) — the fallback counts
+  this PC only. Dollar spend rows are always computed locally.
+
+## GitHub Copilot
+
+- **Reads:** gh CLI / Copilot tokens from Windows Credential Manager
+  (`gh:github.com:<user>`) or legacy `hosts.yml` files — in every source,
+  only the `github.com` entry; a GitHub Enterprise token sharing the
+  file is never selected (this card only ever talks to api.github.com).
+- **Calls:** `api.github.com/copilot_internal/user`.
+- **Shows:** credits/quota and plan.
+
+## Grok (Grok CLI)
+
+- **Reads:** `%USERPROFILE%\.grok\auth.json`.
+- **Calls:** `cli-chat-proxy.grok.com/v1/billing`,
+  `/v1/settings`, and `/v1/user?include=subscription`;
+  `grok.com/prod_mc_billing.ConsumerUiSvc/GetRemainingResets`;
+  `auth.x.ai` token refresh (written back).
+- **Plan:** prefers `subscription_tier_display` from settings, then maps
+  `subscriptionTier` from the user endpoint. Plan lookup failures do not
+  hide otherwise valid usage data.
+- **Shows:** subscription plan, weekly pool, pay-as-you-go cap badge,
+  remaining reset credits; local spend from `~\.grok\logs\`.
+
+## Devin (Devin CLI)
+
+- **Reads:** `%APPDATA%\devin\credentials.toml`;
+  `%APPDATA%\devin\cli\sessions.db` (read live, read-only — the WAL is
+  followed in place, never copied to Temp) for local spend.
+- **Calls:** Devin's `GetUserStatus` RPC.
+- **Shows:** weekly/daily quota, extra balance, plan; local spend from
+  Devin CLI sessions (cloud Devin sessions bill ACUs and keep no local
+  logs, so they can't be priced).
+
+## MiniMax
+
+- **Reads:** the MiniMax Code (mcode) CLI's OAuth sign-in at
+  `%USERPROFILE%\.minimax\auth\prod\<en|cn>\mcode-public\auth.json` —
+  read-only, never refreshed or written (mcode owns that file under its
+  own lock/generation scheme); the `com.minimax.mcode.oauth.prod.*`
+  record with the latest expiry is used (expired and unrelated records
+  are skipped), and only while its `expiresAtMs` is still in the
+  future. The account id comes from
+  `%USERPROFILE%\.minimax\cli-auth\prod\<en|cn>\account-identity.json`
+  (`realUserID`). Without a usable mcode login: pasted key (Settings),
+  `MINIMAX_API_KEY`, or
+  `%USERPROFILE%\.minimax\config.yaml` (exactly
+  `provider.minimax.options.apiKey` — a same-named key under another
+  provider's section is never used); local spend from
+  `%USERPROFILE%\.minimax\sqlite.db` (the Agent CLI's per-turn
+  token_usage table, frozen July 2026 but still read for its history)
+  plus mcode's `%USERPROFILE%\.minimax\v2\sqlite\runtime-state.sqlite`
+  (`local_runtime_token_usage`, model joined from the turn's assistant
+  `context_usage_telemetry`) — and from Claude Code sessions that ran against MiniMax's
+  Anthropic-compatible endpoint (those log MiniMax models into
+  `~\.claude\projects\` and are re-routed here from the Claude card).
+- **Calls:** via the mcode login — `agent.minimax.io` matrix POST
+  `user/get_user_extra_info` with mcode's request signing
+  (`yy`/`x-timestamp`/`x-signature`; required — without a default
+  workspace's `op_group_id` the OAuth path fails over to the key), then
+  `platform.minimax.io/v1/api/openplatform/coding_plan/remains` with the
+  workspace's `X-Group-Id`; the matrix `commerce/get_membership_info`
+  POST runs only when the workspace lookup didn't yield a plan tier
+  (CN hosts: `agent.minimaxi.com` / `www.minimaxi.com`); via a key —
+  `api.minimax.io/v1/token_plan/remains` (+ regional fallbacks).
+- **Shows:** 5 Hours + Weekly plan windows and the Video allowance row —
+  the same three bars mcode's Usage screen draws; the plan tier verbatim
+  (e.g. "Ultra Plan") on the mcode login. The last tier the login
+  reported is remembered in `minimax-plan.json` so the chip survives the
+  OAuth token lapsing while mcode isn't running — scoped to the mcode
+  account id, refreshed while mcode keeps confirming it (the 30-day TTL
+  only bites after a month without an mcode login), and dropped when the
+  MiniMax key is changed or cleared — though not on re-saving an
+  unchanged key — so a pasted key never inherits another account's tier;
+  a key with no remembered tier still shows "Coding Plan". Today / Yesterday / 30-day spend with per-model
+  breakdown (the CLI's own cost_usd is preferred; catalog
+  pricing otherwise).
+
+## OpenRouter
+
+- **Reads:** pasted key, `OPENROUTER_API_KEY`, or the key OpenCode stores.
+- **Calls:** `openrouter.ai/api/v1/credits` and `/key`.
+- **Shows:** balance, credits meter, key limit.
+
+## Z.ai (GLM Coding Plan)
+
+- **Reads:** pasted key (Settings → **Z.ai / GLM**), `ZAI_API_KEY` /
+  `GLM_API_KEY`, or the Z.ai CLI's key file. A GLM Coding Plan key from
+  `open.bigmodel.cn` works here too — no CLI login needed.
+- **Calls:** `api.z.ai` then `open.bigmodel.cn` quota + subscription
+  endpoints. Success on either site wins. A 401, 5xx, or unreachable
+  first site falls through; if every site fails, a 429 is preferred
+  over a later 5xx/parse or sibling 401 so cooldown still sees the
+  rate limit.
+- **Shows:** Session/Weekly, monthly Web Searches quota, plan.
+
+## Antigravity
+
+- **Reads:** the running IDE's local language server (loopback), or the
+  `gemini:antigravity` token in Windows Credential Manager.
+- **Calls:** the local language-server RPC when the IDE runs; otherwise
+  Google's Cloud Code quota API (`cloudcode-pa.googleapis.com`) with
+  Google's own token refresh.
+- **Shows:** Gemini + Claude pool windows, plan.
+
+## DeepSeek / Kimi API / ElevenLabs / Venice-class key providers
+
+- **Reads:** pasted key or env var only (`DEEPSEEK_API_KEY`,
+  `MOONSHOT_API_KEY`/`KIMI_API_KEY`, `ELEVENLABS_API_KEY`).
+  The Customize toggle and Settings field are labeled **Kimi API**;
+  the internal id is still `moonshot`.
+- **Calls:** `api.deepseek.com/user/balance`;
+  `api.moonshot.ai|cn/v1/users/me/balance`;
+  `api.elevenlabs.io/v1/user/subscription`.
+- **Shows:** balances / character quota with reset pacing; Kimi API and
+  DeepSeek add a "Credits used" percent bar metered against the highest
+  balance Pane has seen locally (top-ups raise it; feeds the Almost Out
+  notification). Saving a key in Settings turns that provider on if
+  Customize had it off.
+
+## Kimi Code
+
+- **Reads:** `%USERPROFILE%\.kimi-code\credentials\kimi-code.json` (honors
+  `KIMI_CODE_HOME`; falls back to `~\.kimi\credentials\kimi-code.json`).
+  That is the official CLI's OAuth login. Refresh tokens rotate on use
+  and are written back beside the CLI's file, like Claude/Codex — but
+  the `*.pane-bak` backup made first is deleted again once the
+  refreshed file is safely in place. **No CLI?** Paste your Kimi For Coding plan key in
+  Settings → API keys → **Kimi Code** (stored in `%APPDATA%\Pane\kimi.json`,
+  no env var is read). The login is used when both exist; the key is the
+  fallback (issue #173). This is the plan key, not the platform.kimi.ai
+  wallet key — that one goes in the **Kimi API** field.
+- **Calls:** `api.kimi.com/coding/v1/usages` (Session + Weekly request
+  windows, sent the OAuth token or the pasted plan key as Bearer);
+  `api.kimi.com/coding/v1/me` (plan name — login (OAuth) token only,
+  requested alongside usages with a 4 s cap; the pasted plan key never
+  calls it); `auth.kimi.com/api/oauth/token` (refresh, login only); and,
+  when a Moonshot/Kimi API key is saved,
+  `api.moonshot.ai|cn/v1/users/me/balance`
+  for the API bar. This is the Kimi Code *subscription* plus the
+  pay-as-you-go wallet on the same card.
+- **Shows:** Session (5-hour) and Weekly bars with reset pacing, plus the
+  plan name from `/me`'s `user_level_name`, shown verbatim — Kimi's own
+  pricing-page names at
+  [kimi.ai/membership/pricing](https://www.kimi.ai/membership/pricing):
+  Moderato ($19), Allegretto ($39), Allegro ($99), Vivace ($199).
+
+  Fallback when `/me` is unavailable and usages still carries
+  `user.membership.level` (Kimi dropped that field from usages in
+  Sep 2026):
+
+  | API `user.membership.level` | Card name |
+  |---|---|
+  | `LEVEL_STANDARD` / `LEVEL_MODERATO` | Moderato |
+  | `LEVEL_INTERMEDIATE` | Allegretto |
+  | `LEVEL_ADVANCED` | Allegro |
+  | `LEVEL_PREMIUM` | Vivace |
+
+  Older codes still map if the API sends them (`LEVEL_FREE` /
+  `LEVEL_BASIC` → Adagio, `LEVEL_ANDANTE` → Andante). Weekly request
+  caps 1024 / 2048 / 7168 are a fallback only, when the API omits the
+  level.
+  Those two windows are the same clocks as Kimi's website "5-hour Code"
+  and "7-day Code" rows; the coding usage API currently reports remaining
+  as whole percents (`limit`/`remaining` of 100), so usage under 1% can
+  still show as 0% in Pane. The website's **Total usage** bar is a
+  separate monthly membership credit pool (Kimi chat + Code) and is not
+  on this card. The **API** bar (credits used vs the highest balance Pane
+  has seen) only appears when a Moonshot/Kimi API key is saved — plan-only
+  installs never get a third quota row. Balance/Vouchers sit behind
+  Show more on that bar. Local spend from
+  `~\.kimi-code\sessions\**\wire.jsonl` (one usage.record per turn),
+  priced at Moonshot's published API rates (K3 $3/$15/$0.30 cache;
+  K2.7 Code $0.95/$4/$0.19, HighSpeed 2×; K2.6 $0.95/$4/$0.16;
+  K2.5 $0.60/$3/$0.10; V1 8k/32k/128k at $0.20/$2, $1/$3, $2/$5).
+  Plan logs name K3 `k3` / `kimi-code/k3` and K2.7 Code `kimi-for-coding`;
+  those map to the same cards as `kimi-k3` and `kimi-k2.7-code`.
+  Codex (and Claude) sessions that log `kimi-oauth/…` or `moonshot-ai/…`
+  via a router move those spend rows here, prefix peeled, so they do not
+  stay on the Codex/Claude card.
+  The leftover Kimi API (Moonshot) card is hidden while this card is
+  connected. Switching **Kimi API** off in Customize still skips the
+  wallet fetch (no API bar, no `api.moonshot.ai|cn` call). If the Kimi
+  card is off, local session spend stays on moonshot.
+
+## Hermes (Nous Research desktop)
+
+- **Reads:** the Hermes desktop app's local ledger
+  (`%LOCALAPPDATA%\hermes\state.db` — read live, read-only;
+  `session_model_usage` table — model,
+  billing route, token buckets, and the app's own cost per session).
+  Detected when that file exists; no API key.
+- **Calls:** nothing. This is a purely local source — Hermes records
+  ZERO cost itself, so dollars are priced from Pane's shared catalog.
+- **Shows:** a card with the two most recent user-selected models, their
+  billing backends (AihubMix, MiniMax, a custom URL, …), and session count.
+  Hermes's internal title/approval tasks still count toward real usage but
+  do not replace that model summary. Today / Yesterday / Last 30 Days spend
+  (with a per-model breakdown on hover) sits behind Show more.
+  MiniMax-routed sessions join the MiniMax spend slice; OpenRouter-routed
+  sessions join OpenRouter (including custom URLs pointed at those hosts).
+  AihubMix and other custom OpenAI-compatible URLs stay on Hermes. Scoped
+  AihubMix pricing covers HY4 Preview, Qwen3.8 Flash, and the dated
+  Qwen3.8-Max-0902 spellings without leaking those gateway rates to other
+  routes.
+
+## Ollama
+
+- **Reads:** nothing.
+- **Calls:** your own PC only — `127.0.0.1:11434` (`/api/version`,
+  `/api/tags`, `/api/ps`).
+- **Shows:** installed models, loaded models.
+
+## Codebuff
+
+- **Reads:** `%USERPROFILE%\.config\manicode\credentials.json` (the
+  `codebuff login` file) or a pasted key.
+- **Calls:** `codebuff.com/api/v1/usage` + `/api/user/subscription`.
+- **Shows:** credits, weekly limit, plan.
+
+## Kilo
+
+- **Reads:** `%USERPROFILE%\.local\share\kilo\auth.json` or a pasted key.
+- **Calls:** `app.kilo.ai/api/trpc/user.getCreditBlocks,kiloPass.getState`.
+- **Shows:** credit blocks, Kilo Pass window, tier.
+
+## AihubMix
+
+- **Reads:** pasted key (Settings), `AIHUBMIX_API_KEY`, or the `aihubmix`
+  key OpenCode stores in its own `auth.json` (AihubMix is typically used
+  through OpenCode as an OpenAI-compatible gateway).
+- **Calls:** `aihubmix.com/v1/dashboard/billing/subscription` (spending
+  limit) and `/usage` (month-to-date usage).
+- **Shows:** usage metered against your account's spending limit, plan.
+  Requests routed through OpenCode also appear in the Total Spend donut
+  from OpenCode's local log, same as any other OpenCode model. Claude
+  Code sessions pointed at AihubMix's Anthropic-compatible endpoint
+  (qwen-family models in `~\.claude\projects\` logs, matched
+  case-insensitively) are re-routed here from the Claude card, the same
+  way MiniMax-routed sessions are. Claude Code logs don't record which
+  gateway served a request, so this assumes qwen models reached Claude
+  Code via AihubMix — sessions run through Alibaba's own
+  Anthropic-compatible proxy would land here too.
+
+## One/New API
+
+- **Reads:** nested `%APPDATA%\Pane\onenewapi.json` (versioned
+  `{ version, sites: [{ id, name, baseUrl, displayUnit, keys }] }`) — **not**
+  `config.json`, and not the single-key `set_api_key` Settings list.
+  Written atomically and stored owner-only (Windows protected DACL /
+  Unix `0600`), not inherited from a permissive parent. Settings
+  manages a hierarchy of sites and keys; pasted secrets never
+  come back out of the UI after save.
+- **Discovery:** `GET {origin}/api/status` with no API key, no redirects,
+  and a bounded JSON body — only when creating a site or changing its
+  base URL. Accepts branding-agnostic OneAPI / NewAPI payloads whose
+  `success` is `true` and whose `data.version` or `data.system_name` is
+  a non-empty string. Display unit (`USD` / `CNY` / tokens) is not
+  required. Custom branding text is not required. HTTP 404 or a
+  structural mismatch is shown as not a compatible OneAPI / NewAPI
+  panel, not as a raw HTTP status.
+- **Calls (per enabled key):** `GET {origin}/v1/dashboard/billing/subscription`
+  and `GET {origin}/v1/dashboard/billing/usage` with
+  `Authorization: Bearer <that key>` and **no date query parameters**.
+  Do not call `/api/usage/token` or `/api/log/token`.
+- **HTTP:** `https://` for any valid host. Plain `http://` is limited to
+  IPv4 private/loopback/link-local addresses and IPv6
+  loopback/unique-local/link-local addresses. Every HTTP hostname,
+  including `localhost` and `*.local`, is rejected without DNS resolution.
+- **Shows:** one dashboard/tray card per key, id `onenewapi@<key-id>`,
+  titled `<site name> · <key label>`. Usage `{used} of {limit}` using the
+  site's display unit from `/api/status` (`USD` → `$`, `CNY` → `¥`,
+  tokens as integer counts, OneAPI `display_in_currency: false` as
+  tokens). `total_usage` is always cents-style (`/ 100`) in every mode,
+  matching NewAPI/OneAPI's OpenAI-compatible billing handlers. Plus an
+  Expiry row when `access_until` is a positive timestamp. Empty sites
+  produce no card and spawn no billing requests. Sentinel `>= 100000000`
+  on `hard_limit_usd` / `system_hard_limit_usd` means unlimited: the
+  card shows Used (including `$0.00` / `¥0.00` / `0` when usage is
+  missing) instead of a fake percent bar. Display unit is stored on the
+  site at fingerprint time; existing sites missing it get one
+  unauthenticated status backfill.
+- **AihubMix** stays its own family; an `aihubmix.com` origin may also
+  be added here as a manual site — both cards can coexist and are not
+  folded into Total Spend.
+- **Shared quota:** some panels return the same user-level numbers for
+  every key of one account. Pane shows each key's response independently
+  and does not sum or dedupe equal values.
+- **Accuracy:** OneAPI's `DisplayTokenStatEnabled=false` can hide
+  token-level stats so the panel reports user-level quota instead; treat
+  the card as what that credential observed. Pane does not call native
+  `/api/usage/token` or `/api/log/token` to compensate.
+- **Telemetry:** family `onenewapi` at most once per refresh. Site ids,
+  key ids, origins, labels, and configured key counts never leave the
+  machine.
+- **Local HTTP:** each key is `GET /v1/usage/onenewapi@<key-id>`. The
+  JSON is `providerId`, `displayName`, `plan`, `lines`, `fetchedAt` —
+  no dashboard URL, origin, or secrets.
+
+## Qwen Code (Alibaba Coding Plan)
+
+- **Reads:** pasted key (Settings), `BAILIAN_TOKEN_PLAN_API_KEY` (the env
+  var Qwen Code itself uses), or `DASHSCOPE_API_KEY`; local spend from
+  the CLI's own per-request ledger
+  (`%USERPROFILE%\.qwen\usage\token-usage-YYYY-MM.jsonl`).
+- **Calls:** the Model Studio console's Coding Plan RPC
+  (`modelstudio.console.alibabacloud.com/data/api.json`, China-console
+  fallback) — the same call the Coding Plan page makes; Alibaba publishes
+  no dedicated quota API (approach credited to CodexBar's notes).
+- **Shows:** the plan's three request-counted windows — rolling 5-hour
+  session, weekly, monthly — with resets and plan name. If the console
+  RPC rejects the key, the card falls back to local request/token counts
+  for today and the month. Spend rows and the donut slice come from the
+  local ledger either way.
+
+---
+
+Provider request formats were researched from two MIT-licensed macOS
+projects: [robinebers/openusage](https://github.com/robinebers/openusage)
+and [steipete/CodexBar](https://github.com/steipete/CodexBar) — both
+credited in [LICENSE](../LICENSE).
+## Sub2API
+
+Add a site in Settings → Sub2API, then paste an API key created in that
+site's console. Each site can have several keys; each key has its own card
+with a stable `sub2api@<key-id>` identity. Empty sites remain in Settings.
+Saving validates the address and input locally, so an unavailable site or
+an unauthorized key can still be saved and corrected later.
+
+Pane stores keys in `%APPDATA%\Pane\sub2api.json`, a versioned document
+written atomically with an owner-only Windows DACL (Unix `0600`). Damaged
+or unreadable storage is reported rather than replaced with an empty file.
+Saved keys and key fragments are never returned to Settings. The only
+remote request is `GET <site>/v1/usage` with that key as a Bearer token;
+there is no status probe, dashboard JWT, billing fallback, model request,
+or remote icon download. Requests use Pane's proxy and timeout settings,
+a bounded response body and concurrency, and never follow redirects.
+
+Addresses accept an HTTPS origin or an origin ending in `/v1`; HTTP is
+limited to private, loopback, and link-local IP literals. Userinfo, query
+strings, fragments, and other paths are rejected. Names default to the
+hostname and stable `Key N` labels. Duplicate normalized sites, keys within
+a site, and nonempty labels within a site are rejected.
+
+The response selects the card's mode on every refresh:
+
+- **Key quota:** total USD allowance and configured 5h, 1d, 7d windows,
+  including valid server reset times and a separate key expiry/status.
+  Window-only keys work without a total quota. Actual amounts remain
+  visible when usage exceeds the limit; bars stop at 100%.
+- **Subscription:** plan and configured daily, weekly, monthly USD
+  allowances, plus separate subscription expiry. Explicit unlimited
+  subscriptions show Unlimited. Missing periods are not zero quotas.
+- **Wallet:** actual balance, including zero and negative debt. No
+  percentage is invented from a historical maximum.
+
+Main information stays visible; expand the card for today's and total
+requests, tokens, and **actual_cost**. Missing or invalid fields display
+Unknown; `cost` never substitutes for actual cost. Subscription allowances
+belong to the group subscription and wallet balances to the account,
+whereas usage summaries describe the current key. Equal values across
+keys remain separate and are never added, deduplicated, or included in
+Total Spend. No reset time is inferred from calendar boundaries, window
+starts, expiry, or usage statistics.
+
+Legacy responses without `mode` can use explicit quota, subscription, or
+wallet structure. Ambiguous structures or a lone `remaining` show Unknown
+type and a readable remaining amount when available, without guessing a
+currency. An unknown explicit mode does not invoke legacy detection.
+Unrecognizable responses show a safe error. First refresh failures show
+an error card; subsequent failures retain the same key/context's last
+successful snapshot with a stale warning. Partial successful responses do
+not copy missing fields from older data. Expired or exhausted keys can
+still refresh.
+
+Rename sites or keys without losing card identity, ordering or pins. Leave
+the edited key blank to keep its secret. Rotating a key clears its old
+usage; changing a site's address requires confirmation for the affected
+keys and clears their usage. Delete a key to remove its cached data and
+preferences, or delete a site to remove all its keys. Deleting the last
+key keeps the empty site. Family and per-key enable switches are separate;
+disabling the family preserves each key's choice. The first configured key
+enables the family; subsequent additions respect a disabled family.
+
+The tray automatically selects the valid allowance with the highest used
+percentage, with ties resolved in the standard order listed above. Its
+tooltip names that allowance. Wallets show balance text, without a low
+balance alert. Existing quota notification settings apply independently
+per key and allowance; stale, unknown, and disabled results produce no
+new quota alerts. Dashboard links open the configured site root.
+
+Sub2API adds no telemetry: its family, dynamic identities, site/key counts,
+addresses, labels, values and raw errors are excluded. The local HTTP API
+publishes only display data by snapshot ID, with current error/stale state;
+it excludes origins, dashboard links, secrets and raw responses. See
+[local-http-api.md](local-http-api.md).
