@@ -173,7 +173,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant};
 
     struct TempStore {
         dir: PathBuf,
@@ -182,10 +182,7 @@ mod tests {
 
     impl TempStore {
         fn new() -> Self {
-            let stamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0);
+            let stamp = crate::providers::unique_stamp();
             let dir = std::env::temp_dir().join(format!(
                 "pane-onenewapi-snap-{}-{stamp}",
                 std::process::id()

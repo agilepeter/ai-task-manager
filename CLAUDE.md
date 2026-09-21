@@ -31,11 +31,31 @@ file under `src-tauri/src/providers/` and port it by hand.
 - Internal crate is still named `pane` / `pane_lib`; rename during the core split.
 - Antigravity discovery shells out to PowerShell/netstat: compiles, finds nothing on macOS.
 - Claude extra accounts via `CLAUDE_CONFIG_DIR` (hash-suffixed Keychain service) are not mapped.
-- Log prefix is still `[pane]`, and some user-facing strings still say "Pane" or "this PC".
+- Log prefix is still `[pane]`. About 10 user-facing strings (x3 languages in `src/i18n.ts`,
+  plus Rust hints) still say "this PC" or show the old `%APPDATA%\Pane` path, which is now
+  wrong on both platforms (the dir is `AITaskManager`). One copy pass, with the core split.
 - Spend scan skips any single CLI log over 512 MiB, so a huge Claude Code session is
   left out of spend totals (seen on a 723 MiB session file).
 - Only Claude and Copilot are verified end to end on macOS. Codex, Cursor, OpenRouter
   and ElevenLabs credential paths on macOS are unverified.
+
+## Views
+
+One product, tabs at the top: **Usage** (default; limits, pace, spend) and **Inventory**
+(`src/inventory.ts` + `src-tauri/src/inventory.rs`: MCP servers, agents, skills, guardrails,
+and computed Opportunities). Usage stays the default view.
+
+- **Inventory reads names, shapes and counts only.** Claude config files hold API keys in
+  `env`, `args`, `headers`, URL paths and query strings. Nothing may copy a value out of
+  those. The `never_leaks_*` test plants secrets in every such field; extend it when adding
+  a field.
+- **Opportunities are computed from the inventory, never generic advice.** Each pairs a fact
+  about this machine with why it matters and a Learn more link. A tidy setup shows none.
+- **macOS WebKit gets opaque bars** (`body.no-svg-lens`): it does not paint SVG `url()`
+  backdrop filters, and translucent bars let scrolling rows read through.
+- **Check UI in WebKit, not Chromium**: the macOS webview is WebKit. Playwright's `webkit`
+  with a mocked `window.__TAURI_INTERNALS__.invoke` renders the real frontend from the vite
+  dev server (port 1420). Feed it real data, and give `get_config` a full config or boot aborts.
 
 ## Own config dir, never upstream's
 

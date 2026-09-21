@@ -313,6 +313,30 @@ pub(crate) fn read_small_text(
     Ok(text)
 }
 
+/// A name suffix unique within this process: the clock plus a counter. The
+/// clock alone is not enough. macOS reports it in whole microseconds, so two
+/// threads asking in the same microsecond get the same value, and temp paths
+/// built from it collide (parallel tests deleted each other's directories).
+pub(crate) fn unique_stamp() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{nanos}-{n}")
+}
+
+#[cfg(test)]
+mod unique_stamp_tests {
+    #[test]
+    fn never_repeats_even_within_one_clock_tick() {
+        let stamps: std::collections::HashSet<String> =
+            (0..10_000).map(|_| super::unique_stamp()).collect();
+        assert_eq!(stamps.len(), 10_000);
+    }
+}
+
 /// Where the app keeps its own settings, e.g. saved API keys:
 /// `%APPDATA%\AITaskManager` on Windows,
 /// `~/Library/Application Support/AITaskManager` on macOS.
@@ -976,10 +1000,7 @@ mod sqlite_temp_tests {
         let huge = std::env::temp_dir().join(format!(
             "pane-size-cap-{}-{}.bin",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or_default()
+            crate::providers::unique_stamp()
         ));
         // Don't write 64MB; the helper treats a missing file as too large.
         assert!(!super::temp_sqlite_copy_allowed(&huge));
@@ -999,10 +1020,7 @@ mod credit_baseline_tests {
 
     impl TempDir {
         fn new() -> Self {
-            let stamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0);
+            let stamp = crate::providers::unique_stamp();
             let dir = std::env::temp_dir().join(format!(
                 "pane-credit-{}-{stamp}",
                 std::process::id()

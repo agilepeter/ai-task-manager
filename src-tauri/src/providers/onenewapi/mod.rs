@@ -282,7 +282,6 @@ mod tests {
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TempStore {
         dir: PathBuf,
@@ -291,10 +290,7 @@ mod tests {
 
     impl TempStore {
         fn new() -> Self {
-            let stamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0);
+            let stamp = crate::providers::unique_stamp();
             let dir = std::env::temp_dir()
                 .join(format!("pane-onenewapi-mod-{}-{stamp}", std::process::id()));
             fs::create_dir_all(&dir).unwrap();

@@ -1,3 +1,4 @@
+import { setupViews } from "./inventory";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -2332,6 +2333,7 @@ function applyLens(el: HTMLElement | null, filterId: string, imgId: string): voi
 /// run — the fix for laptops where the popover animates below 60 fps.
 function applyGlass(): void {
   document.body.classList.toggle("no-glass", config.glassEffects === false);
+  document.body.classList.toggle("no-svg-lens", !SVG_BACKDROP_OK);
   // Lens init is skipped entirely while glass is off — build the maps the
   // first time the user turns it on.
   if (config.glassEffects !== false && !lensReady) initLiquidLens();
@@ -2353,7 +2355,6 @@ let lensReady = false;
 function initLiquidLens(): void {
   if (config.glassEffects === false || lensReady) return;
   lensReady = true;
-  document.body.classList.toggle("no-svg-lens", !SVG_BACKDROP_OK);
   if (!SVG_BACKDROP_OK) return;
   const surfaces: [string, string, HTMLElement | null][] = [
     ["lens-side", "lens-map-side", document.querySelector(".sidebar")],
@@ -5040,6 +5041,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#theme-btn")!.addEventListener("click", toggleTheme);
   setupTrailFisheye();
   setupTooltips();
+  setupViews();
   // No lens init here: applyGlass() (via initSettings, after the saved
   // config arrives) owns it — a fixed timer raced the config load and
   // built the maps even for users who turned glass off.

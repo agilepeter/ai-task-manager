@@ -1,5 +1,6 @@
 mod alerts;
 mod httpapi;
+mod inventory;
 mod i18n;
 mod pricing;
 mod providers;
@@ -151,6 +152,15 @@ fn config_with_defaults(mut cfg: Value) -> Value {
 #[tauri::command]
 fn system_ui_locale() -> &'static str {
     i18n::system_ui_locale()
+}
+
+/// The local AI inventory for the Inventory tab. Names, shapes and counts
+/// only; see `inventory.rs` for what is deliberately never read out.
+#[tauri::command]
+async fn get_inventory() -> Result<inventory::Inventory, String> {
+    tauri::async_runtime::spawn_blocking(inventory::scan)
+        .await
+        .map_err(|e| format!("inventory scan: {e}"))
 }
 
 #[tauri::command]
@@ -2958,6 +2968,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             fetch_usage,
+            get_inventory,
             cached_usage,
             fetch_spend,
             set_api_key,
@@ -3537,10 +3548,7 @@ mod tests {
 
     impl TempConfig {
         fn new() -> Self {
-            let stamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0);
+            let stamp = crate::providers::unique_stamp();
             let dir = std::env::temp_dir().join(format!(
                 "pane-config-{}-{stamp}",
                 std::process::id()

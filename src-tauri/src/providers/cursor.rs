@@ -65,10 +65,7 @@ fn read_state_from_capped_copy(
     let tmp = std::env::temp_dir().join(format!(
         "openusage-cursor-{}-{}.vscdb",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default()
+        crate::providers::unique_stamp()
     ));
     match copy_capped(db_path, &tmp, super::MAX_TEMP_SQLITE_BYTES) {
         Ok(copied) if copied > super::MAX_TEMP_SQLITE_BYTES => Err(format!(

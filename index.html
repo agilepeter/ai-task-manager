@@ -56,7 +56,12 @@
 
     <main class="popover">
       <div class="main-col">
+        <div id="view-tabs" class="tabs view-tabs" role="tablist" aria-label="Views">
+          <button class="tab active" role="tab" aria-selected="true" data-view="usage">Usage</button>
+          <button class="tab" role="tab" aria-selected="false" data-view="inventory">Inventory</button>
+        </div>
         <div class="content">
+          <section id="inventory" hidden></section>
           <section id="providers">
             <div class="skeleton-card">
               <div class="skeleton-line title"></div>
@@ -86,7 +91,7 @@
            left edge, then it slides out over the cards. -->
       <div id="side-zone">
         <aside class="sidebar">
-          <span id="app-logo" class="app-logo" title="Pane"></span>
+          <span id="app-logo" class="app-logo" title="AI Task Manager"></span>
           <nav id="trail" aria-label="Card navigation" data-i18n-aria="sidebar.cards"></nav>
           <div class="sidebar-buttons">
             <button id="theme-btn" title="Light / dark mode" data-i18n-title="sidebar.theme">&#9728;</button>

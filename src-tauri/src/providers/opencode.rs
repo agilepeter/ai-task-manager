@@ -1036,10 +1036,7 @@ mod tests {
     fn disc_root() -> PathBuf {
         std::env::temp_dir().join(format!(
             "pane-opencode-disc-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            crate::providers::unique_stamp()
         ))
     }
 
