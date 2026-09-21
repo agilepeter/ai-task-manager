@@ -618,10 +618,14 @@ const MAX_SCAN_DEPTH: usize = 16;
 /// tree (or `/`) can't stall the refresh thread.
 const MAX_SCAN_DIRS: usize = 20_000;
 
-/// Session logs larger than this are skipped whole, with a diagnostic — a
-/// multi-hundred-MB single "log" is a corrupt or hostile artifact, and
-/// reading it would stall the refresh thread.
-const MAX_LOG_FILE_BYTES: u64 = 512 * 1024 * 1024;
+/// Session logs larger than this are skipped whole, with a diagnostic.
+/// Upstream drew the line at 512 MiB on the view that a bigger log must be
+/// corrupt or hostile, but long-lived agent sessions really do get there (a
+/// genuine 723 MiB Claude Code session was being left out of spend). The
+/// reader streams, no line is kept past MAX_LINE_BYTES, and after the first
+/// pass only appended bytes are re-read, so size costs one slow scan, once.
+/// 2 GiB still stops a runaway file from holding the refresh thread forever.
+const MAX_LOG_FILE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Stored bytes per JSONL line: a longer physical line is skipped and its
 /// remainder read-and-discarded, never kept. Legit Claude/Codex lines
@@ -641,7 +645,7 @@ const TAIL_WARMUP: u64 = 1024 * 1024;
 /// Report a log skipped for exceeding MAX_LOG_FILE_BYTES.
 fn oversized_log(path: &Path, size: u64) {
     eprintln!(
-        "[pane] spend: skipping {} — {} MiB exceeds the {} MiB log-file cap",
+        "[aitm] spend: skipping {} — {} MiB exceeds the {} MiB log-file cap",
         path.display(),
         size / (1024 * 1024),
         MAX_LOG_FILE_BYTES / (1024 * 1024),
@@ -679,7 +683,7 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
         dirs_visited += 1;
         if dirs_visited > MAX_SCAN_DIRS {
             eprintln!(
-                "[pane] spend: scan of {} stopped after {MAX_SCAN_DIRS} directories — results may be partial",
+                "[aitm] spend: scan of {} stopped after {MAX_SCAN_DIRS} directories — results may be partial",
                 root.display()
             );
             return;
@@ -3141,7 +3145,7 @@ fn split_csv_row(line: &str) -> Vec<String> {
 fn spend_step<T>(name: &str, f: impl FnOnce() -> T) -> T {
     let started = std::time::Instant::now();
     let out = f();
-    eprintln!("[pane] spend: {name} {:?}", started.elapsed());
+    eprintln!("[aitm] spend: {name} {:?}", started.elapsed());
     out
 }
 
@@ -3151,7 +3155,7 @@ fn take_join<T>(
     fallback: T,
 ) -> T {
     handle.join().unwrap_or_else(|_| {
-        eprintln!("[pane] spend: {name} panicked — keeping the other providers");
+        eprintln!("[aitm] spend: {name} panicked — keeping the other providers");
         fallback
     })
 }

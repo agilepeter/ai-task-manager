@@ -191,7 +191,7 @@ pub async fn fetch_usage_csv() -> Option<String> {
         Err(_) => return stale(),
     };
     if !resp.status().is_success() {
-        eprintln!("[pane] cursor csv: HTTP {}", resp.status());
+        eprintln!("[aitm] cursor csv: HTTP {}", resp.status());
         return stale();
     }
     let Ok(body) = resp.text().await else { return stale() };
@@ -278,7 +278,7 @@ async fn refresh_access_token(refresh: &str) -> Option<String> {
         .await
         .ok()?;
     if !resp.status().is_success() {
-        eprintln!("[pane] cursor token refresh: HTTP {}", resp.status());
+        eprintln!("[aitm] cursor token refresh: HTTP {}", resp.status());
         return None;
     }
     let v: Value = resp.json().await.ok()?;
@@ -319,7 +319,7 @@ fn credit_grants_metric(grants: &Value) -> Option<Metric> {
     if total <= 0.0 && remaining <= 0.0 {
         if has == Some(true) {
             eprintln!(
-                "[pane] cursor credit grants: hasCreditGrants but no totalCents/creditBalanceCents"
+                "[aitm] cursor credit grants: hasCreditGrants but no totalCents/creditBalanceCents"
             );
         }
         return None;
@@ -394,7 +394,7 @@ async fn fetch_grok_bot(token: &str) -> Option<Metric> {
         Ok(Some(usage)) => grok_bot_metric(&usage),
         Ok(None) => None,
         Err(e) => {
-            eprintln!("[pane] cursor grok bot: {e}");
+            eprintln!("[aitm] cursor grok bot: {e}");
             None
         }
     }
@@ -612,7 +612,7 @@ async fn fetch() -> Result<Snapshot, String> {
             }
         }
         Ok(None) => {}
-        Err(e) => eprintln!("[pane] cursor credit grants: {e}"),
+        Err(e) => eprintln!("[aitm] cursor credit grants: {e}"),
     }
 
     let spend_limit = usage.get("spendLimitUsage").filter(|v| v.is_object());

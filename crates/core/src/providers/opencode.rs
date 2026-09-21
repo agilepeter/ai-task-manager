@@ -326,7 +326,7 @@ async fn fetch(
             // offline machine would otherwise print this once a minute
             // for the app's lifetime.
             if !FALLBACK_ACTIVE.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                eprintln!("[pane] opencode: usage API failed ({e}) — using local windows");
+                eprintln!("[aitm] opencode: usage API failed ({e}) — using local windows");
             }
             // If the fallback ALSO fails (fresh device with no local
             // history), the card must carry both causes — surfacing only
@@ -800,7 +800,7 @@ fn read_messages(db: &Path) -> Result<(Vec<MessageRow>, bool), String> {
     }
     if scanned >= super::MAX_LEDGER_ROWS {
         eprintln!(
-            "[pane] opencode: message table hit the {}-row read cap — keeping newest rows, oldest usage is dropped",
+            "[aitm] opencode: message table hit the {}-row read cap — keeping newest rows, oldest usage is dropped",
             super::MAX_LEDGER_ROWS
         );
     }

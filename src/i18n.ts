@@ -1300,7 +1300,10 @@ export function applyStaticI18n(): void {
   document.querySelectorAll<HTMLElement>("[data-i18n-placeholder]").forEach((el) => {
     const key = el.dataset.i18nPlaceholder;
     if (key && "placeholder" in el) {
-      (el as HTMLInputElement).placeholder = t(key);
+      // Shortcut hints name the platform's own modifier. Both spellings are
+      // accepted by the shortcut parser (tested in the app crate).
+      const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+      (el as HTMLInputElement).placeholder = mac ? t(key).replace("Ctrl+", "Cmd+") : t(key);
     }
   });
   document.querySelectorAll<HTMLElement>("[data-i18n-aria]").forEach((el) => {

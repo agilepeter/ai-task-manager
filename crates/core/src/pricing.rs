@@ -486,7 +486,7 @@ fn apply_supplement(store: &mut Store, doc: &Value) {
         }
     }
     if dropped > 0 {
-        eprintln!("[pane] pricing: supplement dropped {dropped} out-of-range entries");
+        eprintln!("[aitm] pricing: supplement dropped {dropped} out-of-range entries");
     }
 }
 
@@ -620,15 +620,15 @@ pub fn ensure_fresh() {
                     state[source] = json!({ "etag": new_etag, "fetchedAt": now, "failedAt": 0 });
                     GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     UNPRICED_HINT.store(false, std::sync::atomic::Ordering::Relaxed);
-                    eprintln!("[pane] pricing: refreshed {source}");
+                    eprintln!("[aitm] pricing: refreshed {source}");
                 }
                 Err(e) => {
-                    eprintln!("[pane] pricing: {source} parse failed ({e})");
+                    eprintln!("[aitm] pricing: {source} parse failed ({e})");
                     state[source] = json!({ "etag": etag, "fetchedAt": fetched_at, "failedAt": now });
                 }
             },
             Err(e) => {
-                eprintln!("[pane] pricing: {source} fetch failed ({e})");
+                eprintln!("[aitm] pricing: {source} fetch failed ({e})");
                 state[source] = json!({ "etag": etag, "fetchedAt": fetched_at, "failedAt": now });
             }
         }

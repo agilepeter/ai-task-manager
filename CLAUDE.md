@@ -37,11 +37,8 @@ file under `src-tauri/src/providers/` and port it by hand.
 
 - Antigravity discovery shells out to PowerShell/netstat: compiles, finds nothing on macOS.
 - Claude extra accounts via `CLAUDE_CONFIG_DIR` (hash-suffixed Keychain service) are not mapped.
-- Log prefix is still `[pane]`. UI copy is platform-neutral now; keep it that way ("this
-  computer", "system notifications", no `%APPDATA%` paths). Still Windows-flavoured: the
-  global-shortcut placeholder (`Ctrl+Shift+U`).
-- Spend scan skips any single CLI log over 512 MiB, so a huge Claude Code session is
-  left out of spend totals (seen on a 723 MiB session file).
+- UI copy is platform-neutral; keep it that way ("this computer", "system notifications",
+  no `%APPDATA%` paths, shortcut hints say Cmd on macOS). Log prefix is `[aitm]`.
 - Only Claude and Copilot are verified end to end on macOS. Codex, Cursor, OpenRouter
   and ElevenLabs credential paths on macOS are unverified.
 

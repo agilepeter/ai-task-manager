@@ -528,7 +528,7 @@ async fn fetch() -> Result<Snapshot, String> {
         .trim_end_matches('/');
     if !is_trusted_server(server) {
         eprintln!(
-            "[pane] devin: credentials.toml api_server_url is not {DEFAULT_SERVER_URL} — skipping status request"
+            "[aitm] devin: credentials.toml api_server_url is not {DEFAULT_SERVER_URL} — skipping status request"
         );
         return Err(
             "Devin credentials point at an unexpected server — sign in with the Devin CLI again".into(),
@@ -742,17 +742,17 @@ fn save_cache(path: &std::path::Path, cache: &DevinCache) {
     let Ok(json) = serde_json::to_string(cache) else { return };
     if let Some(dir) = path.parent() {
         if let Err(e) = std::fs::create_dir_all(dir) {
-            eprintln!("[pane] devin: could not create {}: {e}", dir.display());
+            eprintln!("[aitm] devin: could not create {}: {e}", dir.display());
             return;
         }
     }
     let tmp = path.with_extension("json.tmp");
     if let Err(e) = std::fs::write(&tmp, json) {
-        eprintln!("[pane] devin: could not write {}: {e}", tmp.display());
+        eprintln!("[aitm] devin: could not write {}: {e}", tmp.display());
         return;
     }
     if let Err(e) = std::fs::rename(&tmp, path) {
-        eprintln!("[pane] devin: could not replace {}: {e}", path.display());
+        eprintln!("[aitm] devin: could not replace {}: {e}", path.display());
         let _ = std::fs::remove_file(&tmp);
     }
 }
@@ -895,7 +895,7 @@ fn read_new_events(
     }
     let capped = scanned >= limit;
     if capped {
-        eprintln!("[pane] devin: read {limit} rows this pass — resuming next refresh");
+        eprintln!("[aitm] devin: read {limit} rows this pass — resuming next refresh");
     }
     Ok((out, last_read, capped))
 }
@@ -971,7 +971,7 @@ fn refresh_cache_with_limit(
     // cache claims.
     let reset = cache.db_identity != identity || high_water < cache.last_rowid;
     if reset {
-        eprintln!("[pane] devin: sessions.db was recreated or replaced — rescanning");
+        eprintln!("[aitm] devin: sessions.db was recreated or replaced — rescanning");
         *cache = DevinCache {
             version: DEVIN_CACHE_VERSION,
             db_identity: identity,

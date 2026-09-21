@@ -317,7 +317,7 @@ fn read_usage_events(db: &std::path::Path) -> Result<Vec<HermesUsage>, String> {
     let events: Vec<HermesUsage> = rows.flatten().collect();
     if events.len() as u64 >= super::MAX_LEDGER_ROWS {
         eprintln!(
-            "[pane] hermes: session_model_usage hit the {}-row read cap — keeping newest rows, oldest usage is dropped",
+            "[aitm] hermes: session_model_usage hit the {}-row read cap — keeping newest rows, oldest usage is dropped",
             super::MAX_LEDGER_ROWS
         );
     }

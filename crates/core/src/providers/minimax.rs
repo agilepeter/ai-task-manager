@@ -90,7 +90,7 @@ async fn fetch() -> Result<Snapshot, String> {
             Ok(s) => return Ok(s),
             Err(e) => {
                 if let Some(key) = &key {
-                    eprintln!("[pane] minimax: mcode login: {e}");
+                    eprintln!("[aitm] minimax: mcode login: {e}");
                     return fetch_via_key(key).await;
                 }
                 return Err(e);
@@ -565,7 +565,7 @@ fn remember_tier_if_unchanged(tier: &str, user_id: &str, generation: u64) {
 fn remember_tier_if_unchanged_in(dir: &Path, tier: &str, user_id: &str, generation: u64) {
     let _guard = tier_cache_guard();
     if tier_cache_generation() != generation {
-        eprintln!("[pane] minimax: key changed during refresh — not remembering the plan tier");
+        eprintln!("[aitm] minimax: key changed during refresh — not remembering the plan tier");
         return;
     }
     remember_tier_in(dir, tier, user_id);
@@ -602,7 +602,7 @@ fn remember_tier_at(dir: &Path, tier: &str, user_id: &str, now_ms: i64) {
     })
     .to_string();
     if let Err(e) = super::onenewapi::store::atomic_write(&path, &json) {
-        eprintln!("[pane] minimax: could not save {}: {e}", path.display());
+        eprintln!("[aitm] minimax: could not save {}: {e}", path.display());
     }
 }
 
@@ -655,7 +655,7 @@ pub fn restore_stashed_tier_in(dir: &Path) {
     bump_tier_cache_generation();
     if let Err(e) = std::fs::rename(plan_stash_path(dir), plan_cache_path(dir)) {
         if e.kind() != std::io::ErrorKind::NotFound {
-            eprintln!("[pane] minimax: could not restore {}: {e}", plan_stash_path(dir).display());
+            eprintln!("[aitm] minimax: could not restore {}: {e}", plan_stash_path(dir).display());
         }
     }
 }
@@ -668,7 +668,7 @@ pub fn discard_stashed_tier_in(dir: &Path) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => {
-            eprintln!("[pane] minimax: could not remove {}: {e}", plan_stash_path(dir).display());
+            eprintln!("[aitm] minimax: could not remove {}: {e}", plan_stash_path(dir).display());
         }
     }
 }
@@ -981,11 +981,11 @@ fn read_events_stmt(
         }
     }
     if dropped > 0 {
-        eprintln!("[pane] minimax: {what}: {dropped} row(s) skipped (unreadable ts/model)");
+        eprintln!("[aitm] minimax: {what}: {dropped} row(s) skipped (unreadable ts/model)");
     }
     if events.len() as u64 >= super::MAX_LEDGER_ROWS {
         eprintln!(
-            "[pane] minimax: {what} hit the {}-row read cap — keeping newest rows, oldest usage is dropped",
+            "[aitm] minimax: {what} hit the {}-row read cap — keeping newest rows, oldest usage is dropped",
             super::MAX_LEDGER_ROWS
         );
     }

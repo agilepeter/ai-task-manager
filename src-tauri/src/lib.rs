@@ -35,7 +35,7 @@ fn config_path_in(dir: &Path) -> PathBuf {
 /// A parse failure here once silently reset all settings to defaults, so
 /// failures are now logged durably and the last good copy is used instead.
 fn note_config_error(context: &str) {
-    eprintln!("[pane] {context}");
+    eprintln!("[aitm] {context}");
     // Tests run against temp dirs; they must never append into the
     // developer's real config-error.log.
     if cfg!(test) {
@@ -261,7 +261,7 @@ fn apply_config_patch(cfg: &mut Value, patch: &Value) {
                     target.insert(k.clone(), v.clone());
                 }
             } else {
-                eprintln!("[pane] set_config: ignoring unknown key '{k}'");
+                eprintln!("[aitm] set_config: ignoring unknown key '{k}'");
             }
         }
     }
@@ -1920,7 +1920,7 @@ async fn fetch_usage(
             s.id.as_str()
         };
         eprintln!(
-            "[pane] {}: {} ({} metrics){}",
+            "[aitm] {}: {} ({} metrics){}",
             log_id,
             s.status,
             s.metrics.len(),
@@ -2073,7 +2073,7 @@ async fn fetch_usage(
             }
             if dirty {
                 if let Err(error) = persist_last_ok(&map) {
-                    eprintln!("[pane] snapshot cache refresh: {error}");
+                    eprintln!("[aitm] snapshot cache refresh: {error}");
                 }
             }
         }
@@ -2241,7 +2241,7 @@ fn cached_usage() -> Vec<providers::Snapshot> {
 /// own session logs. Heavy file IO, so it runs on a blocking thread.
 #[tauri::command]
 async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
-    eprintln!("[pane] spend: scan starting");
+    eprintln!("[aitm] spend: scan starting");
     let started = std::time::Instant::now();
     // Cursor's CSV export needs the async client; fetch it here and hand it
     // to the blocking scan. Unlike every other spend source it's an
@@ -2273,7 +2273,7 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
         }
     }
     eprintln!(
-        "[pane] spend: {} providers in {:?}",
+        "[aitm] spend: {} providers in {:?}",
         result.len(),
         started.elapsed()
     );
@@ -2916,7 +2916,7 @@ fn spawn_update_checker(app: &tauri::AppHandle) {
                     let _ = handle.emit("update-available", version);
                 }
                 Ok(None) => {}
-                Err(e) => eprintln!("[pane] update check: {e}"),
+                Err(e) => eprintln!("[aitm] update check: {e}"),
             }
             tokio::time::sleep(std::time::Duration::from_secs(4 * 3600)).await;
         }
@@ -3167,7 +3167,7 @@ pub fn run() {
                 .unwrap_or("")
                 .to_string();
             if let Err(e) = register_shortcut(app.handle(), &saved_shortcut) {
-                eprintln!("[pane] shortcut: {e}");
+                eprintln!("[aitm] shortcut: {e}");
             }
 
             // Start with Windows is on by default (like the Mac app's
@@ -3206,6 +3206,16 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_shortcut_hints_shown_in_settings_are_strings_the_parser_accepts() {
+        use tauri_plugin_global_shortcut::Shortcut;
+        // Settings shows "Ctrl+Shift+U" on Windows and "Cmd+Shift+U" on macOS.
+        for hint in ["Ctrl+Shift+U", "Cmd+Shift+U"] {
+            assert!(hint.parse::<Shortcut>().is_ok(), "{hint} must parse");
+        }
+        assert!("Not+A+Key".parse::<Shortcut>().is_err());
+    }
+
     #[test]
     fn popover_hangs_above_a_bottom_tray_and_drops_below_a_top_menu_bar() {
         let size = tauri::PhysicalSize::new(380, 600);

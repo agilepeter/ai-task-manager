@@ -191,11 +191,11 @@ pub fn start() {
         let server = match tiny_http::Server::http("127.0.0.1:6736") {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[pane] local API: port 6736 unavailable ({e}) — API off");
+                eprintln!("[aitm] local API: port 6736 unavailable ({e}) — API off");
                 return;
             }
         };
-        eprintln!("[pane] local API: http://127.0.0.1:6736/v1/usage");
+        eprintln!("[aitm] local API: http://127.0.0.1:6736/v1/usage");
         for request in server.incoming_requests() {
             // DNS-rebinding guard: a page can point its own hostname at
             // 127.0.0.1, making this server "same-origin" in the victim's

@@ -150,7 +150,7 @@ async fn fetch() -> Result<Snapshot, String> {
         }
         let Some(issuer) = issuer else {
             eprintln!(
-                "[pane] grok: auth.json oidc_issuer is not {DEFAULT_OIDC_ISSUER} — skipping token refresh"
+                "[aitm] grok: auth.json oidc_issuer is not {DEFAULT_OIDC_ISSUER} — skipping token refresh"
             );
             return Err("Grok token expired — run the Grok CLI once to sign in again".into());
         };
@@ -256,7 +256,7 @@ async fn fetch() -> Result<Snapshot, String> {
         // Log field names (never values) so unknown shapes are debuggable.
         if let Some(map) = billing.as_object() {
             eprintln!(
-                "[pane] grok billing keys: {:?}",
+                "[aitm] grok billing keys: {:?}",
                 map.keys().collect::<Vec<_>>()
             );
         }
@@ -276,7 +276,7 @@ async fn fetch() -> Result<Snapshot, String> {
     ));
     match resets_result {
         Ok(credits) => metrics.extend(credits),
-        Err(err) => eprintln!("[pane] grok reset credits: {}", err.category()),
+        Err(err) => eprintln!("[aitm] grok reset credits: {}", err.category()),
     }
 
     let settings = match settings_resp {

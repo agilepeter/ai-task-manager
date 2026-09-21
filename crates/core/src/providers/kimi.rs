@@ -273,18 +273,18 @@ async fn fetch_plan_name(access: &str) -> Option<String> {
     {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("[pane] kimi plan: {e}");
+            eprintln!("[aitm] kimi plan: {e}");
             return None;
         }
     };
     if !resp.status().is_success() {
-        eprintln!("[pane] kimi plan: HTTP {}", resp.status());
+        eprintln!("[aitm] kimi plan: HTTP {}", resp.status());
         return None;
     }
     match super::json_body(resp, MAX_ME_BYTES, "plan").await {
         Ok(doc) => plan_from_me(&doc),
         Err(e) => {
-            eprintln!("[pane] kimi plan: {e}");
+            eprintln!("[aitm] kimi plan: {e}");
             None
         }
     }
