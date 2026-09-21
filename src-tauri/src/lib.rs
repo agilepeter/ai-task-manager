@@ -124,6 +124,8 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     obj.entry("apiFeeds").or_insert(json!(false));
     // "off" or a weekday ("mon" … "sun").
     obj.entry("weeklyDigest").or_insert(json!("mon"));
+    // Days a still-used session may stay open before one weekly nudge (0 = off).
+    obj.entry("sessionNudgeDays").or_insert(json!(7));
     // Days before a renewal to send its one reminder (0 = off).
     obj.entry("renewalReminderDays").or_insert(json!(3));
     obj.entry("burnAlertPoints").or_insert(json!(15));
@@ -385,6 +387,7 @@ const CONFIG_KEYS: &[&str] = &[
     "trustLookup",
     "apiFeeds",
     "weeklyDigest",
+    "sessionNudgeDays",
     "renewalReminderDays",
     "spendMetric",
     "spendTab",
@@ -2554,6 +2557,41 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
                 changed = true;
             }
             marks["budgetFired"] = json!(fired);
+        }
+
+        // Session hygiene: an old, costly session that is still being used.
+        let nudge_days = cfg.get("sessionNudgeDays").and_then(Value::as_i64).unwrap_or(0);
+        if nudge_days > 0 {
+            let mut fired: Vec<String> = marks
+                .get("sessionNudged")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default();
+            let due = coaching::sessions_to_nudge(
+                &spend::claude_sessions(None, None, 500),
+                chrono::Utc::now().timestamp_millis(),
+                nudge_days,
+                &digest::week_mark(today),
+                &mut fired,
+            );
+            // One notification, about the costliest: several at once is noise.
+            if let Some((_, days, cost)) = due.first() {
+                let more = match due.len() - 1 {
+                    0 => String::new(),
+                    1 => " One other session is in the same state.".to_string(),
+                    n => format!(" {n} other sessions are in the same state."),
+                };
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("A long-running session")
+                    .body(format!(
+                        "A session you are still using has been open {days:.0} days and cost ${cost:.0} in 30 days. For new work, a fresh session is cheaper and easier to steer.{more}"
+                    ))
+                    .show();
+                changed = true;
+            }
+            marks["sessionNudged"] = json!(fired);
         }
 
         let setting = cfg.get("weeklyDigest").and_then(Value::as_str).unwrap_or("off");

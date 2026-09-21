@@ -43,6 +43,42 @@ fn money(n: f64) -> String {
     format!("${:.0}", n)
 }
 
+/// A session counts as "in use" if its last message is this recent.
+const ACTIVE_WITHIN_MS: i64 = 24 * 3_600_000;
+
+/// Sessions worth a nudge right now: still in use, open at least `min_days`,
+/// and costly enough to matter. Costliest first. `already` holds marks of the
+/// form "session|<id>|<week>" and is updated, so each session nudges at most
+/// once a week however often this runs.
+pub fn sessions_to_nudge(
+    sessions: &[SessionSpend],
+    now_ms: i64,
+    min_days: i64,
+    week: &str,
+    already: &mut Vec<String>,
+) -> Vec<(String, f64, f64)> {
+    if min_days <= 0 {
+        return Vec::new();
+    }
+    // Marks from earlier weeks have done their job.
+    already.retain(|m| !m.starts_with("session|") || m.ends_with(&format!("|{week}")));
+    let mut due: Vec<(String, f64, f64)> = sessions
+        .iter()
+        .filter_map(|s| {
+            let (start, end) = (s.started_ms?, s.ended_ms?);
+            let days = (end - start) as f64 / 86_400_000.0;
+            let in_use = now_ms - end <= ACTIVE_WITHIN_MS && now_ms >= end;
+            (in_use && days >= min_days as f64 && s.cost >= LONG_SESSION_COST).then(|| (s.id.clone(), days, s.cost))
+        })
+        .filter(|(id, _, _)| !already.contains(&format!("session|{id}|{week}")))
+        .collect();
+    due.sort_by(|a, b| b.2.total_cmp(&a.2));
+    for (id, _, _) in &due {
+        already.push(format!("session|{id}|{week}"));
+    }
+    due
+}
+
 pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend]) -> Vec<Opportunity> {
     let mut out = Vec::new();
     let mut push = |id: &str, kind: &str, title: String, detail: String| {
@@ -236,6 +272,35 @@ mod tests {
         for o in opportunities(claude, &crate::spend::claude_sessions(None, None, 500)) {
             println!("[{}] {}\n    {}", o.kind, o.title, o.detail);
         }
+    }
+
+    #[test]
+    fn a_nudge_is_for_old_costly_sessions_still_in_use_once_a_week() {
+        let day = 86_400_000;
+        let now = 100 * day;
+        let at = |id: &str, age_days: i64, idle_days: i64, cost: f64| SessionSpend {
+            id: id.into(),
+            started_ms: Some(now - age_days * day),
+            ended_ms: Some(now - idle_days * day),
+            ..session(0.0, cost)
+        };
+        let sessions = [
+            at("old-active", 20, 0, 300.0),
+            at("old-abandoned", 40, 9, 900.0), // not in use: nothing to change
+            at("old-cheap", 30, 0, 5.0),
+            at("young", 2, 0, 400.0),
+            at("older-active", 50, 0, 120.0),
+        ];
+        let mut marks = vec!["session|old-active|2026-W38".to_string(), "budget|x".to_string()];
+        let due = sessions_to_nudge(&sessions, now, 7, "2026-W39", &mut marks);
+        assert_eq!(due.iter().map(|d| d.0.as_str()).collect::<Vec<_>>(), ["old-active", "older-active"], "costliest first");
+        assert!((due[0].1 - 20.0).abs() < 1e-9);
+        assert!(marks.contains(&"budget|x".to_string()), "other marks are left alone");
+        assert!(!marks.iter().any(|m| m.ends_with("W38")), "last week's mark is cleared");
+        assert!(sessions_to_nudge(&sessions, now, 7, "2026-W39", &mut marks).is_empty(), "once a week");
+        assert_eq!(sessions_to_nudge(&sessions, now, 7, "2026-W40", &mut marks).len(), 2, "and again next week");
+        assert!(sessions_to_nudge(&sessions, now, 0, "2026-W41", &mut Vec::new()).is_empty(), "0 is off");
+        assert_eq!(sessions_to_nudge(&sessions, now, 30, "2026-W41", &mut Vec::new()).len(), 1, "a longer threshold");
     }
 
     #[test]

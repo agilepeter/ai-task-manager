@@ -218,6 +218,8 @@ interface Config {
   apiFeeds: boolean;
   /** "off" or the weekday ("mon" … "sun") the weekly digest goes out. */
   weeklyDigest: string;
+  /** Days a still-used session may stay open before one weekly nudge; 0 = off. */
+  sessionNudgeDays: number;
   spendTab: SpendTab;
   spendMetric: "cost" | "tokens" | "mtok";
   showUsed: boolean;
@@ -259,6 +261,7 @@ const FRONTEND_CONFIG_KEYS = [
   "trustLookup",
   "apiFeeds",
   "weeklyDigest",
+  "sessionNudgeDays",
   "spendTab",
   "spendMetric",
   "showUsed",
@@ -455,6 +458,7 @@ let config: Config = {
   trustLookup: false,
   apiFeeds: false,
   weeklyDigest: "mon",
+  sessionNudgeDays: 7,
   spendTab: "today",
   spendMetric: "cost",
   showUsed: false,
@@ -4849,6 +4853,7 @@ async function initSettings(): Promise<void> {
     ["#burn-alert", "burnAlertPoints"],
     ["#spend-alert", "dailySpendAlert"],
     ["#renewal-reminder", "renewalReminderDays"],
+    ["#session-nudge", "sessionNudgeDays"],
   ] as const) {
     const el = document.querySelector<HTMLSelectElement>(sel)!;
     el.value = String(config[key]);
@@ -5057,6 +5062,7 @@ function syncSettingsControls(): void {
   setSelect("#spend-alert", String(config.dailySpendAlert));
   setSelect("#renewal-reminder", String(config.renewalReminderDays));
   setSelect("#weekly-digest", config.weeklyDigest);
+  setSelect("#session-nudge", String(config.sessionNudgeDays));
   setSelect("#locale", config.locale);
   setCheck("#notify-reset", config.notifyReset);
   setCheck("#notify-almost", config.notifyAlmostOut);
