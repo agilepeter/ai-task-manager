@@ -184,6 +184,15 @@ and computed Opportunities). Usage stays the default view.
   Mythos, and anything unknown degrades to "Model weekly". **That degradation is silent**, which
   is how a Fable user ended up staring at "Model weekly 100%" with no way to tell which model
   hit the wall. Add each new family here as it ships; the test lists the exact strings seen.
+- **The vendor publishes a limit for ONE model at a time.** Verified against the real
+  endpoint 2026-09-22: `limits[]` carried `session`, `weekly_all` and a single
+  `weekly_scoped` (Fable); `seven_day_opus` and `seven_day_sonnet` were null, and
+  `seven_day_breakdown` splits the week by SURFACE (Claude Code / Chats / Cowork / Other),
+  not by model. So "usage per model" cannot come from the API. The **local logs** know every
+  model, which is why the card expander carries `modelSplit` ("Models today", share of
+  today's cost). Do not try to synthesise per-model limits from the API; it does not have
+  them. `live_usage_shape` prints the payload's shape (keys and percentages only) when this
+  needs checking again.
 - **The in-app marks are ours** (`src/assets/aitm-mark.svg`, `aitm-icon.png`). Upstream's
   `pane-logo.png` / `pane-icon.png` shipped in the sidebar and the share card until 2026-09-22.
   The sidebar takes the flat mark as raw SVG so `currentColor` tints it like the provider

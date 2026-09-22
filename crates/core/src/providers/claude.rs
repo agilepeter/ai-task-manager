@@ -503,6 +503,60 @@ fn backup_credentials(path: &std::path::Path) {
     let _ = std::fs::copy(path, &bak);
 }
 
+/// Dumps the SHAPE of the real usage payload: keys, model display names and
+/// percentages only. No ids, emails or tokens. Ignored; needs a sign-in.
+#[test]
+#[ignore]
+fn live_usage_shape() {
+    crate::rt::block_on(async {
+        let dir = default_dir();
+        let raw = match keychain_credentials(&dir) {
+            Some(r) => r,
+            None => std::fs::read_to_string(dir.join(".credentials.json")).unwrap_or_default(),
+        };
+        let doc: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+        let access = doc
+            .pointer("/claudeAiOauth/accessToken")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if access.is_empty() {
+            println!("no access token");
+            return;
+        }
+        let resp = super::http()
+            .get("https://api.anthropic.com/api/oauth/usage")
+            .bearer_auth(&access)
+            .header("anthropic-beta", "oauth-2025-04-20")
+            .send()
+            .await
+            .expect("request");
+        if !resp.status().is_success() {
+            println!("HTTP {}", resp.status());
+            return;
+        }
+        let v: serde_json::Value = resp.json().await.expect("json");
+        println!("top-level keys: {:?}", v.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+        for key in ["five_hour", "seven_day", "seven_day_breakdown", "seven_day_opus", "seven_day_sonnet"] {
+            if let Some(w) = v.get(key) {
+                println!("  {key}: {}", serde_json::to_string(w).unwrap_or_default());
+            }
+        }
+        if let Some(limits) = v.get("limits").and_then(|l| l.as_array()) {
+            println!("  limits[] has {} entries:", limits.len());
+            for e in limits {
+                println!(
+                    "    kind={:?} model={:?} percent={:?} resets={:?}",
+                    e.get("kind").and_then(|x| x.as_str()),
+                    e.pointer("/scope/model/display_name").and_then(|x| x.as_str()),
+                    e.get("percent"),
+                    e.get("resets_at").and_then(|x| x.as_str()),
+                );
+            }
+        }
+    });
+}
+
 /// Hits the real account and prints the metric labels this build produces.
 /// Ignored: it needs a signed-in Claude Code and touches the network.
 #[test]

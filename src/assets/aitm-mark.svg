@@ -1,15 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44">
-  <!-- Menu bar glyph. Black on transparent: macOS tints a template image for
-       light and dark menu bars, so it must carry shape only, never colour. -->
+  <!-- Menu bar glyph and in-app mark. Black on transparent: macOS tints a
+       template image for light and dark menu bars, so it carries shape only,
+       never colour.
+
+       Drawn as ONE solid head with the face knocked out (fill-rule evenodd)
+       rather than as outlines. At 16px a stroked face turns to mush and the
+       earlier arch-shaped eyes read as the letter "m"; a solid silhouette with
+       holes keeps the most contrast where there are fewest pixels. -->
   <g fill="#000">
-    <circle cx="22" cy="6.5" r="3.2"/>
-    <rect x="20.8" y="8.5" width="2.4" height="5" rx="1.2"/>
-    <rect x="3.5" y="21" width="3.6" height="10" rx="1.8"/>
-    <rect x="36.9" y="21" width="3.6" height="10" rx="1.8"/>
-    <path fill-rule="evenodd" d="M15 12.5h14a8.5 8.5 0 0 1 8.5 8.5v11A8.5 8.5 0 0 1 29 40.5H15A8.5 8.5 0 0 1 6.500 32V21A8.5 8.500 0 0 1 15 12.5Z
-      M15.5 17A4.5 4.5 0 0 0 11 21.5v10A4.5 4.5 0 0 0 15.5 36h13a4.5 4.5 0 0 0 4.5-4.5v-10A4.5 4.5 0 0 0 28.5 17Z"/>
-    <rect x="15" y="21.5" width="4.4" height="6" rx="2"/>
-    <rect x="24.6" y="21.5" width="4.4" height="6" rx="2"/>
-    <rect x="16.5" y="30.5" width="11" height="2.4" rx="1.2"/>
+    <rect x="20.8" y="4" width="2.4" height="6" rx="1.2"/>
+    <circle cx="22" cy="4" r="2.8"/>
+    <path fill-rule="evenodd" d="M12 10h20a7 7 0 0 1 7 7v15a7 7 0 0 1-7 7H12a7 7 0 0 1-7-7V17a7 7 0 0 1 7-7Z
+      M16.2 19.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z
+      M27.8 19.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z
+      M15.4 29.4a1.6 1.6 0 0 0-1.1 2.8c2 1.9 4.7 2.9 7.7 2.9s5.7-1 7.7-2.9a1.6 1.6 0 0 0-1.1-2.8 1.6 1.6 0 0 0-1.1.45c-1.4 1.35-3.4 2.1-5.5 2.1s-4.1-.75-5.5-2.1a1.6 1.6 0 0 0-1.1-.45Z"/>
   </g>
 </svg>

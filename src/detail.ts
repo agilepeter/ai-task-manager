@@ -777,6 +777,8 @@ function spendSection(sp: ProviderSpend | undefined): string {
 // ---------------------------------------------------------------------------
 
 const SPARK_HOURS = 24;
+/// Models listed on the card before the rest fold into "Other".
+const MINI_MODELS = 4;
 const sparkCache = new Map<string, { at: number; series: Series[] }>();
 const sparkLoading = new Set<string>();
 
@@ -817,16 +819,13 @@ function miniHtml(id: string): string {
       <div class="dt-legend dt-mini-legend"><span class="dt-mini-span">24h, % used</span>${keys}</div>`;
   }
   const sp = source?.spend(id);
-  const top = sp ? [...sp.today.models].sort((a, b) => b.cost - a.cost)[0] : undefined;
   const wall = (forecasts.get(id) ?? [])
     .filter((f) => f.hitsLimitAt !== null)
     .sort((a, b) => a.hitsLimitAt! - b.hitsLimitAt!)[0];
   const warn = wall ? `<p class="dt-mini-note dt-forecast-hit">${esc(forecastText(wall, true))}</p>` : "";
   const facts =
-    sp && sp.today.cost > 0.004
-      ? `<span>Today ${money(sp.today.cost)}${top ? ` · mostly ${esc(top.model)}` : ""}</span>`
-      : `<span></span>`;
-  return `${chart}${warn}<div class="dt-mini-foot">${facts}<button class="inv-learn dt-mini-open" data-detail="${esc(id)}">Details</button></div>`;
+    sp && sp.today.cost > 0.004 ? `<span>Today ${money(sp.today.cost)}</span>` : `<span></span>`;
+  return `${chart}${warn}${modelSplit(sp)}<div class="dt-mini-foot">${facts}<button class="inv-learn dt-mini-open" data-detail="${esc(id)}">Details</button></div>`;
 }
 
 async function loadSpark(id: string): Promise<void> {
@@ -850,6 +849,37 @@ async function loadSpark(id: string): Promise<void> {
 
 /// The inline extras for an expanded card. Synchronous for the card
 /// renderer: it draws from cache and refreshes the cache in the background.
+/// Every model the local logs saw today, not just the busiest one. The vendor
+/// only publishes a limit for one model at a time, so this is the only place
+/// the whole picture exists. Shares are of today's cost; a model with cost but
+/// no measurable share still gets a row, because "it ran" is the useful fact.
+function modelSplit(sp: ProviderSpend | undefined): string {
+  if (!sp || sp.today.cost <= 0.004) return "";
+  const all = [...sp.today.models].sort((a, b) => b.cost - a.cost).filter((m) => m.cost > 0 || m.tokens > 0);
+  if (all.length < 2) return "";
+  const shown = all.slice(0, MINI_MODELS);
+  const rest = all.slice(MINI_MODELS);
+  if (rest.length) {
+    shown.push({
+      model: `Other (${rest.length})`,
+      cost: rest.reduce((n, m) => n + m.cost, 0),
+      tokens: rest.reduce((n, m) => n + m.tokens, 0),
+    });
+  }
+  const total = sp.today.cost || 1;
+  const rows = shown
+    .map((m) => {
+      const pct = Math.round((m.cost / total) * 100);
+      return `<div class="dt-ms-row" title="${esc(`${m.model}: ${money(m.cost)}, ${tokens(m.tokens)} tokens today`)}">
+        <span class="dt-ms-name">${esc(m.model)}</span>
+        <span class="dt-ms-bar"><i style="--w:${Math.max(2, (m.cost / total) * 100).toFixed(1)}%"></i></span>
+        <span class="dt-ms-val">${pct}%</span>
+      </div>`;
+    })
+    .join("");
+  return `<div class="dt-ms"><div class="dt-ms-head">Models today</div>${rows}</div>`;
+}
+
 export function cardExtras(id: string): string {
   const cached = sparkCache.get(id);
   if (!cached || Date.now() - cached.at > 5 * 60_000) void loadSpark(id);

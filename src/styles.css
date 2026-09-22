@@ -4237,3 +4237,50 @@ body.wide #detail {
   color: var(--foreground);
   font-weight: 500;
 }
+
+/* ------------------------------------------------------------ model split */
+/* Which models did today's work. The vendor publishes a limit for one model
+   at a time, so this local-log view is the only complete picture. */
+.dt-ms {
+  margin: 8px 0 2px;
+  display: grid;
+  gap: 3px;
+}
+.dt-ms-head {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin-bottom: 2px;
+}
+.dt-ms-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px 30px;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+}
+.dt-ms-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--secondary-foreground);
+}
+.dt-ms-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--muted);
+  overflow: hidden;
+}
+.dt-ms-bar i {
+  display: block;
+  height: 100%;
+  width: var(--w);
+  border-radius: 2px;
+  background: var(--chart-blue);
+}
+.dt-ms-val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
