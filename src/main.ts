@@ -232,7 +232,6 @@ interface Config {
   proxy: { enabled: boolean; url: string };
   showTotalSpend: boolean;
   welcomeDismissed: boolean;
-  firstSeenMs: number;
   reduceAnimations: boolean;
   locale: LocalePref;
 }
@@ -270,7 +269,6 @@ const FRONTEND_CONFIG_KEYS = [
   "proxy",
   "showTotalSpend",
   "welcomeDismissed",
-  "firstSeenMs",
   "reduceAnimations",
   "locale",
 ] as const satisfies readonly (keyof Config)[];
@@ -463,7 +461,6 @@ let config: Config = {
   proxy: { enabled: false, url: "" },
   showTotalSpend: true,
   welcomeDismissed: false,
-  firstSeenMs: 0,
   reduceAnimations: false,
   locale: "auto",
 };
@@ -4402,11 +4399,6 @@ function applyLocale(): void {
 
 async function initSettings(): Promise<void> {
   config = await invoke<Config>("get_config");
-  // First launch timestamp — backs the star prompt's "a few days old"
-  // eligibility. Recorded once, on the first config load that finds it 0.
-  if (!config.firstSeenMs) {
-    void patchConfig({ firstSeenMs: Date.now() }).catch(() => {});
-  }
   config.locale = normalizeLocalePref(config.locale);
   try {
     const sys = await invoke<string>("system_ui_locale");

@@ -29,8 +29,7 @@ const config: Args = {
   spendTab: "today", spendMetric: "cost", showUsed: false, resetExact: false, timeFormat: "auto",
   layout: null, appearance: "dark", density: "compact", minimal: false, glassEffects: true, shortcut: "",
   locale: "en", showTotalSpend: true, reduceAnimations: false, welcomeDismissed: true,
-  firstSeenMs: now() - 40 * 24 * HOUR, lastSeenVersion: "0.1.0",
-  starPromptDone: true, starPromptDay: "", starPromptDayCount: 0, starPromptLastMs: 0,
+  lastSeenVersion: "0.1.0",
 };
 
 function metric(label: string, used: number, resetInHours: number, periodHours: number, detail: string | null = null) {

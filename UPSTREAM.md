@@ -8,5 +8,11 @@ Clean copy (not a GitHub fork) of https://github.com/ItsJazii/pane
 - License: MIT. Original copyright notices are preserved in LICENSE
   (Jazii, Pane for Windows; Robin Ebers, OpenUsage for macOS).
 
+Upstream's own release history, up to the imported commit, is kept verbatim in
+[docs/upstream-changelog.md](docs/upstream-changelog.md). This app's history
+restarts at 0.1.0 in [CHANGELOG.md](CHANGELOG.md).
+
 To pull a provider fix from upstream, diff the single provider file under
-`src-tauri/src/providers/` against this commit and port it by hand.
+`crates/core/src/providers/` against this commit and port it by hand. (The
+provider code lived in `src-tauri/src/providers/` at import time; it moved when
+the Tauri-free core crate was split out.)
