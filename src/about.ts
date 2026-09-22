@@ -35,7 +35,7 @@ const BOT = `
     <rect x="194" y="112" width="16" height="44" rx="7" fill="#2a2a35"/>
     <rect x="42" y="62" width="156" height="140" rx="42" fill="#d0d0d8"/>
     <rect x="60" y="84" width="120" height="96" rx="24" fill="#1a2030"/>
-    <g class="ab-eyes"><rect x="80" y="104" width="22" height="26" rx="9" fill="#5cc8ff"/><rect x="138" y="104" width="22" height="26" rx="9" fill="#5cc8ff"/></g>
+    <g class="ab-eyes" fill="none" stroke="#5cc8ff" stroke-width="8" stroke-linecap="round"><path d="M80 130v-7a11 11 0 0 1 22 0v7"/><path d="M138 130v-7a11 11 0 0 1 22 0v7"/></g>
     <g fill="#5cc8ff"><rect x="82" y="146" width="9" height="9" rx="2"/><rect x="94" y="152" width="9" height="9" rx="2"/><rect x="106" y="155" width="9" height="9" rx="2"/><rect x="118" y="156" width="9" height="9" rx="2"/><rect x="130" y="155" width="9" height="9" rx="2"/><rect x="142" y="152" width="9" height="9" rx="2"/><rect x="154" y="146" width="9" height="9" rx="2"/></g>
   </g>
 </svg>`;

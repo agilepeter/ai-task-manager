@@ -27,10 +27,9 @@
   <!-- screen -->
   <rect x="296" y="372" width="432" height="344" rx="86" fill="#1a2030"/>
   <!-- eyes -->
-  <rect x="368" y="448" width="76" height="92" rx="30" fill="#5cc8ff"/>
-  <rect x="580" y="448" width="76" height="92" rx="30" fill="#5cc8ff"/>
-  <rect x="384" y="462" width="22" height="26" rx="10" fill="#d6f4ff"/>
-  <rect x="596" y="462" width="22" height="26" rx="10" fill="#d6f4ff"/>
+  <!-- happy arches, like HalperBot's -->
+  <path d="M366 536v-24a40 40 0 0 1 80 0v24" fill="none" stroke="#5cc8ff" stroke-width="30" stroke-linecap="round"/>
+  <path d="M578 536v-24a40 40 0 0 1 80 0v24" fill="none" stroke="#5cc8ff" stroke-width="30" stroke-linecap="round"/>
   <!-- pixel smile, read left to right as a meter: five lit, two dim -->
   <g>
     <rect x="372" y="596" width="32" height="32" rx="6" fill="#5cc8ff"/>
