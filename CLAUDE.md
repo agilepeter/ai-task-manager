@@ -181,6 +181,18 @@ and computed Opportunities). Usage stays the default view.
   the narrow panels shrink by the same amount so they never cross the detail column.
 - **Popover anchoring is per platform** (`popover_origin`): above the click for a bottom
   taskbar, below it for the macOS menu bar.
+- **Running now** (`crates/core/src/procs.rs`, `get_running`): the Task Manager half of the
+  name. Reads the process table (`ps` on Unix, `Get-CimInstance` on Windows, same column
+  order so the parser has no platform branch), matches each process to a configured MCP
+  server, and groups a runner with everything it spawned into one copy. **A command line
+  never leaves that module**: arguments carry API keys, vault paths and project directories,
+  so the only string lifted out is the package specifier right after a known runner, and only
+  when it matches a conservative package charset. `npm run <script>` runs a LOCAL SCRIPT and
+  is deliberately not read (it once turned `npm run tauri dev` into a server called "tauri").
+  A process that matches nothing MCP-shaped is dropped rather than described. `never_leaks_*`
+  plants a key, a token and a path in a command line and asserts none reach the output.
+  Findings: duplicate copies and unconfigured servers score as "tighten", total memory is
+  "learn" (a resting cost is not a failing).
 - **Inventory covers every MCP-capable app it knows**, not just Claude Code: Claude Desktop,
   VS Code (`servers` key), Cursor, Windsurf, Gemini CLI and Codex (TOML), all through
   `mcp_from_map_for`, so the never-copy-a-value rule and its leak test cover them. AI tools

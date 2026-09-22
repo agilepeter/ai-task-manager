@@ -4102,3 +4102,52 @@ body.reduce-anim :is(#settings, #drawer, #detail, #audit, #about, .panel-head.gl
 body.wide #detail {
   transition: none;
 }
+
+/* ---------------------------------------------------------------- running */
+/* The Task Manager view. One row per MCP server that is live, heaviest first,
+   with a share-of-memory meter. `.inv-row` is a side-by-side row; here the row
+   stacks, so the meter can span the full width under the name. */
+.run-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+.run-row .inv-row-main {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+}
+.run-mem {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+  flex: none;
+}
+.run-meter {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--muted);
+  overflow: hidden;
+}
+.run-meter i {
+  display: block;
+  height: 100%;
+  width: var(--w);
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--chart-blue);
+}
+/* Two copies of one server is the finding, so the count is not decoration. */
+.inv-chip.run-dupe {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--chart-blue) 26%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.inv-chip.run-unknown {
+  color: var(--foreground);
+  background: color-mix(in srgb, #eab308 24%, transparent);
+  max-width: none;
+}
+.run-lead {
+  margin-bottom: 6px;
+}

@@ -16,6 +16,7 @@ pub mod ledger;
 pub mod pin;
 pub mod policy;
 pub mod pricing;
+pub mod procs;
 pub mod providers;
 pub mod rt;
 pub mod seat;

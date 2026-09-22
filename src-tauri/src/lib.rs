@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, audit, clients, coaching, digest, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, providers, spend, trust};
+pub(crate) use aitm_core::{alerts, audit, clients, coaching, digest, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, procs, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -182,12 +182,23 @@ async fn get_inventory() -> Result<inventory::Inventory, String> {
         let spend = spend::collect(None);
         let claude = spend.iter().find(|p| p.id == "claude");
         inv.opportunities.extend(coaching::opportunities(claude, &spend::claude_sessions(None, None, 500)));
+        // What is running right now, matched against what is configured.
+        inv.opportunities.extend(procs::opportunities(&procs::snapshot(&inv.mcp_servers)));
         // Gaps first, then things to learn, each in the order found.
         inv.opportunities.sort_by_key(|o| o.kind != "tighten");
         inv
     })
     .await
     .map_err(|e| format!("inventory scan: {e}"))
+}
+
+/// The live process view. Separate from `get_inventory` because it is cheap
+/// and changes by the second, while a full scan reads every config file.
+#[tauri::command]
+async fn get_running() -> Result<Vec<procs::RunningServer>, String> {
+    tauri::async_runtime::spawn_blocking(|| procs::snapshot(&inventory::scan().mcp_servers))
+        .await
+        .map_err(|e| format!("process scan: {e}"))
 }
 
 #[derive(serde::Serialize)]
@@ -3514,6 +3525,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             fetch_usage,
             get_inventory,
+            get_running,
             get_history,
             get_ledger,
             get_audit,

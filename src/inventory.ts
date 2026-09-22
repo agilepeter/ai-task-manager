@@ -18,6 +18,18 @@ interface McpServer {
   pinTo: string | null;
 }
 
+/** One MCP server as it exists in memory right now. Never a command line. */
+interface RunningServer {
+  name: string;
+  configured: boolean;
+  client: string | null;
+  package: string | null;
+  instances: number;
+  rssBytes: number;
+  elapsedSecs: number;
+  pids: number[];
+}
+
 interface PinPlan {
   file: string;
   package: string;
@@ -85,6 +97,8 @@ const USER_SCOPE = "__user__";
 
 let inventory: Inventory | null = null;
 let loadError = "";
+let running: RunningServer[] = [];
+let runningError = "";
 let scopeFilter = ALL_SCOPES;
 let kindFilter: KindFilter = "all";
 const ALL_APPS = "__all__";
@@ -93,7 +107,7 @@ let host: InventoryHost | null = null;
 let trust: TrustView | null = null;
 /** The pin being previewed, keyed by "client/name", and what happened to it. */
 let pin: { key: string; plan: PinPlan | null; note: string; done: boolean } | null = null;
-const openSections = new Set<string>(["opportunities", "mcp"]);
+const openSections = new Set<string>(["opportunities", "running", "mcp"]);
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -279,6 +293,60 @@ function renderMcp(list: McpServer[]): string {
   return section("mcp", "MCP servers", list.length, rows, "No MCP servers configured for this scope.", { lead });
 }
 
+function mbLabel(bytes: number): string {
+  const mb = bytes / 1048576;
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+}
+
+/** "3d 4h", "2h 10m", "6m". Uptime, not time spent working. */
+function upLabel(secs: number): string {
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${Math.max(1, m)}m`;
+}
+
+/// The Task Manager view: what is in memory right now, heaviest first. The
+/// backend matches processes to configured servers and never hands over a
+/// command line, so there is nothing here to redact.
+function renderRunning(): string {
+  const total = running.reduce((sum, r) => sum + r.rssBytes, 0);
+  const procCount = running.reduce((sum, r) => sum + r.pids.length, 0);
+  const bar = total > 0 ? running.map((r) => r.rssBytes / total) : [];
+  const rows = running
+    .map((r, i) => {
+      const copies = r.instances > 1 ? `<span class="inv-chip run-dupe" title="Each client app that has this server configured starts its own copy.">&times;${r.instances}</span>` : "";
+      const where = r.configured ? esc(r.client ?? "") : `<span class="inv-chip run-unknown" title="Running, but no config file this app can read declares it.">not in a config</span>`;
+      return `
+      <div class="inv-row run-row">
+        <div class="inv-row-main">
+          <span class="inv-name">${esc(r.name)}</span>
+          ${copies}
+          <span class="spacer"></span>
+          <span class="run-mem">${mbLabel(r.rssBytes)}</span>
+        </div>
+        <div class="run-meter"><i style="--w:${(bar[i] * 100).toFixed(1)}%"></i></div>
+        <div class="inv-row-sub">${where} &middot; up ${upLabel(r.elapsedSecs)} &middot; ${r.pids.length} process${r.pids.length === 1 ? "" : "es"}</div>
+      </div>`;
+    })
+    .join("");
+  const lead = running.length
+    ? `<p class="inv-note run-lead">${mbLabel(total)} of memory across ${procCount} process${procCount === 1 ? "" : "es"}. Servers start when a client asks for one and stay for the session.</p>`
+    : "";
+  return section(
+    "running",
+    "Running now",
+    running.length,
+    rows,
+    runningError
+      ? `Could not read the process list: ${runningError}`
+      : "No MCP servers are running. They start when a client asks for one.",
+    { lead },
+  );
+}
+
 function renderTools(inv: Inventory): string {
   const rows = inv.tools
     .map(
@@ -373,11 +441,24 @@ function render(): void {
     </div>
     <p class="inv-note">Read from this machine only. Names and counts, never keys or prompts. ${inv.projects} project${inv.projects === 1 ? "" : "s"} scanned.</p>
     ${renderOpportunities(inv.opportunities)}
+    ${renderRunning()}
     ${renderTools(inv)}
     ${renderMcp(mcp)}
     ${renderDefinitions("agents", "Agents", agents, "No custom agents in this scope.")}
     ${renderDefinitions("skills", "Skills", skills, "No skills in this scope.")}
     ${renderGuardrails(inv)}`;
+}
+
+/// Cheap next to a full scan, so it refreshes on its own whenever the view is
+/// open: a memory figure that is ten minutes old is worse than none.
+async function loadRunning(): Promise<void> {
+  try {
+    running = await invoke<RunningServer[]>("get_running");
+    runningError = "";
+  } catch (err) {
+    running = [];
+    runningError = String(err);
+  }
 }
 
 async function load(): Promise<void> {
@@ -396,6 +477,7 @@ async function load(): Promise<void> {
   }
   render();
   void loadTrust();
+  void loadRunning().then(render);
 }
 
 function show(view: View): void {

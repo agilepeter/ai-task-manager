@@ -203,6 +203,15 @@ const PINS: Record<string, [string, string]> = {
 };
 const pinned = new Set<string>();
 
+/** A plausible live process picture for the fictional machine. Fixed numbers:
+ *  a demo that drifts every second reads as broken, not live. */
+const RUNNING = [
+  { name: "chrome-devtools", configured: true, client: "Claude Code", package: "chrome-devtools-mcp", instances: 3, rssBytes: 812 * 1048576, elapsedSecs: 129600, pids: [1130, 1210, 1539, 1893, 2044, 2101] },
+  { name: "notes", configured: true, client: "Claude Desktop", package: "obsidian-mcp", instances: 2, rssBytes: 276 * 1048576, elapsedSecs: 129540, pids: [2812, 2904, 3011] },
+  { name: "playwright", configured: true, client: "Claude Code", package: "@playwright/mcp", instances: 1, rssBytes: 188 * 1048576, elapsedSecs: 7200, pids: [8801, 8812] },
+  { name: "postgres", configured: true, client: "Claude Code", package: "pg-readonly-mcp", instances: 1, rssBytes: 64 * 1048576, elapsedSecs: 3300, pids: [9120] },
+] as const;
+
 function inventory() {
   const inv = structuredClone((fixture as any).inventory);
   for (const s of inv.mcpServers) {
@@ -216,6 +225,20 @@ function inventory() {
     .filter((c) => c.status === "consider" && !inv.opportunities.some((o: any) => o.id === c.id))
     .map((c) => ({ id: c.id, kind: "learn", title: c.title, detail: c.detail, learnUrl: "https://staas.fund/classroom/" }));
   inv.opportunities.push(...usage);
+  // The real app computes this one from the live process list; the demo has a
+  // fixed process list, so derive it the same way rather than hard-coding text.
+  const dupes = RUNNING.filter((r) => r.instances > 1);
+  if (dupes.length) {
+    const worst = dupes[0];
+    const wasted = dupes.reduce((sum, r) => sum + r.rssBytes - r.rssBytes / r.instances, 0);
+    inv.opportunities.unshift({
+      id: "mcp-duplicate-processes",
+      kind: "tighten",
+      title: `${dupes.length} MCP servers are running more than once`,
+      detail: `${dupes.map((r) => r.name).join(", ")} each have several copies live right now; ${worst.name} alone is running ${worst.instances} times on ${Math.round(worst.rssBytes / 1048576)} MB. Every app you have configured a server in starts its own copy and keeps it for the session, so the same tool is in memory once per client. About ${Math.round(wasted / 1048576)} MB is duplicate. Removing a server from the clients that do not use it, or quitting an app you are not working in, gets it back.`,
+      learnUrl: "https://staas.fund/mcp/",
+    });
+  }
   if ([...pinned].length) {
     const left = inv.mcpServers.filter((s: any) => s.pinTo).length;
     inv.opportunities = inv.opportunities.filter((o: any) => o.id !== "mcp-unpinned" || left > 0);
@@ -239,6 +262,7 @@ export function handle(cmd: string, args: Args = {}): unknown {
     case "fetch_usage": return snapshots();
     case "fetch_spend": return spend();
     case "get_inventory": return inventory();
+    case "get_running": return structuredClone(RUNNING);
     case "get_history": return history(args.providerId, args.hours);
     case "get_burn_profile": return burnProfile(args.providerId);
     case "get_forecast": return forecast(args.metrics ?? []);
