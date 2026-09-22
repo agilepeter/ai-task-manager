@@ -1,6 +1,6 @@
 # Local HTTP API
 
-Pane serves your usage as JSON so your own scripts, widgets, and overlays
+This app serves your usage as JSON so your own scripts, widgets, and overlays
 can read it.
 
 Sub2API cards use `GET /v1/usage/sub2api@<key-id>` and are also included
@@ -14,7 +14,7 @@ percentage. A Rate Limit Resets row is a text line whose `value` is
 "N available" and whose `resetsAt` is the soonest expiry; per-credit ids
 are never served.
 
-This reads Pane's published snapshots and never initiates a remote usage
+This reads the app's published snapshots and never initiates a remote usage
 request. Disabled or deleted keys return 404 and disappear from the
 collection; rotating a secret or changing a site address clears the old
 context before publishing again. Renaming preserves the ID and updates
@@ -59,7 +59,7 @@ Wire format (compatible with the macOS OpenUsage API):
   `displayName`; dashboard URL, origin, site id, and secrets are omitted.
 - **No CORS headers.** Unlike the macOS app (which sends
   `Access-Control-Allow-Origin: *` and documents that any web page can
-  read your usage), Pane sends no CORS headers — so browsers block web
+  read your usage), this app sends no CORS headers — so browsers block web
   pages from reading this API. PowerShell, curl, Rainmeter, and native
   apps are unaffected; CORS only constrains browsers.
 - **Loopback Host headers only.** Requests whose `Host` header isn't a

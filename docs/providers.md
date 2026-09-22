@@ -1,10 +1,17 @@
-# Providers: exactly what Pane reads and calls
+# Providers: exactly what this app reads and calls
 
 One section per provider: which credentials are read from your PC, which
 endpoints they are sent to, and what comes back. Each provider's code
-lives in [`src-tauri/src/providers/`](../src-tauri/src/providers/) in a
+lives in [`crates/core/src/providers/`](../crates/core/src/providers/) in a
 file of the same name — this page is the plain-English version of that
 code.
+
+> **Paths below are written Windows-style.** The app's own directory is
+> `%APPDATA%\AITaskManager` on Windows and
+> `~/Library/Application Support/AITaskManager` on macOS; the CLIs' own files
+> are under `%USERPROFILE%` on Windows and `~` on macOS. **Inventory >
+> Sign-ins** shows the real locations on the machine you are running, and
+> marks which providers have actually been verified on that platform.
 
 Ground rules that apply to every provider:
 
@@ -239,7 +246,7 @@ Ground rules that apply to every provider:
   `api.elevenlabs.io/v1/user/subscription`.
 - **Shows:** balances / character quota with reset pacing; Kimi API and
   DeepSeek add a "Credits used" percent bar metered against the highest
-  balance Pane has seen locally (top-ups raise it; feeds the Almost Out
+  balance this app has seen locally (top-ups raise it; feeds the Almost Out
   notification). Saving a key in Settings turns that provider on if
   Customize had it off.
 
@@ -251,7 +258,7 @@ Ground rules that apply to every provider:
   and are written back beside the CLI's file, like Claude/Codex — but
   the `*.pane-bak` backup made first is deleted again once the
   refreshed file is safely in place. **No CLI?** Paste your Kimi For Coding plan key in
-  Settings → API keys → **Kimi Code** (stored in `%APPDATA%\Pane\kimi.json`,
+  Settings → API keys → **Kimi Code** (stored in `%APPDATA%\AITaskManager\kimi.json`,
   no env var is read). The login is used when both exist; the key is the
   fallback (issue #173). This is the plan key, not the platform.kimi.ai
   wallet key — that one goes in the **Kimi API** field.
@@ -288,9 +295,9 @@ Ground rules that apply to every provider:
   Those two windows are the same clocks as Kimi's website "5-hour Code"
   and "7-day Code" rows; the coding usage API currently reports remaining
   as whole percents (`limit`/`remaining` of 100), so usage under 1% can
-  still show as 0% in Pane. The website's **Total usage** bar is a
+  still show as 0% in this app. The website's **Total usage** bar is a
   separate monthly membership credit pool (Kimi chat + Code) and is not
-  on this card. The **API** bar (credits used vs the highest balance Pane
+  on this card. The **API** bar (credits used vs the highest balance this app
   has seen) only appears when a Moonshot/Kimi API key is saved — plan-only
   installs never get a third quota row. Balance/Vouchers sit behind
   Show more on that bar. Local spend from
@@ -316,7 +323,7 @@ Ground rules that apply to every provider:
   billing route, token buckets, and the app's own cost per session).
   Detected when that file exists; no API key.
 - **Calls:** nothing. This is a purely local source — Hermes records
-  ZERO cost itself, so dollars are priced from Pane's shared catalog.
+  ZERO cost itself, so dollars are priced from this app's shared catalog.
 - **Shows:** a card with the two most recent user-selected models, their
   billing backends (AihubMix, MiniMax, a custom URL, …), and session count.
   Hermes's internal title/approval tasks still count toward real usage but
@@ -369,7 +376,7 @@ Ground rules that apply to every provider:
 
 ## One/New API
 
-- **Reads:** nested `%APPDATA%\Pane\onenewapi.json` (versioned
+- **Reads:** nested `%APPDATA%\AITaskManager\onenewapi.json` (versioned
   `{ version, sites: [{ id, name, baseUrl, displayUnit, keys }] }`) — **not**
   `config.json`, and not the single-key `set_api_key` Settings list.
   Written atomically and stored owner-only (Windows protected DACL /
@@ -409,11 +416,11 @@ Ground rules that apply to every provider:
   be added here as a manual site — both cards can coexist and are not
   folded into Total Spend.
 - **Shared quota:** some panels return the same user-level numbers for
-  every key of one account. Pane shows each key's response independently
+  every key of one account. This app shows each key's response independently
   and does not sum or dedupe equal values.
 - **Accuracy:** OneAPI's `DisplayTokenStatEnabled=false` can hide
   token-level stats so the panel reports user-level quota instead; treat
-  the card as what that credential observed. Pane does not call native
+  the card as what that credential observed. This app does not call native
   `/api/usage/token` or `/api/log/token` to compensate.
 - **Telemetry:** family `onenewapi` at most once per refresh. Site ids,
   key ids, origins, labels, and configured key counts never leave the
@@ -452,13 +459,13 @@ with a stable `sub2api@<key-id>` identity. Empty sites remain in Settings.
 Saving validates the address and input locally, so an unavailable site or
 an unauthorized key can still be saved and corrected later.
 
-Pane stores keys in `%APPDATA%\Pane\sub2api.json`, a versioned document
+This app stores keys in `%APPDATA%\AITaskManager\sub2api.json`, a versioned document
 written atomically with an owner-only Windows DACL (Unix `0600`). Damaged
 or unreadable storage is reported rather than replaced with an empty file.
 Saved keys and key fragments are never returned to Settings. The only
 remote request is `GET <site>/v1/usage` with that key as a Bearer token;
 there is no status probe, dashboard JWT, billing fallback, model request,
-or remote icon download. Requests use Pane's proxy and timeout settings,
+or remote icon download. Requests use this app's proxy and timeout settings,
 a bounded response body and concurrency, and never follow redirects.
 
 Addresses accept an HTTPS origin or an origin ending in `/v1`; HTTP is

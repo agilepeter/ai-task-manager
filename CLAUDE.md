@@ -33,7 +33,7 @@ which can hold an account email. `aitm-agent --no-limits` skips the vendor calls
 Clean copy of github.com/ItsJazii/pane (MIT). Commit 1 is the pristine
 upstream import; see `UPSTREAM.md` for the exact upstream commit. Keep both
 copyright notices in `LICENSE`. To take an upstream provider fix, diff that one
-file under `src-tauri/src/providers/` and port it by hand.
+file under `crates/core/src/providers/` and port it by hand.
 
 ## Hard rules
 

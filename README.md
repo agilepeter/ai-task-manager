@@ -1,300 +1,359 @@
 <div align="center">
 
-# Pane
+# AI Task Manager
 
-**Pane tracker: all your AI plans and subscriptions in one Windows tray.**
+**Everything your AI tools are doing, in one place.**
 
-One click on the tray icon answers the questions every AI power user keeps
-asking: *How much of my Claude session is left? When does my Codex weekly
-reset? What did today actually cost me?*
+One click on the menu bar (macOS) or system tray (Windows) answers the
+questions every AI power user keeps asking: *How much of my Claude session is
+left? When does my Codex weekly reset? What did today actually cost me? And
+what are all these MCP servers doing in the background?*
 
-Pane is the [OpenUsage](https://www.openusage.ai/) port for Windows: a free
-AI plan tracker for Claude, Codex, Cursor, Copilot, Kimi, Grok, and 16 more.
+macOS and Windows. No account, no cloud, no telemetry.
 
-**[trypane.xyz](https://trypane.xyz)** · [Guides](https://trypane.xyz/guides) · [Install](#install) · [How it works](#how-it-works) · [Providers](#providers-22-and-counting) · [Features](#features) · [Privacy](#privacy--security) · [Credits](#credits)
-
-<img src="docs/promo.png" width="760" alt="Pane — track all your AI subscription limits in one tray app: Total Spend donut with per-provider slices, usage cards with pace bars" />
+[Install](#install) · [How it works](#how-it-works) · [Providers](#providers) ·
+[What is in the app](#what-is-in-the-app) · [Privacy](#privacy-and-security) ·
+[Build](#build-and-develop) · [Credits](#credits)
 
 </div>
 
 ---
 
-## Why Pane
-
-If you use AI coding tools seriously, you're juggling half a dozen separate
-subscriptions — Claude Max, ChatGPT/Codex, Copilot, Cursor, and whatever
-else this month brought. Each one hides its limits behind its own dashboard,
-counts in its own units, and resets on its own schedule. The only time you
-find out you're running low is when you hit the wall mid-task.
-
-Pane puts all of them in one place, in your system tray, refreshed every few
-minutes, with pace warnings *before* you hit the wall. It started as a
-Windows rebuild of the excellent [OpenUsage for macOS](https://github.com/robinebers/openusage)
-by [Robin Ebers](https://github.com/robinebers) and is growing into a
-broader AI-workflow companion from there.
-
 ## Install
 
-Every release binary is built and published by GitHub Actions straight
-from the tagged source — public build logs, verifiable provenance.
+### Read this first
 
-### winget (recommended)
+This is a private repository and **no release has been cut yet**, so there is
+nothing to download. There is also no code signing certificate on either
+platform, so builds are unsigned and both operating systems will say so.
 
-```
-winget install Pane.Pane
-```
+That leaves one path that works today: **build it yourself.** It takes about
+ten minutes the first time and needs no certificate, no account and no admin
+rights. Everything below is written for that path, with the "someone handed me
+a build" steps beside it for when that day comes.
 
-Pane is in [Microsoft's official winget community repo](https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/Pane/Pane) —
-reviewed, hash-verified, no SmartScreen prompt.
+| | State today |
+|---|---|
+| Downloadable release | None. `release.yml` builds installers for a `v*` tag but has never been run. |
+| macOS signing | None. No Apple Developer ID certificate is configured, so `spctl` reports "no usable signature" on any build. |
+| Windows signing | None. SmartScreen will warn on any installer. |
+| Auto-update | **Off.** See [Updates](#updates). |
 
-### One-liner (PowerShell)
+### macOS
 
-```powershell
-irm https://trypane.xyz/install.ps1 | iex
-```
+**Prerequisites**
 
-Downloads the latest release, verifies its SHA-256, installs per-user
-(no admin), and launches Pane. No SmartScreen prompt.
+- **Xcode Command Line Tools**: `xcode-select --install`
+- **Rust** (stable), from [rustup.rs](https://rustup.rs). Use the official
+  installer, not Homebrew: Homebrew has no bottle for Intel macOS 26 and will
+  build LLVM from source, which takes hours.
+- **Node.js 20 or newer**, from [nodejs.org](https://nodejs.org) or `brew install node`.
 
-Piping a script straight into PowerShell runs whatever the server sends
-at that moment. Prefer to look first? Same script, two steps:
+**Build and install**
 
-```powershell
-iwr https://trypane.xyz/install.ps1 -OutFile install.ps1
-# read install.ps1 — one short, commented script — then:
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-```
-
-(Or skip the script question entirely: `winget install Pane.Pane` above
-is hash-verified by Microsoft's pipeline.)
-
-### Installer (.exe)
-
-1. Grab **`Pane_x.y.z_x64-setup.exe`** from the
-   [latest release](https://github.com/ItsJazii/pane/releases/latest).
-2. Run it. Pane installs per-user to `%LOCALAPPDATA%\Pane` — no admin
-   rights needed.
-3. Look for the Pane icon in the system tray (next to the clock). Click it.
-
-> **SmartScreen note:** the installer isn't code-signed yet, so Windows may
-> show "Windows protected your PC." Click **More info → Run anyway**. Code
-> signing is on the roadmap.
-
-Silent install (for scripts): `Pane_x.y.z_x64-setup.exe /S`
-
-Whichever way you install, Pane keeps itself current — every install
-checks for signed updates and offers a one-click restart when a new
-version ships.
-
-### Build from source
-
-Prerequisites: Node.js 20+, Rust (stable-msvc), Visual Studio C++ Build
-Tools, WebView2 (bundled with Windows 11).
-
-```
-git clone https://github.com/ItsJazii/pane
-cd pane
+```sh
+git clone https://github.com/agilepeter/ai-task-manager
+cd ai-task-manager
 npm install
-npm run tauri dev     # run with hot reload
-npm run tauri build   # installer lands in src-tauri/target/release/bundle
+npm run tauri build -- --bundles app,dmg
 ```
+
+The first build compiles the whole Rust dependency tree and takes roughly ten
+minutes. Later builds take seconds.
+
+You get two things under `target/release/bundle/`:
+
+- `macos/AI Task Manager.app` -> drag it to `/Applications`
+- `dmg/AI Task Manager_0.1.0_<arch>.dmg` -> the same app, packaged to hand to
+  someone else
+
+Open the app. It lives in the **menu bar**, not the Dock: the app runs as a
+macOS Accessory, so there is deliberately no Dock icon and no entry in the app
+switcher. Look for the small robot glyph near the clock and click it.
+
+> **An app you built yourself opens normally.** macOS applies its quarantine
+> flag to things that *arrive* (downloads, AirDrop, a copied disk image), not
+> to something you compiled locally, so Gatekeeper stays out of your way. The
+> steps below are only for a build that came from somewhere else.
+
+**Installing a .dmg someone sent you**
+
+Because the build is unsigned, double-clicking it will fail with *"Apple could
+not verify..."* or *"is damaged and can't be opened"*. Neither is true; both
+mean unsigned. Either:
+
+1. Open the `.dmg` and drag the app to `/Applications`.
+2. **Right-click the app > Open**, then confirm. macOS remembers the choice, so
+   you only do this once.
+
+or, if the right-click route is blocked by your machine's policy, strip the
+quarantine flag yourself:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"
+```
+
+**Uninstall**
+
+```sh
+rm -rf "/Applications/AI Task Manager.app"
+rm -rf ~/Library/Application\ Support/AITaskManager
+```
+
+The second line removes your settings, saved keys and local history. Leave it
+out to keep them for a reinstall.
+
+### Windows
+
+**Prerequisites**
+
+- **Visual Studio C++ Build Tools** (the "Desktop development with C++"
+  workload), from
+  [visualstudio.microsoft.com/visual-cpp-build-tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+- **Rust** (stable-msvc), from [rustup.rs](https://rustup.rs)
+- **Node.js 20 or newer**, from [nodejs.org](https://nodejs.org)
+- **WebView2**: already present on Windows 11 and on up-to-date Windows 10. If
+  it is missing, the
+  [Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+  installs it.
+
+**Build and install**
+
+```powershell
+git clone https://github.com/agilepeter/ai-task-manager
+cd ai-task-manager
+npm install
+npm run tauri build
+```
+
+Installers land in `target\release\bundle\`:
+
+- `nsis\AI Task Manager_0.1.0_x64-setup.exe` -> per-user install, no admin
+- `msi\AI Task Manager_0.1.0_x64_en-US.msi` -> for Group Policy or scripted rollout
+
+Run either one, then look for the icon in the system tray next to the clock and
+click it.
+
+**Installing an installer someone sent you**
+
+The installer is not code-signed, so Windows shows **"Windows protected your
+PC."** Click **More info > Run anyway**. There is no way around this short of a
+code-signing certificate.
+
+Silent install, for scripts: `"AI Task Manager_0.1.0_x64-setup.exe" /S`
+
+**Uninstall**
+
+Settings > Apps > Installed apps > AI Task Manager > Uninstall. To remove your
+settings, saved keys and history as well, delete `%APPDATA%\AITaskManager`.
+
+### Releases
+
+Once a `v*` tag is pushed, `.github/workflows/release.yml` builds a macOS
+universal bundle and Windows installers and attaches them to a **draft**
+release. Until that runs and the artifacts are signed, building from source
+above is both the supported path and the better one: you can read what you are
+running.
 
 ## How it works
 
-Pane is a small Tauri v2 app: a Rust core doing the data work, a vanilla
-TypeScript UI doing the glass. No Electron, no background services — one
-~10 MB process idling around 90 MB of RAM.
+A small Tauri v2 app: a Rust core doing the data work, a vanilla TypeScript UI
+doing the glass. No Electron, no background service, no account.
 
-**1. Finding your accounts.** The official CLIs and editors you already use
-keep their login tokens in well-known per-user locations — Claude Code
-writes `%USERPROFILE%\.claude\.credentials.json`, Codex CLI writes
-`%USERPROFILE%\.codex\auth.json`, the GitHub CLI stores its token in
-Windows Credential Manager, and so on. Pane reads those same files (or
-takes an API key you paste into Settings) and shows a card for every tool
-it finds. Tools it can't find start disabled — no dead cards.
+**1. Finding your accounts.** The CLIs and editors you already use keep their
+logins in well-known per-user places. Claude Code writes `~/.claude/` (or the
+login Keychain on macOS), Codex CLI writes `~/.codex/auth.json`, the GitHub CLI
+uses the OS credential store, Cursor uses a local database, and so on. The app
+reads those same files, or takes an API key you paste into Settings, and shows
+a card for every tool it finds. Tools it cannot find start disabled, so there
+are no dead cards. If a card is empty and you expected data, **Settings >
+Sign-ins** lists every location that provider checked on *your* machine and
+whether it was there.
 
-**2. Asking the vendors.** Every few minutes, each provider's token is sent
-to **its own vendor's API only** — the exact usage endpoints the vendors'
-own apps use — and the card updates with sessions, weekly windows, credit
-balances, and reset times. Expired OAuth tokens are refreshed and written
-back, which keeps your CLIs signed in too. Failing providers get benched
-briefly and their last good data is shown with an "Outdated" tag instead of
-a blank card.
+**2. Asking the vendors.** Every few minutes each provider's token goes to
+**its own vendor's API and nowhere else**, the same usage endpoints the
+vendors' own apps use. Cards update with sessions, weekly windows, credit
+balances and reset times. A provider that starts failing is benched briefly and
+its last good data is shown with an "Outdated" tag rather than a blank card.
 
-**3. Pacing the burn.** Every metric with a reset window gets a projection:
-if you keep burning at this rate, will you make it to the reset? Bars turn
-amber/red as the math worsens and optional Windows toasts fire once per
-reset window ("Almost out", "Will run out") or when a weekly window
-resets ("Limit reset").
+**3. Pacing the burn.** Every metric with a reset window gets a projection: at
+this rate, will you make it to the reset? Bars turn amber and red as the maths
+worsens, and optional system notifications fire once per window. A separate
+**Burning Fast** rule catches what pacing cannot: a limit that jumped many
+points inside thirty minutes, which is what an agent fan-out looks like early
+in a week.
 
-**4. Counting the money.** Your CLIs already log every request locally.
-Pane scans those logs (Claude, Codex, Grok, OpenCode, Devin CLI, Cursor
-CSV, MiniMax CLI, Kimi Code, Qwen Code, the pi coding agent, the Hermes
-desktop app), prices each
-request with live per-model rates (LiteLLM /
-models.dev, refreshed daily — hourly while unknown models are around, so
-brand-new models price within the hour), and draws the Today /
-Yesterday / 30-day donut with a per-model breakdown. Click the ring to
-flip between dollars and tokens. On a flat-rate plan this shows what
-your usage *would* cost at API prices — the best ad for your
-subscription you'll ever see. Requests on models with no public
-pricing keep their measured tokens in the counts, but no dollars are
-ever guessed for them — a ⚠ on the provider's spend row says the real
-cost runs a little higher than shown.
+**4. Counting the money.** Your CLIs already log every request locally. The app
+scans those logs, prices each request with live per-model rates, and draws the
+Today / Yesterday / 30-day breakdown by model, project and day. On a flat-rate
+plan this is what your usage *would* cost at API prices, which is the best
+argument for your subscription you will ever see.
 
-**5. Staying local.** All of the above happens on your machine. There is
-no account, and your quotas, spend, and provider data never leave your
-PC. Pane reports two things about itself, both anonymous: the update
-check (country-level counting, no IPs stored) and an anonymous once-a-day
-statistic — always on, no in-app switch — (random ID, version, which
-providers are enabled, provider success/failure counts — never amounts or
-error text) — see [Privacy](#privacy--security) for the full contract.
+> **Spend figures are a floor, not a bill.** Measured against the vendor's own
+> recorded cost, this app reads about 23% low on Claude, because Claude Code
+> bills 1-hour cache writes at twice the input rate and the catalogue assumes
+> the 5-minute rate. The app checks itself against that reference and says so
+> in Inventory > Audit rather than quietly reporting a number it cannot stand
+> behind.
 
-## Providers (22 and counting)
+**5. Staying local.** All of the above happens on your machine. There is no
+account, no analytics, and your quotas, spend, folder names and provider data
+never leave the computer. See [Privacy](#privacy-and-security).
 
-| Provider | How Pane connects |
+## Providers
+
+23 providers. How each one connects, in short. The full reference, one
+section per provider with every file read and every endpoint called, is
+[docs/providers.md](docs/providers.md).
+
+| Provider | Source |
 |---|---|
-| Claude (Claude Code) | `%USERPROFILE%\.claude\.credentials.json` + Anthropic usage API; multi-account — every discovered config-dir login gets its own card |
-| Codex (Codex CLI) | `%USERPROFILE%\.codex\auth.json` + ChatGPT usage API, incl. reset-credit redemption; multi-account like Claude |
-| Cursor | Cursor's local state database + modern usage RPC; `cursor.com/api/usage-summary` keeps plan bars live when the RPC host is unreachable |
-| OpenCode (Go plan) | Official account-wide usage API (Go key from `auth.json`); local `opencode.db` for spend* |
-| GitHub Copilot | Copilot editor login or GitHub CLI (Credential Manager) + GitHub API |
-| Grok (Grok CLI) | `%USERPROFILE%\.grok\auth.json` + Grok billing/subscription APIs |
-| Devin (Devin CLI) | `%APPDATA%\devin\credentials.toml` + GetUserStatus RPC; local CLI session store for spend |
-| MiniMax | API key (Settings, env var, or CLI config) + token-plan API |
-| OpenRouter | API key (Settings) or key stored by OpenCode |
-| Z.ai | API key (Settings), CLI key file, or env var |
-| Antigravity | Local language server, or Google Cloud Code API via Credential Manager |
-| DeepSeek | API key (Settings) → balance |
-| Kimi API | Platform API key (Settings) → wallet balance and credits-used meter (global + CN endpoints) |
-| Kimi Code | Official CLI login (`kimi login`) or pasted Kimi For Coding plan key → Session + Weekly bars and membership name (Moderato / Allegretto / Allegro / Vivace); optional Kimi API wallet bar; local session spend |
-| ElevenLabs | API key (Settings) → character quota with reset pacing |
-| Ollama | Local server on :11434 — installed + loaded models, no key |
-| Codebuff | `codebuff login` credentials file or API key → credits + weekly limit |
-| Kilo | Kilo CLI login file or API key → credit blocks + Kilo Pass |
-| AihubMix | API key (Settings or auto-detected from OpenCode) → usage vs spending limit |
-| One/New API | Add multiple compatible sites and keys in Settings; one quota card per key, with owner-only local secret storage |
-| Qwen Code | Coding Plan key (Settings or env) → 5h/weekly/monthly request quotas + local spend |
-| Hermes | Local ledger `%LOCALAPPDATA%\hermes\state.db` → two recent user models, routes, and catalog-priced spend, including scoped AihubMix launch-model rates |
+| Claude (Claude Code) | CLI login (login Keychain on macOS, `.credentials.json` elsewhere) + Anthropic usage API. Multi-account: every discovered config dir gets its own card. |
+| Codex (Codex CLI) | `~/.codex/auth.json` + ChatGPT usage API, including reset-credit redemption. Multi-account. |
+| Cursor | Cursor's local state database + usage RPC, with `cursor.com` usage summary as fallback |
+| OpenCode | Official account-wide usage API, plus local `opencode.db` for spend |
+| GitHub Copilot | Copilot editor login or GitHub CLI token in the OS credential store + GitHub API |
+| Grok (Grok CLI) | `~/.grok/auth.json` + Grok billing APIs |
+| Devin (Devin CLI) | CLI credentials + GetUserStatus RPC; local session store for spend |
+| Antigravity | Local language server, or Google Cloud Code API via the OS credential store |
+| Hermes | Local ledger from the Hermes desktop app: recent models, routes, catalog-priced spend |
+| Qwen Code | Coding Plan key -> 5h / weekly / monthly request quotas + local spend |
+| Kimi Code | `kimi login` or a pasted plan key -> session + weekly bars and membership tier |
+| Kimi API | Platform API key -> wallet balance and credits-used meter (global + CN) |
+| MiniMax | API key (Settings, env var or CLI config) + token-plan API |
+| OpenRouter | API key, or a key already stored by OpenCode |
+| Z.ai | API key, CLI key file, or env var |
+| DeepSeek | API key -> balance |
+| ElevenLabs | API key -> character quota with reset pacing |
+| Codebuff | `codebuff login` credentials or API key -> credits + weekly limit |
+| Kilo | Kilo CLI login or API key -> credit blocks + Kilo Pass |
+| AihubMix | API key (or auto-detected from OpenCode) -> usage against spending limit |
+| One/New API | Add any number of compatible sites and keys; one quota card per key |
+| Sub2API | Compatible site keys, one card per key |
+| Ollama | Local server on `:11434`. Installed and loaded models, no key. |
 
-*OpenCode's meters use the official usage API that shipped in
-[anomalyco/opencode#16513](https://github.com/anomalyco/opencode/pull/16513)
-— the same account-wide numbers as the Zen dashboard, so usage from your
-other devices (or other people on a shared subscription) finally counts.
-If the API is unreachable, Pane falls back to computing this machine's
-usage locally from `opencode.db`, the same data `opencode stats` uses;
-dollar spend figures are always local.
+**On platform coverage, honestly.** This app is a clean copy of a Windows
+original, so the Windows credential paths are inherited and exercised. On
+**macOS only Claude and Copilot are verified end to end**; Codex, Cursor,
+OpenRouter and ElevenLabs use paths that compile and look right but have not
+been confirmed against a real signed-in machine. Antigravity discovery shells
+out to PowerShell and `netstat`, so on macOS it compiles and finds nothing.
+**Inventory > Sign-ins** marks exactly which providers are verified on the
+platform you are running, so the app never lets a guess look like a fact.
 
-More on the way: IDE-database providers (Windsurf, JetBrains AI…) and
-whatever the community asks for loudest.
+## What is in the app
 
-## Features
+Three tabs.
 
-- **Multi-account Claude & Codex** — running a personal plan AND a
-  work/enterprise seat? Keep the second login in its own folder (via
-  `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) and Pane shows one card per
-  account — each with its own limits, plan, credits, and spend, named
-  by its organization or email ("Claude — Acme"). The same account
-  signed in twice stays one card, and your existing setup is untouched.
-- **One/New API sites** — add multiple compatible sites and multiple keys
-  per site in Settings. Every key gets its own quota card; secrets remain
-  owner-only on this PC and are sent only to the configured origin.
-- **English, Chinese, and Russian** — choose a language explicitly or let
-  Auto follow the Windows display language across the popover, tray, and
-  quota notifications.
-- **Pace projections** — colored bars and "will run out" warnings based on
-  your burn rate within each reset window, plus optional Windows toasts.
-- **Local spend** — Today / Yesterday / 30 Days donut with per-model
-  breakdown and a 30-day trend, priced with live model rates. Hover a
-  slice and it pops out with its legend row; click the ring to flip
-  dollars ⇄ tokens.
-- **Codex reset credits** — see each banked credit's exact expiry and
-  redeem it with one click.
-- **Signed auto-updates** — Pane checks for updates every time you open
-  it (and every 4 hours in the background); when a release is out, the
-  footer version stamp becomes an Update button — one click downloads,
-  verifies the signature, and restarts.
-- **Live tray numbers** — star up to two metrics per provider and they
-  render as logo + percentage pairs directly in the tray.
-- **Customize** — drag any card by its grip right in the popover to
-  reorder, or open the Customize screen (☰) to reorder metrics, hide
-  rows, and tuck rarely-needed ones behind an "On Demand" caret. Ctrl+Z
-  undoes.
-- **Liquid glass UI** — real SDF lens refraction on the auto-hiding
-  sidebar and glass bars, magnetic minimap trail, circular day/night wipe.
-- **Share cards** — hover a card, click ⧉, and paste anywhere: the copy
-  is exactly what the card shows (bars, pace hints, trend — buttons and
-  links stripped), framed with the Pane icon and tagline.
-- **Quick links** — Status / Dashboard shortcuts on every card.
-- **[Local HTTP API](docs/local-http-api.md)** — `GET
-  http://127.0.0.1:6736/v1/usage` for scripts, Rainmeter widgets, stream
-  overlays; same wire format as the Mac app, but with no CORS headers
-  and a loopback-only Host check so web pages can't read it through
-  your browser (not even via DNS rebinding).
-- **Appearance** — System / Light / Dark, compact density, global shortcut
-  (e.g. `Ctrl+Shift+U`), optional outbound proxy.
+**Usage** (the default) is the limits, pace bars and spend. Click any card's
+name for a detail page: limits over time from a local 90-day history, spend
+grouped by model, project or day, a 7x24 heatmap of when a limit actually gets
+used, and a forecast that says when you run out at your recent rate. Click a
+work area or a day to see the sessions behind it.
 
-## Privacy & security
+**Subscriptions** is your own ledger of what you pay. It never guesses a price:
+a detected plan names a tier, not what it costs you. It steps renewal dates
+from an anchor without drift, reminds you once before a renewal, and shows each
+subscription's 30-day API-equivalent value against its monthly cost. "Idle"
+requires measured low usage; a tool with no spend data says "no data".
 
-Pane reads credential files. You should not take our word for how it
-treats them — verify it:
+**Inventory** is the setup itself: MCP servers, agents, skills and guardrails
+across every MCP-capable app it knows (Claude Code, Claude Desktop, VS Code,
+Cursor, Windsurf, Gemini CLI, Codex). **Running now** reads the process table
+and shows which of those servers are actually running, grouped by runner, with
+their memory, and lets you end one. **Audit** scores the whole setup: every
+finding is computed from your machine, states its own numbers, and disappears
+when it no longer applies. Nothing is graded twice, and what cannot be judged
+is left out rather than counted against you.
 
-- **[docs/privacy.md](docs/privacy.md)** — the complete list of every
-  network call Pane can make. No event streams, no session recording,
-  no autocapture; the update check counts anonymous daily installs by
-  country (no IPs stored), and an always-on daily statistic reports
-  version + enabled providers + refresh success/failure counts under a
-  random ID attached to nothing. That document explains exactly how,
-  field by field.
-- **[docs/providers.md](docs/providers.md)** — per provider: exactly which
-  files are read on your PC and exactly which endpoints they're sent to.
-- **[SECURITY.md](SECURITY.md)** — how to report vulnerabilities
-  privately, the security properties you can audit in source, and an
-  honest list of current limitations (unsigned installer — the release
-  binaries themselves are built by GitHub Actions from the tagged source,
-  with public build logs).
+Also: work areas and client attribution with CSV export, budget alerts per
+client, an optional weekly digest, a read-only [local HTTP
+API](docs/local-http-api.md) on `127.0.0.1:6736`, English / Chinese / Russian,
+light and dark themes, a global shortcut, and a wide mode that grows the same
+window rather than opening a second one.
 
-The short version: tokens are sent only to their own vendor's API over
-HTTPS; pasted keys live in `%APPDATA%\Pane`, readable only by your
-Windows user; spend accounting parses your local logs locally; the HTTP
-API is loopback-only with no CORS and a Host check; updates are
-signature-verified.
+## Privacy and security
 
-## Settings (gear icon)
+The app reads credential files. You should not take anyone's word for how it
+treats them, so here is the contract and where to check it. The long version,
+including every network call the app can make and the greps that prove it, is
+[docs/privacy.md](docs/privacy.md).
 
-Language (Auto / English / 中文 / Русский) · refresh interval · Start with
-Windows · tray metric picker · appearance and compact density · time format ·
-global shortcut · notification toggles · outbound proxy · provider API keys ·
-One/New API site and key management.
+- **No telemetry and no phone-home.** There is no analytics SDK, no install
+  counter, no crash reporter and no in-app switch to find, because there is
+  nothing to switch off. The upstream project's PostHog module was removed
+  rather than disabled.
+- **Outbound traffic is each provider's own vendor API**, and nothing else,
+  with one documented exception: the **MCP Trust Index lookup**, which is
+  **off by default**. Turned on, it sends nothing about your machine: one
+  parameterless GET of a public list, at most once a day, matched locally.
+- **Credentials are read, never copied out.** Inventory reads names, shapes and
+  counts only. MCP config files routinely hold API keys in `env`, `args`,
+  `headers` and URL query strings, and a test plants secrets in every one of
+  those fields and asserts none of them reach any output.
+- **OS credential stores are read-only.** On macOS the Claude provider reads
+  the Keychain and deliberately never refreshes the token, because refreshing
+  rotates it and would sign Claude Code out from under you.
+- **Your folder names stay on your machine.** Work areas and client names are
+  never published to the local HTTP API by default; the extra feeds that would
+  expose them are opt-in and loopback-only, with a DNS-rebinding host check so
+  a web page cannot read them through your browser.
+- **The app changes your machine in exactly two places, both behind an explicit
+  confirmed click**: ending a running MCP server, and pinning an unpinned MCP
+  package to a version. The second takes its version from your local package
+  cache, replaces one JSON string byte for byte, re-parses to prove nothing
+  else moved, refuses if the file changed since the preview, and leaves a
+  backup beside it.
+- **Prompts and conversation titles are never read.** Claude Code stores titles
+  derived from your prompts in the same logs the spend scanner walks. It skips
+  them on purpose.
+
+## Updates
+
+**Self-update is off.** The updater's endpoints still point at the upstream
+project, so switching it on would replace this app with a different one. The
+signing key is ours, but the public feed does not exist yet because this
+repository is private. `SHIPPING.md` lists exactly what each remaining step
+needs. Until then, update by pulling and rebuilding:
+
+```sh
+git pull
+npm install
+npm run tauri build -- --bundles app,dmg   # or: npm run tauri build   (Windows)
+```
+
+## Build and develop
+
+```sh
+npm install
+npm run tauri dev      # run with hot reload
+cargo test --workspace # 617 Rust tests
+npm test               # 12 frontend tests
+```
+
+`npm run tauri dev` only watches `src-tauri/`. A change under `crates/` needs
+the app restarted by hand.
+
+Checking real numbers against the running app: `curl http://127.0.0.1:6736/v1/usage`.
+
+The repository layout, the rules that hold it together and the reasoning behind
+the non-obvious parts are in [CLAUDE.md](CLAUDE.md). Distribution status is in
+[SHIPPING.md](SHIPPING.md). What came from upstream and how to take a fix from
+it is in [UPSTREAM.md](UPSTREAM.md).
 
 ## Credits
 
-Pane exists because of
-**[OpenUsage for macOS](https://github.com/robinebers/openusage)** by
-**[Robin Ebers](https://github.com/robinebers)** (MIT). The hard part of a
-tool like this — knowing which credential files to read, which
-undocumented usage endpoints to call, and how to interpret their
-responses — is research Robin did first and published openly. Pane is an
-independent from-scratch rebuild for Windows (Rust + TypeScript instead of
-Swift), but it stands on that research and gladly says so. If you're on a
-Mac, use his app.
+Built on two projects that did the hard provider research first, both MIT:
 
-Additional thanks:
+- **[Pane](https://github.com/ItsJazii/pane)** by Jazii, the Windows tray app
+  this grew from.
+- **[OpenUsage](https://github.com/robinebers/openusage)** by Robin Ebers, the
+  macOS original and the provider research.
+- **[CodexBar](https://github.com/steipete/CodexBar)** by Peter Steinberger,
+  provider research for Codebuff, Kilo, Kiro, Amp, Vertex AI, Bedrock, Poe,
+  Chutes, Warp and Crof.
 
-- [Tauri](https://tauri.app/) — the app shell that keeps Pane tiny.
-- [prasen.dev](https://www.prasen.dev/) — the original SDF liquid-glass
-  lens technique the UI's refraction is ported from.
-- [LiteLLM](https://github.com/BerriAI/litellm) and
-  [models.dev](https://models.dev/) — open model-price catalogs powering
-  the spend engine.
-- [shadcn/ui](https://ui.shadcn.com/) — the zinc design tokens the theme
-  is built on.
+Their copyright notices are kept in [LICENSE](LICENSE) and in the app's About
+panel. If you fork this, keep them.
 
-Pane is not affiliated with or endorsed by Robin Ebers or any of the AI
-vendors listed. Provider names and logos belong to their respective owners
-and are used only to identify the services.
-
-## License
-
-[MIT](LICENSE) — © 2026 Jazii, with provider research credit to Robin
-Ebers' OpenUsage (MIT).
+MIT licensed. Made by [StaaS Fund](https://staas.fund/).
