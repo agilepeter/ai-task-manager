@@ -13,4 +13,6 @@ rm -rf "$dest"
 mkdir -p "$dest"
 cp -R dist-demo/assets "$dest/assets"
 cp dist-demo/demo.html "$dest/index.html"
+python3 "$here/scripts/bump-demo-version.py" "$site/task-manager/index.html"
+
 echo "Demo copied to $dest. Review, then commit and push the site yourself."
