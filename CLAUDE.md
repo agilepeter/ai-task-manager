@@ -126,6 +126,12 @@ and computed Opportunities). Usage stays the default view.
   entry uses ordered static imports because the app boots on DOMContentLoaded.
   `scripts/sync-demo-to-site.sh` rebuilds it into the staas.fund product page
   (`staasfund/task-manager/demo/`); it never commits or pushes, because a push there is a deploy.
+- **A new finding is invisible to the audit until it is listed there.** `audit.rs` does not
+  iterate opportunities; it asks for specific ids (`from_finding`, or `only_if_present` for a
+  finding with no meaningful "pass"). The running and pricing findings were computed and shown
+  in the tab but scored nothing for a day because of this. `enriched_inventory()` in
+  `src-tauri/src/lib.rs` is now the single place both the tab and the audit get their findings
+  from, so the two lists cannot drift apart again.
 - **Audit** (`crates/core/src/audit.rs`, `src/audit.ts`): a scored, sectioned read of the whole
   setup; opens itself once on first run (`auditSeen`), then from Inventory > Audit; exports
   Markdown. It never judges anything a second time: each existing finding becomes a check,

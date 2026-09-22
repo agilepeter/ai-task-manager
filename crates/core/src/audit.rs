@@ -69,6 +69,14 @@ fn from_finding(inv: &Inventory, id: &str, pass_title: &str, pass_detail: &str) 
     }
 }
 
+/// A finding that has no meaningful "pass": it either applies or it does not,
+/// so its absence adds no row rather than an empty one.
+fn only_if_present(inv: &Inventory, id: &str) -> Option<Check> {
+    inv.opportunities.iter().find(|o| o.id == id).map(|o| {
+        check(id, if o.kind == "tighten" { "attention" } else { "consider" }, o.title.clone(), o.detail.clone())
+    })
+}
+
 fn plural(n: usize, one: &str) -> String {
     format!("{n} {one}{}", if n == 1 { "" } else { "s" })
 }
@@ -101,6 +109,19 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
         }
         setup.push(from_finding(inv, "mcp-env-secrets", "No MCP server is handed credentials", "No API keys are sitting in an MCP config."));
         setup.push(from_finding(inv, "mcp-remote", "No remote MCP servers", "Everything configured runs on this computer."));
+        setup.push(from_finding(
+            inv,
+            "mcp-duplicate-processes",
+            "No MCP server is running twice",
+            "Nothing is holding a second copy of the same tool in memory.",
+        ));
+        setup.push(from_finding(
+            inv,
+            "mcp-running-unconfigured",
+            "Everything running is accounted for",
+            "Every live MCP server is declared in a config this app can read.",
+        ));
+        setup.extend(only_if_present(inv, "mcp-memory"));
     }
 
     let p = &inv.permissions;
@@ -128,6 +149,15 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
     ];
 
     let mut usage = Vec::new();
+    // Whether the dollar figures can be trusted belongs before anything that
+    // is measured in dollars.
+    usage.push(from_finding(
+        inv,
+        "pricing-cache-ttl",
+        "Prices agree with the vendor",
+        "This app's rate card matches what the vendor recorded for the same tokens.",
+    ));
+    usage.extend(only_if_present(inv, "pricing-drift"));
     if i.spend30 >= 50.0 {
         usage.push(from_finding(inv, "mix-top-heavy", "The model mix is balanced", "Less than 70% of spend is on the largest models."));
         usage.push(from_finding(inv, "session-long-lived", "No costly long-running sessions", "No session has been open a week or more while costing real money."));
@@ -248,6 +278,24 @@ mod tests {
 
     fn statuses(r: &AuditReport) -> Vec<(String, String)> {
         r.sections.iter().flat_map(|s| &s.checks).map(|c| (c.id.clone(), c.status.clone())).collect()
+    }
+
+    #[test]
+    fn a_finding_with_no_pass_state_adds_no_row_when_absent() {
+        let inv = Inventory::default();
+        assert!(super::only_if_present(&inv, "mcp-memory").is_none());
+        let inv = Inventory {
+            opportunities: vec![crate::inventory::Opportunity {
+                id: "mcp-memory".into(),
+                kind: "learn".into(),
+                title: "MCP servers are holding 2115 MB".into(),
+                detail: "d".into(),
+                learn_url: None,
+            }],
+            ..Inventory::default()
+        };
+        let c = super::only_if_present(&inv, "mcp-memory").expect("present");
+        assert_eq!(c.status, "consider", "a resting cost is not a failing");
     }
 
     #[test]

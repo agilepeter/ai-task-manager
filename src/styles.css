@@ -949,7 +949,9 @@ select:focus-visible {
 }
 
 .quick-sep {
-  color: var(--border);
+  /* A separator is still text. --border is a line colour and read at
+     1.22:1 here; the muted text token is the right one. */
+  color: var(--muted-foreground);
   font-size: 11px;
 }
 
@@ -4228,4 +4230,20 @@ body.wide #detail {
   text-align: right;
   font-variant-numeric: tabular-nums;
   color: var(--foreground);
+}
+
+/* Sub-headings inside a folded section (Agents / Skills / Guardrails share
+   one accordion now, rather than owning three). */
+.inv-grouphead {
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin: 10px 0 2px;
+}
+.card-panel > .inv-grouphead:first-child {
+  margin-top: 0;
+}
+.inv-grouphead-n {
+  color: var(--secondary-foreground);
 }

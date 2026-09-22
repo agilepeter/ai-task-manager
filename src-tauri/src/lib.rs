@@ -175,21 +175,7 @@ fn system_ui_locale() -> &'static str {
 /// only; see `inventory.rs` for what is deliberately never read out.
 #[tauri::command]
 async fn get_inventory() -> Result<inventory::Inventory, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let mut inv = inventory::scan();
-        // Usage-based opportunities sit with the setup ones. The spend scan
-        // is cached per file, so this is quick after the first refresh.
-        let spend = spend::collect(None);
-        let claude = spend.iter().find(|p| p.id == "claude");
-        inv.opportunities.extend(coaching::opportunities(claude, &spend::claude_sessions(None, None, 500)));
-        // What is running right now, matched against what is configured.
-        inv.opportunities.extend(procs::opportunities(&procs::snapshot(&inv.mcp_servers)));
-        // Our rate card against the vendor's own recorded cost.
-        inv.opportunities.extend(drift::opportunities(&drift::scan()));
-        // Gaps first, then things to learn, each in the order found.
-        inv.opportunities.sort_by_key(|o| o.kind != "tighten");
-        inv
-    })
+    tauri::async_runtime::spawn_blocking(|| enriched_inventory().0)
     .await
     .map_err(|e| format!("inventory scan: {e}"))
 }
@@ -377,11 +363,24 @@ async fn get_burn_profile(provider_id: String) -> Result<Vec<history::BurnProfil
         .map_err(|e| format!("burn profile: {e}"))
 }
 
-fn build_audit() -> audit::AuditReport {
+/// The inventory plus every computed finding, and the spend it was built
+/// from. **Both the Inventory tab and the audit go through here**: they used
+/// to assemble the list separately, so the audit silently scored a shorter
+/// one than the tab displayed.
+fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     let mut inv = inventory::scan();
     let spend = spend::collect(None);
     let claude = spend.iter().find(|p| p.id == "claude");
     inv.opportunities.extend(coaching::opportunities(claude, &spend::claude_sessions(None, None, 500)));
+    inv.opportunities.extend(procs::opportunities(&procs::snapshot(&inv.mcp_servers)));
+    inv.opportunities.extend(drift::opportunities(&drift::scan()));
+    // Gaps first, then things to learn, each in the order found.
+    inv.opportunities.sort_by_key(|o| o.kind != "tighten");
+    (inv, spend)
+}
+
+fn build_audit() -> audit::AuditReport {
+    let (inv, spend) = enriched_inventory();
     let usage30: std::collections::HashMap<String, f64> = spend.iter().map(|p| (p.id.clone(), p.last30.cost)).collect();
     let today = chrono::Local::now().date_naive();
     let ledger_view = ledger::view(&ledger::load_from(&ledger::path()), today, &usage30);

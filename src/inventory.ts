@@ -420,8 +420,8 @@ function renderTools(inv: Inventory): string {
   return section("tools", "AI tools on this computer", inv.tools.length, rows, "None of the AI tools this app knows were found.");
 }
 
-function renderDefinitions(id: string, title: string, list: Definition[], hint: string): string {
-  const rows = list
+function defRows(list: Definition[]): string {
+  return list
     .map(
       (d) => `
       <div class="inv-row">
@@ -430,12 +430,14 @@ function renderDefinitions(id: string, title: string, list: Definition[], hint: 
       </div>`,
     )
     .join("");
-  return section(id, title, list.length, rows, hint);
 }
 
-function renderGuardrails(inv: Inventory): string {
+/// Agents, skills and guardrails are all "how this machine is configured",
+/// they rarely change, and each was its own accordion. Eight collapsible
+/// sections is a wall; these three are one, with sub-headings inside.
+function renderSetup(inv: Inventory, agents: Definition[], skills: Definition[]): string {
   const p = inv.permissions;
-  const rows = [
+  const guardrails = [
     ["Default model", inv.model ?? "not pinned"],
     ["Permission mode", p.defaultMode ?? "default (asks each time)"],
     ["Allow rules", String(p.allow)],
@@ -451,9 +453,15 @@ function renderGuardrails(inv: Inventory): string {
       </div>`,
     )
     .join("");
-  return section("guardrails", "Guardrails", p.allow + p.ask + p.deny + inv.hooks.length, rows, "", {
-    keepBody: true,
-  });
+  const defs = (title: string, list: Definition[], hint: string) =>
+    `<div class="inv-grouphead">${esc(title)} <span class="inv-grouphead-n">${list.length}</span></div>` +
+    (list.length ? defRows(list) : `<p class="inv-empty">${esc(hint)}</p>`);
+  const body =
+    defs("Agents", agents, "No custom agents in this scope.") +
+    defs("Skills", skills, "No skills in this scope.") +
+    `<div class="inv-grouphead">Guardrails</div>${guardrails}`;
+  const count = agents.length + skills.length + p.allow + p.ask + p.deny + inv.hooks.length;
+  return section("setup", "Agents, skills & guardrails", count, body, "", { keepBody: true });
 }
 
 function scopeOptions(inv: Inventory): string {
@@ -502,9 +510,7 @@ function render(): void {
     ${renderSignIns()}
     ${renderTools(inv)}
     ${renderMcp(mcp)}
-    ${renderDefinitions("agents", "Agents", agents, "No custom agents in this scope.")}
-    ${renderDefinitions("skills", "Skills", skills, "No skills in this scope.")}
-    ${renderGuardrails(inv)}`;
+    ${renderSetup(inv, agents, skills)}`;
 }
 
 /// Cheap next to a full scan, so it refreshes on its own whenever the view is
