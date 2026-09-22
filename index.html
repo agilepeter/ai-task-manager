@@ -306,6 +306,10 @@
           <div class="setting-row">
             <label class="toggle"><input id="api-feeds" type="checkbox" /> <span>Serve spend and subscriptions on the local API</span></label>
           </div>
+          <div class="setting-row" id="api-keys-reveal-row">
+            <button class="mini-btn" id="api-keys-reveal">Show API key fields</button>
+            <span class="settings-note">Only needed for tools that cannot sign you in themselves.</span>
+          </div>
           <p class="settings-note">
             For your own dashboards. Adds /v1/spend, /v1/spend/areas, /v1/spend/clients and
             /v1/subscriptions to http://127.0.0.1:6736, reachable from this computer only. Areas and
@@ -321,7 +325,7 @@
           </button>
         </div></div>
       </div>
-      <div class="acc-group">
+      <div class="acc-group" id="api-keys-group" hidden>
         <button class="acc-head"><span data-i18n="settings.apiKeys">API keys</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note" data-i18n="settings.apiKeysNote">

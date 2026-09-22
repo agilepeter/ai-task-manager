@@ -42,11 +42,8 @@ import sub2apiIcon from "./assets/providers/sub2api.svg?raw";
 import opencodeIcon from "./assets/providers/opencode.svg?raw";
 import openrouterIcon from "./assets/providers/openrouter.svg?raw";
 // OURS, not upstream's. The sidebar takes the flat mark as raw SVG so it is
-// tinted by `currentColor` like the provider icons; the share card takes the
-// rounded icon as a data URI, because a rasterized SVG snapshot cannot load
-// external resources.
+// tinted by `currentColor`, like the provider icons.
 import aitmMark from "./assets/aitm-mark.svg?raw";
-import aitmIcon from "./assets/aitm-icon.png?inline";
 import zaiIcon from "./assets/providers/zai.svg?raw";
 
 const PROVIDER_ICONS: Record<string, string> = {
@@ -1400,10 +1397,6 @@ function renderCard(s: Snapshot): string {
     .map((l) => `<button class="quick-link" data-link="${escapeHtml(l.url)}">${escapeHtml(displayLinkLabel(l.label))}</button>`)
     .join("<span class='quick-sep'>·</span>");
   const linksRow = config.minimal || !links ? "" : `<div class="quick-links">${links}</div>`;
-  const share =
-    !config.minimal && s.status === "ok"
-      ? `<button class="share-btn" data-share="${escapeHtml(s.id)}" title="${escapeHtml(t("card.share"))}">⧉</button>`
-      : "";
   const planChip = config.minimal ? "" : plan;
   return `
     <article class="provider${muted}" data-provider="${escapeHtml(s.id)}">
@@ -1413,7 +1406,7 @@ function renderCard(s: Snapshot): string {
         ${planChip}
         ${stale}
         <span class="spacer"></span>
-        ${share}
+        
       </div>
       <div class="card-panel">
         ${body}
@@ -1782,7 +1775,6 @@ function renderTotalSpend(): string {
         <span class="provider-name">${escapeHtml(t("spend.title"))}</span>
         <span class="info" title="${escapeHtml(t("spend.info", { names: contributors }))}">&#9432;</span>
         <span class="spacer"></span>
-        <button class="share-btn" data-share="__total__" title="${escapeHtml(t("card.share"))}">⧉</button>
       </div>
       <div class="card-panel">
         <div class="tabs">
@@ -1910,122 +1902,6 @@ function appConfirm(opts: {
   });
 }
 
-
-async function shareCard(id: string): Promise<void> {
-  const status = document.querySelector("#status")!;
-  try {
-    const el =
-      id === "__total__"
-        ? document.querySelector<HTMLElement>("article.total-spend")
-        : document.querySelector<HTMLElement>(`article.provider[data-provider="${id}"]`);
-    if (!el) return;
-
-    const rect = el.getBoundingClientRect();
-    const W = Math.ceil(rect.width);
-    const S = 2;
-    const PAD = 16; // frame around the card, like the Mac share cards
-    const FOOT = 34; // logo + tagline row
-    // The tagline row already carries its own breathing room, so the frame
-    // under it is thin — otherwise the tagline floats with dead space below.
-    const PAD_BOTTOM = 4;
-
-    let css = "";
-    for (const sheet of Array.from(document.styleSheets)) {
-      try {
-        for (const rule of Array.from(sheet.cssRules)) css += rule.cssText + "\n";
-      } catch {
-        // Inaccessible sheet (shouldn't happen — all styles are bundled).
-      }
-    }
-    // Static rasterization renders CSS animations at time zero, which for
-    // the entrance animations means an invisible card. Freeze final state.
-    // The body's inherited text styles are re-declared on the wrapper since
-    // the snapshot document has no <body>.
-    const bodyStyle = getComputedStyle(document.body);
-    css +=
-      "*{animation:none!important;transition:none!important}" +
-      "#snap-root .share-btn{display:none!important}" +
-      `#snap-foot{display:flex;align-items:center;justify-content:center;gap:6px;` +
-      `height:${FOOT}px;color:var(--muted-foreground);font-size:12px}` +
-      "#snap-foot img{width:16px;height:16px;border-radius:4px}";
-
-    const clone = el.cloneNode(true) as HTMLElement;
-    clone.style.margin = "0";
-    clone.style.width = `${W}px`;
-    clone.style.boxSizing = "border-box";
-
-    // Shares are strictly what's on screen: everything the card currently
-    // renders — bars, pace hints, the trend, and the On Demand section
-    // when it's open — copies as-is. Only interactive chrome (buttons,
-    // links, carets, grips) never belongs in an image. (The old "compact
-    // composition" for collapsed cards is retired: it dropped the visible
-    // trend and pace hints, which read as missing data in the copy.)
-    // .snap-card restores the card surface the popover no longer draws
-    // (cards sit flat on the background there, panels carry the chrome).
-    clone.classList.add("snap-card");
-    if (id !== "__total__") {
-      clone
-        .querySelectorAll(".share-btn, .card-caret, .quick-links, .action-row, .drag-grip, .grip-glyph")
-        .forEach((n) => n.remove());
-    }
-
-    // The curated clone is shorter than the on-screen card (chrome
-    // removed), so measure IT — briefly attached offscreen — instead of
-    // sizing the canvas from the original and leaving dead space.
-    clone.style.position = "fixed";
-    clone.style.left = "-99999px";
-    clone.style.top = "0";
-    document.body.appendChild(clone);
-    const H = Math.ceil(clone.getBoundingClientRect().height);
-    clone.remove();
-    clone.style.position = "";
-    clone.style.left = "";
-    clone.style.top = "";
-    const W2 = W + PAD * 2;
-    const H2 = H + PAD + FOOT + PAD_BOTTOM;
-    css +=
-      `#snap-root{font-family:${bodyStyle.fontFamily};font-size:${bodyStyle.fontSize};` +
-      `color:${bodyStyle.color};letter-spacing:${bodyStyle.letterSpacing};` +
-      `background:var(--background);padding:${PAD}px ${PAD}px ${PAD_BOTTOM}px;box-sizing:border-box;` +
-      `width:${W2}px;height:${H2}px}`;
-
-    // data-theme / data-density live on <html>; :root of the snapshot
-    // document is the <svg>, so the attributes are mirrored there for the
-    // :root[data-…] rules to keep matching.
-    const root = document.documentElement;
-    const svgMarkup =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${W2 * S}" height="${H2 * S}" ` +
-      `viewBox="0 0 ${W2} ${H2}" data-theme="${root.dataset.theme ?? ""}" ` +
-      `data-density="${root.dataset.density ?? ""}" ` +
-      `data-minimal="${root.dataset.minimal ?? "false"}">` +
-      `<foreignObject width="${W2}" height="${H2}">` +
-      `<div xmlns="http://www.w3.org/1999/xhtml" id="snap-root">` +
-      // CDATA so CSS containing XML-special characters (`<`, `&` — e.g. in
-      // a content: string) can never malform the snapshot document. A
-      // literal "]]>" inside CSS would end the section early, so split it.
-      `<style><![CDATA[${css.split("]]>").join("]]]]><![CDATA[>")}]]></style>` +
-      new XMLSerializer().serializeToString(clone) +
-      `<div id="snap-foot"><img src="${aitmIcon}" alt="" /><span>${escapeHtml(t("share.tagline"))}</span></div>` +
-      `</div></foreignObject></svg>`;
-
-    const img = new Image();
-    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
-    await img.decode();
-
-    const canvas = document.createElement("canvas");
-    canvas.width = W2 * S;
-    canvas.height = H2 * S;
-    const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(img, 0, 0);
-
-    const dataUrl = canvas.toDataURL("image/png");
-    const pngBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-    await invoke("copy_share_image", { pngBase64 });
-    status.textContent = t("footer.copied");
-  } catch (err) {
-    status.textContent = t("footer.shareFailed", { err: String(err) });
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Liquid glass lens (prasen.dev original). A rounded-rect signed-distance
@@ -2427,10 +2303,26 @@ function renderWelcome(): string {
     </article>`;
 }
 
+/// Providers that can only be reached with a key pasted into the app. The
+/// API-keys group stays out of the way until one of them is actually in use;
+/// Advanced always carries a button to show it regardless.
+const KEY_PROVIDERS = [
+  "openrouter", "zai", "minimax", "deepseek", "kimi", "moonshot",
+  "elevenlabs", "codebuff", "kilo", "aihubmix", "qwen", "onenewapi", "sub2api",
+];
+
+function syncApiKeysGroup(): void {
+  const group = document.querySelector<HTMLElement>("#api-keys-group");
+  if (!group || !group.hidden) return;
+  const inUse = orderedSnapshots().some((s) => KEY_PROVIDERS.includes(providerFamily(s.id)));
+  if (inUse) group.hidden = false;
+}
+
 function renderAll(): void {
   const el = document.querySelector("#providers")!;
   el.innerHTML =
     renderWelcome() + renderTotalSpend() + orderedSnapshots().map(renderCard).join("");
+  syncApiKeysGroup();
   resetsPopover.onRender();
   if (customizeOpen) renderDrawerBody();
   rebuildTrail();
@@ -4869,6 +4761,13 @@ window.addEventListener("DOMContentLoaded", () => {
     setSettings(!document.body.classList.contains("settings-open"));
   });
   document.querySelector("#settings-close")!.addEventListener("click", () => setSettings(false));
+  document.querySelector("#api-keys-reveal")?.addEventListener("click", () => {
+    const group = document.querySelector<HTMLElement>("#api-keys-group");
+    if (!group) return;
+    group.hidden = false;
+    group.classList.add("open");
+    group.scrollIntoView({ block: "nearest" });
+  });
   document.querySelectorAll<HTMLElement>(".acc-head").forEach((head) => {
     head.addEventListener("click", () => head.parentElement!.classList.toggle("open"));
   });
@@ -4978,11 +4877,6 @@ window.addEventListener("DOMContentLoaded", () => {
       void invoke("open_link", { url: link.dataset.link }).catch((err) => {
         document.querySelector("#status")!.textContent = t("footer.openLinkFailed", { err: String(err) });
       });
-      return;
-    }
-    const shareBtn = target.closest<HTMLElement>("[data-share]");
-    if (shareBtn) {
-      void shareCard(shareBtn.dataset.share!);
       return;
     }
     if (target.closest(".donut-wrap")) {

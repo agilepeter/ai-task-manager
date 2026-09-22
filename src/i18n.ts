@@ -192,7 +192,6 @@ const en: Dict = {
   "card.outdated": "⚠ Outdated",
   "card.showMore": "Show more",
   "card.showLess": "Show less",
-  "card.share": "Copy card as image",
   "card.drag": "Drag to reorder",
   "card.notStarted": "Not started",
   "card.notStartedTip": "Sessions start after you send your first message.",
@@ -375,8 +374,6 @@ const en: Dict = {
   "resets.failed": "Couldn't reset usage. Please try again.",
   "resets.none": "You have no rate limit resets",
   "resets.expiryUnknown": "Expiry times unavailable",
-
-  "share.tagline": "Tracked with AI Task Manager",
   "tray.left": "{label}: {n}% left",
 
   "detail.unlimited": "Unlimited",
@@ -575,7 +572,6 @@ const zh: Dict = {
   "card.outdated": "⚠ 数据过时",
   "card.showMore": "显示更多",
   "card.showLess": "收起",
-  "card.share": "复制卡片为图片",
   "card.drag": "拖动以排序",
   "card.notStarted": "尚未开始",
   "card.notStartedTip": "发送第一条消息后，会话窗口才会开始计时。",
@@ -749,8 +745,6 @@ const zh: Dict = {
   "resets.failed": "重置失败，请重试。",
   "resets.none": "你没有可用的速率限制重置",
   "resets.expiryUnknown": "无法获取过期时间",
-
-  "share.tagline": "用 AI Task Manager 盯紧你的 AI 订阅",
   "tray.left": "{label}：剩余 {n}%",
 
   "detail.unlimited": "无限制",
@@ -892,7 +886,6 @@ const ru: Dict = {
   "card.outdated": "⚠ Данные устарели",
   "card.showMore": "Ещё",
   "card.showLess": "Свернуть",
-  "card.share": "Скопировать карточку как изображение",
   "card.drag": "Перетащите, чтобы изменить порядок",
   "card.notStarted": "Ещё не началось",
   "card.notStartedTip": "Окно начнётся после первого сообщения.",
@@ -1074,8 +1067,6 @@ const ru: Dict = {
   "resets.failed": "Не удалось сбросить лимиты. Попробуйте ещё раз.",
   "resets.none": "У вас нет сбросов лимитов",
   "resets.expiryUnknown": "Время истечения недоступно",
-
-  "share.tagline": "Отслеживается в AI Task Manager",
   "tray.left": "{label}: осталось {n}%",
 
   "detail.unlimited": "Без лимита",

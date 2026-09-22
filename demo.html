@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <meta name="robots" content="noindex" />
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="robots" content="noindex" />
     <title>AI Task Manager</title>
     <script type="module" src="/src/demo/boot.ts" defer></script>
   </head>
@@ -300,11 +300,37 @@
         </div></div>
       </div>
 
+
       <div class="acc-group">
+        <button class="acc-head"><span data-i18n="settings.advanced">Advanced</span> <span class="chev">&#8964;</span></button>
+        <div class="acc-body"><div class="acc-inner">
+          <div class="setting-row">
+            <label class="toggle"><input id="api-feeds" type="checkbox" /> <span>Serve spend and subscriptions on the local API</span></label>
+          </div>
+          <div class="setting-row" id="api-keys-reveal-row">
+            <button class="mini-btn" id="api-keys-reveal">Show API key fields</button>
+            <span class="settings-note">Only needed for tools that cannot sign you in themselves.</span>
+          </div>
+          <p class="settings-note">
+            For your own dashboards. Adds /v1/spend, /v1/spend/areas, /v1/spend/clients and
+            /v1/subscriptions to http://127.0.0.1:6736, reachable from this computer only. Areas and
+            clients are folder and customer names, so this is off until you turn it on.
+          </p>
+          <p class="settings-note" data-i18n="settings.advancedNote">
+            Restores every preference to its default and re-detects installed
+            tools. API keys and your usage history stay. Proxy changes still
+            need a restart.
+          </p>
+          <button id="reset-all-settings" type="button" class="danger-btn" data-i18n="settings.resetAll">
+            Reset all settings
+          </button>
+        </div></div>
+      </div>
+      <div class="acc-group" id="api-keys-group" hidden>
         <button class="acc-head"><span data-i18n="settings.apiKeys">API keys</span> <span class="chev">&#8964;</span></button>
         <div class="acc-body"><div class="acc-inner">
           <p class="settings-note" data-i18n="settings.apiKeysNote">
-            Stored only on this PC (%APPDATA%\Pane). Leave empty and save to remove.
+            Stored only on this computer. Leave empty and save to remove.
           </p>
           <div class="key-row">
             <label for="key-openrouter">OpenRouter</label>
@@ -363,7 +389,7 @@
           </div>
           <h4 class="settings-sub" data-i18n="settings.onenewapi">One/New API sites</h4>
           <p class="settings-note" data-i18n="settings.onenewapiNote">
-            Register OneAPI / NewAPI compatible sites. Keys stay on this PC and are sent only to that site. Empty sites stay here; cards appear after you add a key.
+            Register OneAPI / NewAPI compatible sites. Keys stay on this computer and are sent only to that site. Empty sites stay here; cards appear after you add a key.
           </p>
           <div class="setting-row">
             <label class="toggle" data-i18n-title="settings.onenewapiFamilyTip" title="Turns off every key card at once. Per-key switches in Customize stay.">
@@ -382,7 +408,7 @@
           </form>
           <h4 class="settings-sub" data-i18n="settings.sub2api">Sub2API sites</h4>
           <p class="settings-note" data-i18n="settings.sub2apiNote">
-            Register Sub2API sites. Usage is requested only from /v1/usage. Keys stay on this PC and are sent only to that site. Empty sites stay here; cards appear after you add a key.
+            Register Sub2API sites. Usage is requested only from /v1/usage. Keys stay on this computer and are sent only to that site. Empty sites stay here; cards appear after you add a key.
           </p>
           <div class="setting-row">
             <label class="toggle" data-i18n-title="settings.onenewapiFamilyTip" title="Turns off every key card at once. Per-key switches in Customize stay.">
@@ -401,32 +427,6 @@
           </form>
         </div></div>
       </div>
-
-      <div class="acc-group">
-        <button class="acc-head"><span data-i18n="settings.advanced">Advanced</span> <span class="chev">&#8964;</span></button>
-        <div class="acc-body"><div class="acc-inner">
-          <div class="setting-row">
-            <label class="toggle"><input id="api-feeds" type="checkbox" /> <span>Serve spend and subscriptions on the local API</span></label>
-          </div>
-          <p class="settings-note">
-            For your own dashboards. Adds /v1/spend, /v1/spend/areas, /v1/spend/clients and
-            /v1/subscriptions to http://127.0.0.1:6736, reachable from this computer only. Areas and
-            clients are folder and customer names, so this is off until you turn it on.
-          </p>
-          <p class="settings-note" data-i18n="settings.advancedNote">
-            Restores every preference to its default and re-detects installed
-            tools. API keys and your usage history stay. Proxy changes still
-            need a restart.
-          </p>
-          <button id="reset-all-settings" type="button" class="danger-btn" data-i18n="settings.resetAll">
-            Reset all settings
-          </button>
-        </div></div>
-      </div>
-
-      <button id="changelog-btn" type="button" data-i18n="settings.changelog">
-        What&#8217;s new &#183; Changelog
-      </button>
 
       <p class="settings-note" style="margin-top: 12px" data-i18n="settings.customizeHint">
         Providers, row order, and tray-strip stars live in
