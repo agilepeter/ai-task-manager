@@ -63,7 +63,18 @@ function spend() {
     last30: { cost, tokens: 1_200_000, models: [{ model: id === "codex" ? "gpt-5-codex" : "cursor-auto", cost, tokens: 1_200_000 }] },
     trend: Array(30).fill(40_000), unpriced: 0, unpriced_models: [], daily_cost: Array(30).fill(cost / 30), projects: [],
   });
-  return [...claude, thin("codex", "Codex", 31), thin("cursor", "Cursor", 9.4)];
+  // The real app derives this after the scan; the demo does the same sum so
+  // the fortnight line is never out of step with the day bars behind it.
+  const week = (daily: number[]) => {
+    if (!daily || daily.length < 14) return null;
+    const cut = daily.length - 7;
+    const thisWeek = daily.slice(cut).reduce((a, b) => a + b, 0);
+    const lastWeek = daily.slice(cut - 7, cut).reduce((a, b) => a + b, 0);
+    return { thisWeek, lastWeek, changePercent: lastWeek > 0 ? ((thisWeek - lastWeek) / lastWeek) * 100 : null };
+  };
+  const all = [...claude, thin("codex", "Codex", 31), thin("cursor", "Cursor", 9.4)];
+  for (const card of all) card.week = week(card.daily_cost);
+  return all;
 }
 
 function history(provider: string, hours: number) {
@@ -212,6 +223,28 @@ const RUNNING = [
   { name: "postgres", configured: true, client: "Claude Code", package: "pg-readonly-mcp", instances: 1, rssBytes: 64 * 1048576, elapsedSecs: 3300, pids: [9120] },
 ] as const;
 
+/** Servers the viewer has ended in this demo session. */
+const endedServers = new Set<string>();
+
+const SIGN_INS = [
+  { id: "claude", name: "Claude", verifiedHere: true, hint: "Run `claude` in a terminal and sign in.",
+    probes: [ { kind: "file", location: "~/.claude/.credentials.json", found: true } ] },
+  { id: "codex", name: "Codex", verifiedHere: false, hint: "Run `codex login` in a terminal.",
+    probes: [ { kind: "file", location: "~/.codex/auth.json", found: true } ] },
+  { id: "copilot", name: "GitHub Copilot", verifiedHere: true, hint: "Sign in to Copilot in your editor, or run `gh auth login`.",
+    probes: [ { kind: "file", location: "~/.config/github-copilot/apps.json", found: true },
+              { kind: "file", location: "~/.config/github-copilot/hosts.json", found: false } ] },
+  { id: "cursor", name: "Cursor", verifiedHere: false, hint: "Open Cursor and sign in; the app reads its local database.",
+    probes: [ { kind: "file", location: "~/Library/Application Support/Cursor/User/globalStorage/state.vscdb", found: false } ] },
+] as const;
+
+const EFFORT = [
+  { area: "acme-portal", cost: 692, commits: 148, costPerCommit: 692 / 148 },
+  { area: "northwind-api", cost: 406, commits: 61, costPerCommit: 406 / 61 },
+  { area: "internal-tools", cost: 181, commits: 12, costPerCommit: 181 / 12 },
+  { area: "blog", cost: 14, commits: null, costPerCommit: null },
+] as const;
+
 function inventory() {
   const inv = structuredClone((fixture as any).inventory);
   for (const s of inv.mcpServers) {
@@ -262,7 +295,14 @@ export function handle(cmd: string, args: Args = {}): unknown {
     case "fetch_usage": return snapshots();
     case "fetch_spend": return spend();
     case "get_inventory": return inventory();
-    case "get_running": return structuredClone(RUNNING);
+    case "get_running": return structuredClone(RUNNING.filter((r) => !endedServers.has(r.name)));
+    case "end_task": {
+      if (!RUNNING.some((r) => r.name === args.name)) throw "that server is not running any more";
+      endedServers.add(String(args.name));
+      return 1;
+    }
+    case "get_diagnosis": return structuredClone(SIGN_INS);
+    case "get_effort": return structuredClone(EFFORT);
     case "get_history": return history(args.providerId, args.hours);
     case "get_burn_profile": return burnProfile(args.providerId);
     case "get_forecast": return forecast(args.metrics ?? []);

@@ -63,6 +63,15 @@ file under `src-tauri/src/providers/` and port it by hand.
 - **OS credential stores are read-only.** `read_os_credential` never writes.
   On macOS the Claude provider reads the Keychain and never refreshes the
   token, because a refresh rotates it and would sign Claude Code out.
+- **The app changes this machine in exactly two places, both on an explicit confirmed click.**
+  `procs::end_task` is the second. It stops a running MCP server and its rules are the
+  contract: the caller names a **server**, never a pid; the pids come from a snapshot taken
+  inside that call, so no number crosses the command boundary and a recycled pid cannot be
+  hit; only a process this app already matched as an MCP server is reachable; it asks
+  (SIGTERM, `taskkill` with no `/F`) and **never escalates** — a server that ignores it keeps
+  running and the next refresh says so. Children are signalled before their runner. The UI
+  asks twice and the button only appears on hover. Ending one is safe by design: every client
+  starts these on demand, so the next request spawns a fresh copy.
 - **The app writes to another tool's file in exactly one place: `crates/core/src/pin.rs`**
   (pinning an unpinned MCP package), and only on an explicit click after a before/after
   preview. The rules there are the contract: version from the LOCAL package cache (no
@@ -193,6 +202,22 @@ and computed Opportunities). Usage stays the default view.
   plants a key, a token and a path in a command line and asserts none reach the output.
   Findings: duplicate copies and unconfigured servers score as "tighten", total memory is
   "learn" (a resting cost is not a failing).
+- **Sign-ins** (`crates/core/src/diagnose.rs`): why a card is empty. Lists every place each
+  locally-signed-in provider reads and whether it is there, so "you are not signed in" and
+  "we looked in the wrong place" stop looking the same — on macOS Peter has no
+  `.credentials.json` at all and the Keychain is the real source. **A keychain entry is named
+  and never opened**: `security find-generic-password` can prompt, and a diagnostics panel
+  must never pop a dialog, so its `found` is `None` rather than a guess. Each row carries
+  `verified_here`, false for Codex and Cursor on macOS, and the test asserts that against
+  what "Known gaps" above admits. The table is hand-written beside the providers, so it can
+  drift: keep it in step when a provider's path changes. These paths are UI-only and have no
+  field in the seat report.
+- **Cost per commit** (`crates/core/src/effort.rs`): 30 days of spend in a work area against
+  30 days of commits in that folder (`git log --since -- .`, scoped so an area inside a
+  larger repo counts only its own changes). git is read, never written. Zero commits is a
+  real answer and never a divisor; a folder outside git says so instead of guessing; buckets
+  like `(unsorted)` are never probed because they are not folders. **It is a ratio, not a
+  verdict** — one commit can be a day's refactor — and the copy says so rather than scoring.
 - **Pricing check** (`crates/core/src/drift.rs`): Claude Code writes a `cost-state` line
   carrying, per model, its tokens **and the vendor's own `costUSD`**. That is a price
   reference already on disk, so the app checks its catalogue against it. No network. Samples

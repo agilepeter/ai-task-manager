@@ -290,6 +290,66 @@ pub fn snapshot(servers: &[McpServer]) -> Vec<RunningServer> {
 }
 
 // ---------------------------------------------------------------------------
+// Ending a task
+// ---------------------------------------------------------------------------
+
+/// Stop a running MCP server, by name, after the caller has confirmed it.
+///
+/// This is the second and last thing the app does *to* the machine (the first
+/// is `pin.rs`), so it carries the same kind of contract:
+///
+/// * the caller names a **server**, never a pid, and the pids are taken from a
+///   snapshot read inside this call, so a number cannot be smuggled in and a
+///   recycled pid cannot be hit;
+/// * only a process this module already matched as an MCP server can be named,
+///   so nothing else on the machine is reachable through it;
+/// * it asks politely. SIGTERM on Unix, `taskkill` without `/F` on Windows.
+///   A server that ignores it keeps running, and the next refresh will say so.
+///   Nothing here escalates to SIGKILL;
+/// * the server is meant to come back: every client starts these on demand, so
+///   ending one frees the memory and the next request spawns a fresh copy.
+pub fn end_task(name: &str, servers: &[McpServer]) -> Result<usize, String> {
+    let live = snapshot(servers);
+    let target = live.iter().find(|s| s.name == name).ok_or_else(|| format!("{name} is not running any more"))?;
+    if target.pids.is_empty() {
+        return Err(format!("{name} has no processes to end"));
+    }
+    // Children first: ending a runner first can orphan what it spawned.
+    let mut pids = target.pids.clone();
+    pids.sort_unstable_by(|a, b| b.cmp(a));
+    let mut ended = 0usize;
+    for pid in pids {
+        if signal(pid) {
+            ended += 1;
+        }
+    }
+    if ended == 0 {
+        return Err(format!("could not end {name}: the system refused every process"));
+    }
+    Ok(ended)
+}
+
+/// Ask one process to stop. Never forces.
+#[cfg(not(windows))]
+fn signal(pid: u32) -> bool {
+    std::process::Command::new("/bin/kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn signal(pid: u32) -> bool {
+    // No /F: this is a request, not a kill.
+    std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string()])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
 // Opportunities
 // ---------------------------------------------------------------------------
 
@@ -585,6 +645,13 @@ mod tests {
         let o = big.iter().find(|o| o.id == "mcp-memory").expect("memory finding");
         assert_eq!(o.kind, "learn", "a resting cost is not a failing");
         assert!(o.detail.contains("1500 MB"), "{}", o.detail);
+    }
+
+    #[test]
+    fn a_name_that_is_not_running_is_refused() {
+        // No inventory, so the snapshot cannot contain it whatever is live.
+        let err = end_task("definitely-not-running-xyz", &[]).expect_err("must refuse");
+        assert!(err.contains("not running"), "{err}");
     }
 
     #[test]

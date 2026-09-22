@@ -30,6 +30,20 @@ interface RunningServer {
   pids: number[];
 }
 
+interface Probe {
+  kind: "file" | "keychain" | "folder";
+  location: string;
+  found: boolean | null;
+}
+
+interface Diagnosis {
+  id: string;
+  name: string;
+  probes: Probe[];
+  verifiedHere: boolean;
+  hint: string;
+}
+
 interface PinPlan {
   file: string;
   package: string;
@@ -99,6 +113,8 @@ let inventory: Inventory | null = null;
 let loadError = "";
 let running: RunningServer[] = [];
 let runningError = "";
+let signIns: Diagnosis[] = [];
+let ending = "";
 let scopeFilter = ALL_SCOPES;
 let kindFilter: KindFilter = "all";
 const ALL_APPS = "__all__";
@@ -318,6 +334,9 @@ function renderRunning(): string {
   const rows = running
     .map((r, i) => {
       const copies = r.instances > 1 ? `<span class="inv-chip run-dupe" title="Each client app that has this server configured starts its own copy.">&times;${r.instances}</span>` : "";
+      const end = ending === r.name
+        ? `<span class="run-confirm">End ${esc(r.name)}? <button class="mini-btn run-yes" data-end-yes="${esc(r.name)}">End task</button><button class="mini-btn" data-end-no="1">Cancel</button></span>`
+        : `<button class="mini-btn run-end" data-end="${esc(r.name)}" title="Ask this server to stop. Your client starts a fresh copy the next time it needs one.">End task</button>`;
       const where = r.configured ? esc(r.client ?? "") : `<span class="inv-chip run-unknown" title="Running, but no config file this app can read declares it.">not in a config</span>`;
       return `
       <div class="inv-row run-row">
@@ -329,6 +348,7 @@ function renderRunning(): string {
         </div>
         <div class="run-meter"><i style="--w:${(bar[i] * 100).toFixed(1)}%"></i></div>
         <div class="inv-row-sub">${where} &middot; up ${upLabel(r.elapsedSecs)} &middot; ${r.pids.length} process${r.pids.length === 1 ? "" : "es"}</div>
+        <div class="run-actions">${end}</div>
       </div>`;
     })
     .join("");
@@ -344,6 +364,43 @@ function renderRunning(): string {
       ? `Could not read the process list: ${runningError}`
       : "No MCP servers are running. They start when a client asks for one.",
     { lead },
+  );
+}
+
+/// Why a card is empty. Says where the app looked, so "not signed in" and
+/// "we looked in the wrong place" stop looking the same.
+function renderSignIns(): string {
+  const rows = signIns
+    .map((d) => {
+      const probes = d.probes
+        .map((p) => {
+          const mark = p.found === null ? "not opened" : p.found ? "found" : "missing";
+          const cls = p.found === null ? "sig-unknown" : p.found ? "sig-found" : "sig-missing";
+          return `<div class="sig-probe"><span class="inv-chip ${cls}">${mark}</span><code>${esc(p.location)}</code></div>`;
+        })
+        .join("");
+      const unverified = d.verifiedHere
+        ? ""
+        : `<span class="inv-chip sig-unverified" title="This provider's layout came across from the Windows build and has not been checked on this operating system. A missing sign-in here may mean the app is looking in the wrong place.">unverified on this OS</span>`;
+      const hint = d.probes.length && d.probes.every((p) => p.found === false) ? `<p class="sig-hint">${esc(d.hint)}</p>` : "";
+      return `
+      <div class="inv-row sig-row">
+        <div class="inv-row-main">
+          <span class="inv-name">${esc(d.name)}</span>
+          ${unverified}
+        </div>
+        ${probes}
+        ${hint}
+      </div>`;
+    })
+    .join("");
+  return section(
+    "signins",
+    "Sign-ins",
+    signIns.length,
+    rows,
+    "Could not read the sign-in locations.",
+    { lead: `<p class="inv-note">Where this app looks for each tool's sign-in, and whether it is there. Nothing is opened: a keychain entry is named, never read.</p>` },
   );
 }
 
@@ -442,6 +499,7 @@ function render(): void {
     <p class="inv-note">Read from this machine only. Names and counts, never keys or prompts. ${inv.projects} project${inv.projects === 1 ? "" : "s"} scanned.</p>
     ${renderOpportunities(inv.opportunities)}
     ${renderRunning()}
+    ${renderSignIns()}
     ${renderTools(inv)}
     ${renderMcp(mcp)}
     ${renderDefinitions("agents", "Agents", agents, "No custom agents in this scope.")}
@@ -458,6 +516,11 @@ async function loadRunning(): Promise<void> {
   } catch (err) {
     running = [];
     runningError = String(err);
+  }
+  try {
+    signIns = await invoke<Diagnosis[]>("get_diagnosis");
+  } catch {
+    signIns = [];
   }
 }
 
@@ -519,6 +582,31 @@ export function setupViews(h: InventoryHost): void {
     const link = target.closest<HTMLElement>("[data-link]");
     if (link) {
       void invoke("open_link", { url: link.dataset.link }).catch(() => {});
+      return;
+    }
+    // End task: two steps, always. The first click only asks.
+    const endBtn = target.closest<HTMLElement>("[data-end]");
+    if (endBtn) {
+      ending = endBtn.dataset.end ?? "";
+      render();
+      return;
+    }
+    if (target.closest("[data-end-no]")) {
+      ending = "";
+      render();
+      return;
+    }
+    const endYes = target.closest<HTMLElement>("[data-end-yes]");
+    if (endYes) {
+      const name = endYes.dataset.endYes ?? "";
+      ending = "";
+      runningError = "";
+      void invoke<number>("end_task", { name })
+        .catch((err) => {
+          runningError = String(err);
+        })
+        .then(() => loadRunning())
+        .then(render);
       return;
     }
     const pinBtn = target.closest<HTMLElement>("[data-pin]");

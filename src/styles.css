@@ -4151,3 +4151,89 @@ body.wide #detail {
 .run-lead {
   margin-bottom: 6px;
 }
+
+/* End task: the ask sits under the row, never inline with the numbers, so a
+   stray click on a busy list cannot reach it. */
+.run-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.run-end {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.run-row:hover .run-end,
+.run-end:focus-visible {
+  opacity: 1;
+}
+.run-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--secondary-foreground);
+}
+.run-yes {
+  color: #eab308;
+}
+
+/* Sign-ins: where the app looked for each tool's credentials. */
+.sig-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+.sig-row .inv-row-main {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+}
+.sig-probe {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+/* Paths wrap rather than truncate: this view exists to say exactly where the
+   app looked, and half a path answers nothing. */
+.sig-probe code {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.sig-probe .inv-chip {
+  flex: none;
+  max-width: none;
+}
+.sig-probe {
+  align-items: baseline;
+}
+.sig-hint {
+  font-size: 11.5px;
+  color: var(--secondary-foreground);
+  margin: 2px 0 0;
+}
+.inv-chip.sig-found {
+  color: var(--foreground);
+  background: color-mix(in srgb, #22c55e 26%, transparent);
+}
+.inv-chip.sig-missing,
+.inv-chip.sig-unknown {
+  background: var(--muted);
+}
+.inv-chip.sig-unverified {
+  color: var(--foreground);
+  background: color-mix(in srgb, #eab308 24%, transparent);
+  max-width: none;
+}
+
+/* Week over week: direction carries meaning, so it is not left to the word
+   alone. Up is not "bad" here (it is your own spend), so both use the neutral
+   chart hue rather than a red/green verdict. */
+.dt-week-up,
+.dt-week-down {
+  color: var(--foreground);
+  font-weight: 500;
+}

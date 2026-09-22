@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, audit, clients, coaching, digest, drift, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, procs, providers, spend, trust};
+pub(crate) use aitm_core::{alerts, audit, clients, coaching, diagnose, digest, drift, effort, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, procs, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -192,6 +192,34 @@ async fn get_inventory() -> Result<inventory::Inventory, String> {
     })
     .await
     .map_err(|e| format!("inventory scan: {e}"))
+}
+
+/// Stop one running MCP server. The frontend sends a NAME it was shown and
+/// the user confirmed; `procs::end_task` resolves that to pids from a fresh
+/// snapshot, so no pid crosses this boundary and nothing outside the matched
+/// MCP servers can be reached. It asks (SIGTERM), never forces.
+#[tauri::command]
+async fn end_task(name: String) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let inv = inventory::scan();
+        procs::end_task(&name, &inv.mcp_servers)
+    })
+    .await
+    .map_err(|e| format!("end task: {e}"))?
+}
+
+/// Where each provider looks for its sign-in, and whether it is there.
+#[tauri::command]
+async fn get_diagnosis() -> Result<Vec<diagnose::Diagnosis>, String> {
+    tauri::async_runtime::spawn_blocking(diagnose::all).await.map_err(|e| format!("diagnose: {e}"))
+}
+
+/// 30 days of spend per work area against 30 days of commits in that folder.
+#[tauri::command]
+async fn get_effort() -> Result<Vec<effort::AreaEffort>, String> {
+    tauri::async_runtime::spawn_blocking(|| effort::measure_spend(&spend::collect(None), 30))
+        .await
+        .map_err(|e| format!("effort: {e}"))
 }
 
 /// The live process view. Separate from `get_inventory` because it is cheap
@@ -3528,6 +3556,9 @@ pub fn run() {
             fetch_usage,
             get_inventory,
             get_running,
+            end_task,
+            get_diagnosis,
+            get_effort,
             get_history,
             get_ledger,
             get_audit,

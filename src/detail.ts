@@ -48,6 +48,13 @@ interface SpendWindow {
   models: { model: string; cost: number; tokens: number }[];
 }
 
+/** The last 7 days against the 7 before. Absent until a fortnight exists. */
+interface WeekDelta {
+  thisWeek: number;
+  lastWeek: number;
+  changePercent: number | null;
+}
+
 interface ProviderSpend {
   id: string;
   today: SpendWindow;
@@ -55,6 +62,15 @@ interface ProviderSpend {
   last30: SpendWindow;
   daily_cost?: number[];
   projects?: ProjectSpend[];
+  week?: WeekDelta | null;
+}
+
+/** 30 days of spend in a folder against 30 days of commits there. */
+interface AreaEffort {
+  area: string;
+  cost: number;
+  commits: number | null;
+  costPerCommit: number | null;
 }
 
 interface AreaSpend {
@@ -165,6 +181,7 @@ let burnFor = "";
 let burnMetric = "";
 /** The drill-down in view: sessions behind an area or a day. */
 let drill: { title: string; area?: string; day?: string; sessions: SessionSpend[] | null } | null = null;
+let effort: AreaEffort[] = [];
 /** Wide mode: the window is twice as wide and this page is a fixed right column. */
 let wide = false;
 
@@ -450,6 +467,20 @@ function allAreas(sp: ProviderSpend): AreaSpend[] {
   return (sp.projects ?? []).flatMap((p) => p.areas ?? []);
 }
 
+/// Runs a `git log` per work area, so it is fetched once when the Work area
+/// view is first opened rather than on every render.
+let effortLoaded = false;
+async function loadEffort(): Promise<void> {
+  if (effortLoaded) return;
+  effortLoaded = true;
+  try {
+    effort = await invoke<AreaEffort[]>("get_effort");
+  } catch {
+    effort = [];
+  }
+  render();
+}
+
 async function loadClients(): Promise<void> {
   const sp = openId ? source?.spend(openId) : undefined;
   if (!sp) return;
@@ -632,6 +663,31 @@ function dayBars(daily: number[]): string {
     <div class="dt-days-axis"><span>30 days ago</span><span>${money(total)} total · peak ${money(max)}</span><span>today</span></div>`;
 }
 
+/// Dollars per commit for the folders that are in git. A ratio, not a verdict:
+/// one commit can be a day's refactor and ten can be typo fixes, so the copy
+/// gives the number and the caveat and draws no conclusion.
+function effortCaption(): string {
+  const rows = effort.filter((e) => e.costPerCommit !== null).slice(0, 4);
+  if (!rows.length) return "";
+  const parts = rows.map((e) => `${esc(e.area)} ${money(e.costPerCommit!)} (${e.commits} commit${e.commits === 1 ? "" : "s"})`);
+  return `<p class="dt-caption">Per commit, last 30 days: ${parts.join(" &middot; ")}. Folders outside git are left out. A commit is not a unit of work, so read this as a ratio, not a score.</p>`;
+}
+
+/// "up 22% on last week". Absent when there is no fortnight to compare, and
+/// wordless when last week was zero: a rise from nothing has no percentage.
+function weekLine(week: WeekDelta | null | undefined): string {
+  if (!week) return "";
+  if (week.changePercent === null) {
+    return week.thisWeek > 0
+      ? `<p class="dt-caption">${money(week.thisWeek)} in the last 7 days; nothing the 7 before.</p>`
+      : "";
+  }
+  const pct = week.changePercent;
+  const dir = pct >= 0 ? "up" : "down";
+  const cls = pct >= 0 ? "dt-week-up" : "dt-week-down";
+  return `<p class="dt-caption">${money(week.thisWeek)} in the last 7 days, <span class="${cls}">${dir} ${Math.abs(pct).toFixed(0)}%</span> on the ${money(week.lastWeek)} before.</p>`;
+}
+
 function spendSection(sp: ProviderSpend | undefined): string {
   if (!sp || (sp.last30.cost < 0.005 && sp.last30.tokens <= 0)) {
     return `<p class="dt-empty">No local spend logs for this tool. Spend is read from the logs a command-line tool writes on this computer.</p>`;
@@ -652,6 +708,7 @@ function spendSection(sp: ProviderSpend | undefined): string {
       ${groupKey === "area" ? `<label>Detail ${select("dt-depth", [["1", "Top folders"], ["2", "Two levels"]], areaDepth)}</label>` : ""}
     </div>`;
 
+  const week = weekLine(sp.week);
   let body: string;
   if (groupKey === "day") {
     body = dayBars(sp.daily_cost ?? []);
@@ -686,6 +743,7 @@ function spendSection(sp: ProviderSpend | undefined): string {
       });
     }
     body = top.length ? bars(top) : `<p class="dt-empty">Nothing in this period.</p>`;
+    body += effortCaption();
     body += `<p class="dt-caption">A work area is the top-level folder a session was working in: where its shell was, or the files it touched. "(unsorted)" is spend before a session had gone anywhere.</p>`;
   } else if (groupKey === "project") {
     const rows = (sp.projects ?? [])
@@ -710,7 +768,7 @@ function spendSection(sp: ProviderSpend | undefined): string {
     groupKey === "client" || !lastTable
       ? ""
       : `<div class="dt-rule-actions"><span class="spacer"></span><button class="inv-learn" id="dt-export-table" title="Save what is shown here as a CSV in your Downloads folder">Export CSV</button></div>${clientNote ? `<p class="dt-caption">${esc(clientNote)}</p>` : ""}`;
-  return `${controls}${headline}${body}${exportBtn}
+  return `${controls}${headline}${week}${body}${exportBtn}
     <p class="dt-caption">From local logs, priced at API rates. On a flat-rate plan this is equivalent value, not a charge.</p>`;
 }
 
@@ -1004,8 +1062,10 @@ export function setupDetail(src: DetailSource): void {
     else if (t.id === "dt-depth") areaDepth = t.value as "1" | "2";
     else if (t.id === "dt-metric") metricFilter = t.value;
     else if (t.id === "dt-window") windowKey = t.value as WindowKey;
-    else if (t.id === "dt-group") groupKey = t.value as GroupKey;
-    else return;
+    else if (t.id === "dt-group") {
+      groupKey = t.value as GroupKey;
+      if (groupKey === "area") void loadEffort();
+    } else return;
     render();
   });
   document.querySelector("#detail-body")?.addEventListener("click", (e) => {
