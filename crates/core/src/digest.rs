@@ -130,6 +130,7 @@ mod tests {
             v
         };
         ProviderSpend {
+            week: None,
             id: "claude".into(),
             name: "Claude".into(),
             today: Window::default(),
@@ -147,6 +148,7 @@ mod tests {
                 areas: areas
                     .iter()
                     .map(|(a, tail)| AreaSpend {
+                        week: None,
                         area: a.to_string(),
                         today: Window::default(),
                         yesterday: Window::default(),

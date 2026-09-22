@@ -7,6 +7,7 @@ pub mod audit;
 pub mod clients;
 pub mod coaching;
 pub mod digest;
+pub mod drift;
 pub mod forecast;
 pub mod history;
 pub mod httpapi;

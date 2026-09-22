@@ -193,6 +193,19 @@ and computed Opportunities). Usage stays the default view.
   plants a key, a token and a path in a command line and asserts none reach the output.
   Findings: duplicate copies and unconfigured servers score as "tighten", total memory is
   "learn" (a resting cost is not a failing).
+- **Pricing check** (`crates/core/src/drift.rs`): Claude Code writes a `cost-state` line
+  carrying, per model, its tokens **and the vendor's own `costUSD`**. That is a price
+  reference already on disk, so the app checks its catalogue against it. No network. Samples
+  that used web search are skipped (per-search billing is not a token rate), and a line whose
+  own `hasUnknownModelCost` is true is skipped (the vendor's total was partial). A gap is only
+  reported at 8%+, over $0.50, across 2+ samples. **When the gap equals the cache-write tokens
+  times (1-hour rate minus 5-minute rate) to within 1%, it says so precisely** instead of
+  hedging: verified on real logs 2026-09-21, where haiku matched to +0.0% and Fable was 22.7%
+  low, every sample explained exactly by 1-hour cache writes. Spend figures are a floor.
+- **Week over week** (`spend::week_over_week`): the last 7 days against the 7 before, from
+  `daily_cost`. Needs a full fortnight or it returns None, and `change_percent` is absent when
+  last week was zero, because "up from nothing" is not a percentage. Derived after the scan,
+  so it never enters the persisted cache.
 - **Inventory covers every MCP-capable app it knows**, not just Claude Code: Claude Desktop,
   VS Code (`servers` key), Cursor, Windsurf, Gemini CLI and Codex (TOML), all through
   `mcp_from_map_for`, so the never-copy-a-value rule and its leak test cover them. AI tools

@@ -36,6 +36,31 @@ pub struct Window {
     pub models: Vec<ModelSpend>,
 }
 
+/// Two seven-day windows side by side, so a number can say which way it is
+/// going. `change_percent` is absent when last week was zero: "up from
+/// nothing" is not a percentage, and printing one would invent a trend.
+#[derive(Serialize, serde::Deserialize, Clone, Default, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct WeekDelta {
+    pub this_week: f64,
+    pub last_week: f64,
+    pub change_percent: Option<f64>,
+}
+
+/// The last 7 days against the 7 before them, from a `daily_cost` series that
+/// ends today. Needs a full fortnight of readings; with less, there is nothing
+/// honest to compare and the answer is None.
+pub fn week_over_week(daily_cost: &[f64]) -> Option<WeekDelta> {
+    if daily_cost.len() < 14 {
+        return None;
+    }
+    let n = daily_cost.len();
+    let this_week: f64 = daily_cost[n - 7..].iter().sum::<f64>() + 0.0;
+    let last_week: f64 = daily_cost[n - 14..n - 7].iter().sum::<f64>() + 0.0;
+    let change_percent = (last_week > 0.0).then(|| (this_week - last_week) / last_week * 100.0);
+    Some(WeekDelta { this_week, last_week, change_percent })
+}
+
 #[derive(Serialize, Clone)]
 pub struct ProviderSpend {
     pub id: String,
@@ -57,6 +82,9 @@ pub struct ProviderSpend {
     /// Claude Code only: the same windows split by project folder, largest
     /// 30-day cost first. Empty for every other provider.
     pub projects: Vec<ProjectSpend>,
+    /// Last 7 days against the 7 before. Derived from `daily_cost` after the
+    /// scan, so it is never part of the persisted cache.
+    pub week: Option<WeekDelta>,
 }
 
 /// One project's share of a provider's spend.
@@ -83,6 +111,10 @@ pub struct AreaSpend {
     /// Dollars per day, oldest first with today last, like `daily_cost` on a
     /// card. Lets a calendar month be cut out of the rolling window.
     pub daily_cost: Vec<f64>,
+    /// Last 7 days against the 7 before, like the card's. Recomputed after
+    /// every scan, so a cache written before this field existed still loads.
+    #[serde(default)]
+    pub week: Option<WeekDelta>,
 }
 
 impl ProviderSpend {
@@ -567,6 +599,7 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
     unpriced_models.truncate(5);
     let days = data.days;
     let mut sp = ProviderSpend {
+        week: None,
         id: id.into(),
         name: name.into(),
         today: Window::default(),
@@ -1968,6 +2001,7 @@ fn project_spends(per_project: Vec<(String, FileData)>, today: i32) -> Vec<Proje
                     yesterday,
                     last30,
                     daily_cost,
+                    week: None,
                 })
                 .collect();
             areas.sort_by(|a, b| b.last30.cost.total_cmp(&a.last30.cost).then_with(|| a.area.cmp(&b.area)));
@@ -3402,7 +3436,72 @@ pub fn collect(cursor_csv: Option<String>) -> Vec<ProviderSpend> {
         pricing::note_unpriced();
     }
     save_persisted_cache();
+    // Derived, not scanned: the fortnight comparison every view shows.
+    for sp in list.iter_mut() {
+        sp.week = week_over_week(&sp.daily_cost);
+        for proj in sp.projects.iter_mut() {
+            for area in proj.areas.iter_mut() {
+                area.week = week_over_week(&area.daily_cost);
+            }
+        }
+    }
     list.into_iter().filter(ProviderSpend::has_data).collect()
+}
+
+#[cfg(test)]
+mod week_tests {
+    use super::*;
+
+    #[test]
+    fn needs_a_full_fortnight() {
+        assert_eq!(week_over_week(&[1.0; 13]), None, "13 readings cannot make two weeks");
+        assert!(week_over_week(&[1.0; 14]).is_some());
+    }
+
+    #[test]
+    fn compares_the_last_seven_with_the_seven_before() {
+        let mut days = vec![2.0; 7];
+        days.extend([3.0; 7]);
+        let d = week_over_week(&days).expect("a fortnight");
+        assert_eq!(d.last_week, 14.0);
+        assert_eq!(d.this_week, 21.0);
+        assert_eq!(d.change_percent, Some(50.0));
+    }
+
+    #[test]
+    fn only_the_last_fortnight_counts() {
+        // A 30-day series: everything before the last 14 days is ignored.
+        let mut days = vec![99.0; 16];
+        days.extend([1.0; 7]);
+        days.extend([2.0; 7]);
+        let d = week_over_week(&days).expect("a fortnight");
+        assert_eq!(d.last_week, 7.0);
+        assert_eq!(d.this_week, 14.0);
+    }
+
+    #[test]
+    fn a_week_from_nothing_has_no_percentage() {
+        let mut days = vec![0.0; 7];
+        days.extend([5.0; 7]);
+        let d = week_over_week(&days).expect("a fortnight");
+        assert_eq!(d.change_percent, None, "up from zero is not a percentage");
+        assert_eq!(d.this_week, 35.0);
+    }
+
+    #[test]
+    fn a_quiet_fortnight_is_zero_not_absent() {
+        let d = week_over_week(&[0.0; 14]).expect("a fortnight");
+        assert_eq!(d.this_week, 0.0);
+        assert!(d.this_week.is_sign_positive(), "never -0.0 in JSON");
+        assert_eq!(d.change_percent, None);
+    }
+
+    #[test]
+    fn a_drop_is_negative() {
+        let mut days = vec![10.0; 7];
+        days.extend([5.0; 7]);
+        assert_eq!(week_over_week(&days).unwrap().change_percent, Some(-50.0));
+    }
 }
 
 #[cfg(test)]

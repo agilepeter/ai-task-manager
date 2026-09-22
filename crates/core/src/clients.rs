@@ -319,7 +319,7 @@ mod tests {
         let mut daily = vec![0.0; TREND_DAYS];
         let start = TREND_DAYS - daily_tail.len();
         daily[start..].copy_from_slice(daily_tail);
-        AreaSpend { area: name.into(), today: w(today), yesterday: w(0.0), last30: w(last30), daily_cost: daily }
+        AreaSpend { area: name.into(), today: w(today), yesterday: w(0.0), last30: w(last30), daily_cost: daily, week: None }
     }
 
     fn rule(client: &str, patterns: &[&str]) -> ClientRule {

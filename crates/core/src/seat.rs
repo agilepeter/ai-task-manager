@@ -263,6 +263,7 @@ mod tests {
             ..Inventory::default()
         };
         let spend = vec![ProviderSpend {
+            week: None,
             id: "claude@ab12cd34".into(),
             name: "Claude · dana@acme-portal".into(),
             today: w(3.0),
@@ -278,6 +279,7 @@ mod tests {
                 yesterday: w(0.0),
                 last30: w(120.0),
                 areas: vec![AreaSpend {
+                    week: None,
                     area: "site/client-a".into(),
                     today: w(3.0),
                     yesterday: w(0.0),

@@ -174,6 +174,7 @@ mod tests {
         last30.models =
             models.iter().map(|(m, c)| ModelSpend { model: m.to_string(), cost: *c, tokens: c * 1000.0 }).collect();
         ProviderSpend {
+            week: None,
             id: "claude".into(),
             name: "Claude".into(),
             today: w(0.0),
@@ -191,6 +192,7 @@ mod tests {
                 areas: areas
                     .iter()
                     .map(|(a, c)| AreaSpend {
+                        week: None,
                         area: a.to_string(),
                         today: w(0.0),
                         yesterday: w(0.0),

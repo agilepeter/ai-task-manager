@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, audit, clients, coaching, digest, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, procs, providers, spend, trust};
+pub(crate) use aitm_core::{alerts, audit, clients, coaching, digest, drift, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, procs, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -184,6 +184,8 @@ async fn get_inventory() -> Result<inventory::Inventory, String> {
         inv.opportunities.extend(coaching::opportunities(claude, &spend::claude_sessions(None, None, 500)));
         // What is running right now, matched against what is configured.
         inv.opportunities.extend(procs::opportunities(&procs::snapshot(&inv.mcp_servers)));
+        // Our rate card against the vendor's own recorded cost.
+        inv.opportunities.extend(drift::opportunities(&drift::scan()));
         // Gaps first, then things to learn, each in the order found.
         inv.opportunities.sort_by_key(|o| o.kind != "tighten");
         inv
