@@ -3326,6 +3326,31 @@ body.wide #drawer .panel-head {
   right: auto;
   width: 380px;
 }
+/* The rail may slide over the cards, never over an open panel: while the
+   cursor holds it out, the panel and its pinned header step right by the
+   rail's width, so Done and the first column stay readable and clickable.
+   In wide mode the narrow panels shrink by the same amount so they never
+   cross into the detail column, which the rail does not reach. */
+body:has(#side-zone:hover) :is(#settings, #drawer, #detail, #audit, #about),
+body:has(.sidebar:focus-within) :is(#settings, #drawer, #detail, #audit, #about) {
+  left: 42px;
+}
+body:has(#side-zone:hover) :is(#settings, #drawer, #detail, #audit, #about) .panel-head.glass-bar,
+body:has(.sidebar:focus-within) :is(#settings, #drawer, #detail, #audit, #about) .panel-head.glass-bar {
+  left: 42px;
+}
+body.wide:has(#side-zone:hover) #detail,
+body.wide:has(.sidebar:focus-within) #detail,
+body.wide:has(#side-zone:hover) #detail .panel-head,
+body.wide:has(.sidebar:focus-within) #detail .panel-head {
+  left: 380px;
+}
+body.wide:has(#side-zone:hover) :is(#settings, #drawer, #audit, #about),
+body.wide:has(.sidebar:focus-within) :is(#settings, #drawer, #audit, #about),
+body.wide:has(#side-zone:hover) :is(#settings, #drawer, #audit, #about) .panel-head,
+body.wide:has(.sidebar:focus-within) :is(#settings, #drawer, #audit, #about) .panel-head {
+  width: 338px;
+}
 /* Back on the left, Wide on the right: the title needs no optical offset. */
 #detail .panel-head.glass-bar .panel-title {
   margin-right: 0;
@@ -4062,4 +4087,18 @@ body.reduce-anim .ab-eyes,
 body.reduce-anim .ab-hop .ab-bot-body,
 body.reduce-anim .ab-dance .ab-bot-body {
   animation: none;
+}
+
+/* Last on purpose: the panels above each set their own transform transition,
+   and the rail push (left / width) must ride along with it everywhere. */
+#settings, #drawer, #detail, #audit, #about, .panel-head.glass-bar {
+  transition-property: transform, left, width;
+  transition-duration: 0.28s, 0.24s, 0.24s;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+body.reduce-anim :is(#settings, #drawer, #detail, #audit, #about, .panel-head.glass-bar) {
+  transition: none;
+}
+body.wide #detail {
+  transition: none;
 }

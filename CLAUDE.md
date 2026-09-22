@@ -175,6 +175,10 @@ and computed Opportunities). Usage stays the default view.
   must stay pure black on transparent. The app runs as an Accessory (no Dock icon). Windows
   keeps upstream's drawn-number icon. Icons are original vectors in the HalperBot family
   (silver helmet, dark screen, cyan eyes, antenna): sources in `design/`, never generated art.
+- **The rail pushes, never covers.** The auto-hiding sidebar slides out over the cards, but
+  over an open panel (Settings, Customize, Detail, Audit, About) the panel and its pinned
+  header step right by the rail's width (`body:has(#side-zone:hover)` rules). In wide mode
+  the narrow panels shrink by the same amount so they never cross the detail column.
 - **Popover anchoring is per platform** (`popover_origin`): above the click for a bottom
   taskbar, below it for the macOS menu bar.
 - **Inventory covers every MCP-capable app it knows**, not just Claude Code: Claude Desktop,
