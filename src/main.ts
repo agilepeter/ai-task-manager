@@ -48,9 +48,6 @@ import openrouterIcon from "./assets/providers/openrouter.svg?raw";
 import aitmMark from "./assets/aitm-mark.svg?raw";
 import aitmIcon from "./assets/aitm-icon.png?inline";
 import zaiIcon from "./assets/providers/zai.svg?raw";
-// The repo's changelog ships inside the bundle, so the "What's new" dialog
-// and the Settings changelog viewer read the exact file releases maintain.
-import changelogRaw from "../CHANGELOG.md?raw";
 
 const PROVIDER_ICONS: Record<string, string> = {
   antigravity: antigravityIcon,
@@ -238,12 +235,7 @@ interface Config {
   proxy: { enabled: boolean; url: string };
   showTotalSpend: boolean;
   welcomeDismissed: boolean;
-  lastSeenVersion: string;
   firstSeenMs: number;
-  starPromptDone: boolean;
-  starPromptDay: string;
-  starPromptDayCount: number;
-  starPromptLastMs: number;
   reduceAnimations: boolean;
   locale: LocalePref;
 }
@@ -281,12 +273,7 @@ const FRONTEND_CONFIG_KEYS = [
   "proxy",
   "showTotalSpend",
   "welcomeDismissed",
-  "lastSeenVersion",
   "firstSeenMs",
-  "starPromptDone",
-  "starPromptDay",
-  "starPromptDayCount",
-  "starPromptLastMs",
   "reduceAnimations",
   "locale",
 ] as const satisfies readonly (keyof Config)[];
@@ -479,12 +466,7 @@ let config: Config = {
   proxy: { enabled: false, url: "" },
   showTotalSpend: true,
   welcomeDismissed: false,
-  lastSeenVersion: "",
   firstSeenMs: 0,
-  starPromptDone: false,
-  starPromptDay: "",
-  starPromptDayCount: 0,
-  starPromptLastMs: 0,
   reduceAnimations: false,
   locale: "auto",
 };
@@ -1928,261 +1910,6 @@ function appConfirm(opts: {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Changelog — "What's new" after an update + the Settings viewer
-// ---------------------------------------------------------------------------
-
-interface ChangelogSection {
-  version: string;
-  date: string;
-  body: string;
-}
-
-/// CHANGELOG.md split into per-version sections, newest first. The
-/// "Unreleased" section is skipped — a shipped build's own notes carry its
-/// version header (release retitles Unreleased), so users only ever see
-/// released entries.
-function parseChangelog(): ChangelogSection[] {
-  const sections: ChangelogSection[] = [];
-  for (const block of changelogRaw.split(/^## /m).slice(1)) {
-    const nl = block.indexOf("\n");
-    const header = block.slice(0, nl).trim();
-    if (/^unreleased$/i.test(header)) continue;
-    const m = header.match(/^([\d.]+)\s*—\s*(.+)$/);
-    sections.push({
-      version: m ? m[1] : header,
-      date: m ? m[2] : "",
-      body: block.slice(nl + 1).trim(),
-    });
-  }
-  return sections;
-}
-
-/// Markdown-lite for changelog bodies: ### subheads, - bullets (with hanging
-/// continuation lines), plain paragraphs, **bold**, `code`. Bullets and
-/// paragraphs accumulate as raw markdown and are transformed only on flush,
-/// so a bold/code span wrapped across the file's ~70-column lines still
-/// matches. Input is escaped before any markup is applied, so the changelog
-/// can never inject HTML.
-function renderChangelogBody(md: string): string {
-  const inline = (s: string) =>
-    escapeHtml(s)
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>");
-  let html = "";
-  let items: string[] = [];
-  let para = "";
-  const flushItems = () => {
-    if (items.length) html += `<ul>${items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`;
-    items = [];
-  };
-  const flushPara = () => {
-    if (para) html += `<p>${inline(para)}</p>`;
-    para = "";
-  };
-  for (const line of md.split("\n")) {
-    if (line.startsWith("### ")) {
-      flushItems();
-      flushPara();
-      html += `<h5>${escapeHtml(line.slice(4).trim())}</h5>`;
-    } else if (line.startsWith("- ")) {
-      flushPara();
-      items.push(line.slice(2));
-    } else if (/^\s+\S/.test(line) && items.length) {
-      items[items.length - 1] += " " + line.trim();
-    } else if (line.trim()) {
-      flushItems();
-      para += (para ? " " : "") + line.trim();
-    } else {
-      flushPara();
-    }
-  }
-  flushItems();
-  flushPara();
-  return html;
-}
-
-/// Same lifecycle as dismissConfirm: the popover reopen routine clears a
-/// stale dialog left behind by hide-on-focus-loss.
-let dismissWhatsNew: (() => void) | null = null;
-
-/// Card-styled scrollable dialog listing changelog sections. Esc, backdrop
-/// clicks (anywhere outside the card), and the Got it button all dismiss.
-function showChangelogDialog(title: string, sections: ChangelogSection[]): void {
-  dismissWhatsNew?.();
-  const overlay = document.createElement("div");
-  overlay.id = "whatsnew-overlay";
-  const list = sections
-    .map(
-      (s) =>
-        `<section><h4>v${escapeHtml(s.version)}${
-          s.date ? `<span>${escapeHtml(s.date)}</span>` : ""
-        }</h4>${renderChangelogBody(s.body)}</section>`,
-    )
-    .join("");
-  overlay.innerHTML = `
-    <div id="whatsnew-box" role="dialog" aria-modal="true">
-      <h3>${escapeHtml(title)}</h3>
-      <div id="whatsnew-body">${list}</div>
-      <div id="whatsnew-actions">
-        <button id="whatsnew-ok" type="button">${escapeHtml(t("dialog.gotIt"))}</button>
-      </div>
-    </div>`;
-  const done = () => {
-    dismissWhatsNew = null;
-    document.removeEventListener("keydown", onKey, true);
-    overlay.remove();
-  };
-  dismissWhatsNew = done;
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      done();
-    }
-  };
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) done();
-  });
-  overlay.querySelector("#whatsnew-ok")!.addEventListener("click", done);
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
-}
-
-/// The sections a just-updated install hasn't seen yet (newest first,
-/// capped), or null when there's nothing to announce. Marks the current
-/// version as seen immediately so the dialog can only ever appear once per
-/// version, even if it's dismissed by closing the popover.
-let appVersion = "";
-let pendingWhatsNew: ChangelogSection[] | null = null;
-
-function computeWhatsNew(version: string): ChangelogSection[] | null {
-  const last = config.lastSeenVersion;
-  if (last === version) return null;
-  void patchConfig({ lastSeenVersion: version });
-  const all = parseChangelog();
-  if (!last) {
-    // First run with this feature. An install that already dismissed the
-    // welcome card is an *update* — show the new version's notes. A true
-    // fresh install gets the welcome card instead, not two popups. Guard
-    // the empty case (e.g. a build whose notes are still Unreleased) —
-    // an empty array is truthy and would present a blank dialog.
-    const own = config.welcomeDismissed ? all.filter((s) => s.version === version) : [];
-    return own.length ? own : null;
-  }
-  const out: ChangelogSection[] = [];
-  for (const s of all) {
-    if (s.version === last || out.length >= 5) break;
-    out.push(s);
-  }
-  return out.length ? out : null;
-}
-
-// ---------------------------------------------------------------------------
-// Star prompt — asks for a GitHub star, at most twice a day
-// ---------------------------------------------------------------------------
-
-/// Same lifecycle as dismissConfirm/dismissWhatsNew: the popover reopen
-/// routine clears a stale prompt left behind by hide-on-focus-loss.
-let dismissStarPrompt: (() => void) | null = null;
-
-/// Local YYYY-MM-DD for the "twice a day" cap — day boundaries follow the
-/// user's clock, not UTC.
-function starPromptToday(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-/// A roll that won but hasn't presented yet. An interrupted winning roll
-/// records nothing — hiding before the timer fires just wastes the roll.
-let starPromptTimer: number | undefined;
-
-/// Eligibility + the random roll: the install must be a few days old, at
-/// most twice a day, never within four hours of the last show. Winning
-/// only arms the timer — the counters commit in presentStarPrompt, when
-/// the dialog is actually appended (a prompt inserted into a hidden
-/// webview would burn the budget unseen).
-function maybeShowStarPrompt(): void {
-  const now = Date.now();
-  const today = starPromptToday();
-  if (
-    config.starPromptDone ||
-    !config.firstSeenMs ||
-    now - config.firstSeenMs < 3 * 86_400_000 ||
-    now - config.starPromptLastMs < 4 * 3_600_000 ||
-    (config.starPromptDay === today && config.starPromptDayCount >= 2)
-  ) {
-    return;
-  }
-  if (Math.random() >= 0.25) return;
-  if (starPromptTimer !== undefined) return; // a roll is already pending
-  // After the reveal animation; the guards are re-checked inside.
-  starPromptTimer = window.setTimeout(() => {
-    starPromptTimer = undefined;
-    presentStarPrompt();
-  }, 450);
-}
-
-/// Small glass dialog: Star on GitHub retires it forever (and opens the
-/// repo), "Don't ask again" retires it, Maybe later / Esc / backdrop just
-/// close.
-function presentStarPrompt(): void {
-  // A dialog (or a second prompt) may have presented while the reveal
-  // played — never stack. And a hidden window can't see it at all.
-  if (document.hidden || dismissConfirm || dismissWhatsNew || dismissStarPrompt) return;
-  const today = starPromptToday();
-  void patchConfig({
-    starPromptLastMs: Date.now(),
-    starPromptDay: today,
-    starPromptDayCount:
-      config.starPromptDay === today ? config.starPromptDayCount + 1 : 1,
-  }).catch(() => {});
-  const overlay = document.createElement("div");
-  overlay.id = "star-overlay";
-  overlay.innerHTML = `
-    <div id="star-box" role="dialog" aria-modal="true">
-      <div class="star-glyph">★</div>
-      <h3>${escapeHtml(t("star.title"))}</h3>
-      <p>${escapeHtml(t("star.body"))}</p>
-      <div id="star-actions">
-        <button id="star-go" type="button" class="primary">${escapeHtml(t("star.go"))}</button>
-        <button id="star-later" type="button">${escapeHtml(t("star.later"))}</button>
-      </div>
-      <button id="star-never" type="button" class="linkish">${escapeHtml(t("star.never"))}</button>
-    </div>`;
-  const done = () => {
-    dismissStarPrompt = null;
-    document.removeEventListener("keydown", onKey, true);
-    overlay.remove();
-  };
-  dismissStarPrompt = done;
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      done();
-    }
-  };
-  const retire = () => {
-    void patchConfig({ starPromptDone: true }).catch(() => {});
-    done();
-  };
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) done();
-  });
-  overlay.querySelector("#star-later")!.addEventListener("click", done);
-  overlay.querySelector("#star-never")!.addEventListener("click", retire);
-  overlay.querySelector("#star-go")!.addEventListener("click", () => {
-    void patchConfig({ starPromptDone: true }).catch(() => {});
-    void invoke("open_link", { url: "https://github.com/ItsJazii/pane" }).catch((err) => {
-      document.querySelector("#status")!.textContent = t("footer.openLinkFailed", { err: String(err) });
-    });
-    done();
-  });
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(overlay);
-}
 
 async function shareCard(id: string): Promise<void> {
   const status = document.querySelector("#status")!;
@@ -2507,30 +2234,6 @@ function undoLayout(): void {
   renderAll();
   requestTraySync();
   document.querySelector("#status")!.textContent = "Layout change undone";
-}
-
-// ---------------------------------------------------------------------------
-// Party mode 🎉 — ↑↑↓↓←→←→BA. Purely cosmetic, never persisted.
-// ---------------------------------------------------------------------------
-
-const KONAMI = [
-  "ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown",
-  "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a",
-];
-let konamiAt = 0;
-
-function toggleParty(): void {
-  const on = document.body.classList.toggle("party");
-  document.querySelector("#status")!.textContent = on ? "🎉 Party mode!" : "Party's over.";
-}
-
-function konamiListen(e: KeyboardEvent): void {
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  konamiAt = key === KONAMI[konamiAt] ? konamiAt + 1 : key === KONAMI[0] ? 1 : 0;
-  if (konamiAt === KONAMI.length) {
-    konamiAt = 0;
-    toggleParty();
-  }
 }
 
 const systemLight = window.matchMedia("(prefers-color-scheme: light)");
@@ -4988,7 +4691,7 @@ async function initSettings(): Promise<void> {
 }
 
 /// Restore every preference to the same defaults a fresh install gets.
-/// API keys, lastSeenVersion, and welcomeDismissed stay (keys are not
+/// API keys and welcomeDismissed stay (keys are not
 /// "settings"; What's-new shouldn't pop again).
 async function resetAllSettings(): Promise<void> {
   const ok = await appConfirm({
@@ -5098,19 +4801,6 @@ function syncSettingsControls(): void {
 window.addEventListener("DOMContentLoaded", () => {
   const appLogo = document.querySelector<HTMLElement>("#app-logo")!;
   appLogo.innerHTML = aitmMark;
-  // Party mode, the easy way: triple-click the logo. (The Konami code
-  // still works, for the culture.)
-  let logoClicks = 0;
-  let logoClickReset: number | undefined;
-  appLogo.addEventListener("click", () => {
-    logoClicks += 1;
-    window.clearTimeout(logoClickReset);
-    logoClickReset = window.setTimeout(() => (logoClicks = 0), 1200);
-    if (logoClicks >= 3) {
-      logoClicks = 0;
-      toggleParty();
-    }
-  });
   document.querySelector("#theme-btn")!.addEventListener("click", toggleTheme);
   setupTrailFisheye();
   setupTooltips();
@@ -5142,7 +4832,6 @@ window.addEventListener("DOMContentLoaded", () => {
   // config arrives) owns it — a fixed timer raced the config load and
   // built the maps even for users who turned glass off.
   window.addEventListener("keydown", (e) => {
-    konamiListen(e);
     if (e.ctrlKey && e.key.toLowerCase() === "z" && customizeOpen) {
       e.preventDefault();
       undoLayout();
@@ -5164,7 +4853,6 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
   void getVersion().then((v) => {
-    appVersion = v;
     buildText = `v${v} · build ${__BUILD_STAMP__}`;
     renderBuildInfo();
     void checkForUpdate();
@@ -5181,10 +4869,6 @@ window.addEventListener("DOMContentLoaded", () => {
     setSettings(!document.body.classList.contains("settings-open"));
   });
   document.querySelector("#settings-close")!.addEventListener("click", () => setSettings(false));
-  document.querySelector("#changelog-btn")!.addEventListener("click", () => {
-    setSettings(false);
-    showChangelogDialog(t("dialog.changelog"), parseChangelog());
-  });
   document.querySelectorAll<HTMLElement>(".acc-head").forEach((head) => {
     head.addEventListener("click", () => head.parentElement!.classList.toggle("open"));
   });
@@ -5410,10 +5094,6 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // A pending star roll must not present into a hidden window.
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && starPromptTimer !== undefined) {
-      window.clearTimeout(starPromptTimer);
-      starPromptTimer = undefined;
-    }
   });
 
   void listen("popover-shown", () => {
@@ -5424,28 +5104,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setDrawer(false);
     setSettings(false);
     dismissConfirm?.();
-    dismissWhatsNew?.();
-    dismissStarPrompt?.();
-    if (starPromptTimer !== undefined) {
-      window.clearTimeout(starPromptTimer);
-      starPromptTimer = undefined;
-    }
     resetsPopover.dismiss();
-    // A fresh update's notes present on the first open after launch.
-    if (pendingWhatsNew) {
-      showChangelogDialog(t("dialog.whatsNew", { version: appVersion }), pendingWhatsNew);
-      pendingWhatsNew = null;
-    }
-    // The star prompt only rolls when nothing else is presenting and the
-    // welcome card is gone.
-    if (
-      config.welcomeDismissed &&
-      !pendingWhatsNew &&
-      !dismissWhatsNew &&
-      !dismissConfirm
-    ) {
-      maybeShowStarPrompt();
-    }
     // Replay any renders skipped while hidden, before the reveal plays.
     if (pendingRender) {
       pendingRender = false;
@@ -5464,12 +5123,6 @@ window.addEventListener("DOMContentLoaded", () => {
     scheduleAutoRefresh();
     void paintCachedSnapshots();
     void refresh(true);
-    // Queued, not shown: the window is usually still hidden in the tray at
-    // startup — the first popover-shown presents it. Runs after the config
-    // load so lastSeenVersion is the real stored value, not the default.
-    void getVersion().then((v) => {
-      pendingWhatsNew = computeWhatsNew(v);
-    });
   });
 
   // Countdown texts ("Resets in 3h 41m") tick every 30 s — but only for

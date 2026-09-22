@@ -150,7 +150,6 @@ const en: Dict = {
   "settings.advancedNote":
     "Restores every preference to its default and re-detects installed tools. API keys and your usage history stay. Proxy changes still need a restart.",
   "settings.resetAll": "Reset all settings",
-  "settings.changelog": "What's new · Changelog",
   "settings.customizeHint":
     "Providers, row order, and tray-strip stars live in Customize (☰ in the sidebar). Star up to 2 metrics per provider there to show them as tray icons.",
 
@@ -188,14 +187,6 @@ const en: Dict = {
 
   "dialog.cancel": "Cancel",
   "dialog.gotIt": "Got it",
-  "dialog.changelog": "Changelog",
-  "dialog.whatsNew": "What's new in v{version}",
-
-  "star.title": "Enjoying Pane?",
-  "star.body": "If Pane saves you time, a star on GitHub helps this open-source project get found. It takes two seconds.",
-  "star.go": "Star on GitHub",
-  "star.later": "Maybe later",
-  "star.never": "Don't ask again",
 
   "card.notConnected": "Not connected",
   "card.outdated": "⚠ Outdated",
@@ -239,15 +230,15 @@ const en: Dict = {
   "stale.lastFailed": "The last refresh failed",
   "stale.reloginDefault":
     "add the API key again in Settings (or sign in with the tool once)",
-  "stale.fixRetry": "Pane keeps retrying automatically — nothing to do unless this persists.",
-  "stale.fixDone": "Pane recovers automatically once that's done.",
-  "stale.fixRelogin": "Fix: {how} — Pane picks it up on the next refresh.",
+  "stale.fixRetry": "The app keeps retrying automatically — nothing to do unless this persists.",
+  "stale.fixDone": "The app recovers automatically once that's done.",
+  "stale.fixRelogin": "Fix: {how} — the app picks it up on the next refresh.",
   "stale.fix429":
-    "The vendor is rate-limiting; Pane waits exactly as long as it asked, then retries by itself.",
+    "The vendor is rate-limiting; the app waits exactly as long as it asked, then retries by itself.",
   "stale.fix5xx":
-    "The vendor's API is having trouble; Pane retries automatically until it recovers.",
+    "The vendor's API is having trouble; the app retries automatically until it recovers.",
   "stale.fixNet":
-    "Pane couldn't reach the vendor — check your internet connection (or the proxy in Settings).",
+    "The app couldn't reach the vendor — check your internet connection (or the proxy in Settings).",
   "stale.tail": "Showing the last good data meanwhile.",
   "stale.relogin.claude": "run `claude` in a terminal and sign in",
   "stale.relogin.codex": "run `codex login` in a terminal",
@@ -385,7 +376,7 @@ const en: Dict = {
   "resets.none": "You have no rate limit resets",
   "resets.expiryUnknown": "Expiry times unavailable",
 
-  "share.tagline": "Monitor Your AI Subscriptions with Pane",
+  "share.tagline": "Tracked with AI Task Manager",
   "tray.left": "{label}: {n}% left",
 
   "detail.unlimited": "Unlimited",
@@ -542,7 +533,6 @@ const zh: Dict = {
   "settings.advancedNote":
     "把所有偏好恢复成默认值，并重新检测已安装的工具。API 密钥和用量记录会保留。代理更改仍需重启。",
   "settings.resetAll": "重置全部设置",
-  "settings.changelog": "更新说明 · 更新日志",
   "settings.customizeHint":
     "服务开关、行顺序和托盘加星在「自定义」里（侧栏的 ☰）。每个服务最多加星 2 项，作为托盘图标。",
 
@@ -580,14 +570,6 @@ const zh: Dict = {
 
   "dialog.cancel": "取消",
   "dialog.gotIt": "知道了",
-  "dialog.changelog": "更新日志",
-  "dialog.whatsNew": "v{version} 有什么新内容",
-
-  "star.title": "喜欢 Pane 吗？",
-  "star.body": "如果 Pane 帮你省了时间，在 GitHub 上点个 Star 能让这个开源项目被更多人看到。只需两秒。",
-  "star.go": "去 GitHub 点 Star",
-  "star.later": "以后再说",
-  "star.never": "不再提醒",
 
   "card.notConnected": "未连接",
   "card.outdated": "⚠ 数据过时",
@@ -630,11 +612,11 @@ const zh: Dict = {
 
   "stale.lastFailed": "上次刷新失败",
   "stale.reloginDefault": "在设置里重新粘贴 API 密钥（或用该工具登录一次）",
-  "stale.fixRetry": "Pane 会自动重试 — 除非一直失败，否则不用动手。",
-  "stale.fixDone": "完成后 Pane 会自动恢复。",
-  "stale.fixRelogin": "解决方法：{how} — 下次刷新时 Pane 会接上。",
-  "stale.fix429": "对方在限流；Pane 会按对方要求的时间等待，然后自己重试。",
-  "stale.fix5xx": "对方的接口出了问题；Pane 会自动重试直到恢复。",
+  "stale.fixRetry": "应用会自动重试 — 除非一直失败，否则不用动手。",
+  "stale.fixDone": "完成后应用会自动恢复。",
+  "stale.fixRelogin": "解决方法：{how} — 下次刷新时应用会接上。",
+  "stale.fix429": "对方在限流；应用会按对方要求的时间等待，然后自己重试。",
+  "stale.fix5xx": "对方的接口出了问题；应用会自动重试直到恢复。",
   "stale.fixNet": "连不上对方 — 请检查网络（或设置里的代理）。",
   "stale.tail": "期间显示上次成功的数据。",
   "stale.relogin.claude": "在终端运行 `claude` 并登录",
@@ -768,7 +750,7 @@ const zh: Dict = {
   "resets.none": "你没有可用的速率限制重置",
   "resets.expiryUnknown": "无法获取过期时间",
 
-  "share.tagline": "用 Pane 盯紧你的 AI 订阅",
+  "share.tagline": "用 AI Task Manager 盯紧你的 AI 订阅",
   "tray.left": "{label}：剩余 {n}%",
 
   "detail.unlimited": "无限制",
@@ -895,7 +877,6 @@ const ru: Dict = {
   "settings.advancedNote":
     "Вернёт все настройки к значениям по умолчанию и заново найдёт установленные инструменты. Ключи API и история использования останутся. Смена прокси по-прежнему требует перезапуска.",
   "settings.resetAll": "Сбросить все настройки",
-  "settings.changelog": "Что нового · Журнал изменений",
   "settings.customizeHint":
     "Сервисы, порядок строк и звёзды трея — в «Настройка» (☰ в боковой панели). Там можно отметить до 2 показателей на сервис — они появятся значками в трее.",
 
@@ -906,14 +887,6 @@ const ru: Dict = {
 
   "dialog.cancel": "Отмена",
   "dialog.gotIt": "Понятно",
-  "dialog.changelog": "Журнал изменений",
-  "dialog.whatsNew": "Что нового в v{version}",
-
-  "star.title": "Нравится Pane?",
-  "star.body": "Если Pane экономит вам время, звезда на GitHub помогает этому открытому проекту. Это займёт две секунды.",
-  "star.go": "Поставить звезду",
-  "star.later": "Позже",
-  "star.never": "Больше не спрашивать",
 
   "card.notConnected": "Не подключено",
   "card.outdated": "⚠ Данные устарели",
@@ -957,15 +930,15 @@ const ru: Dict = {
   "stale.lastFailed": "Последнее обновление не удалось",
   "stale.reloginDefault":
     "снова вставьте ключ API в Настройках (или войдите в инструмент один раз)",
-  "stale.fixRetry": "Pane сам повторяет попытки — ничего делать не нужно, пока это не затянется.",
-  "stale.fixDone": "Pane восстановится сам, как только это будет сделано.",
-  "stale.fixRelogin": "Что сделать: {how} — Pane подхватит это при следующем обновлении.",
+  "stale.fixRetry": "Приложение само повторяет попытки — ничего делать не нужно, пока это не затянется.",
+  "stale.fixDone": "Приложение восстановится само, как только это будет сделано.",
+  "stale.fixRelogin": "Что сделать: {how} — приложение подхватит это при следующем обновлении.",
   "stale.fix429":
-    "Сервис ограничивает частоту запросов; Pane ждёт ровно столько, сколько просили, и повторяет сам.",
+    "Сервис ограничивает частоту запросов; приложение ждёт ровно столько, сколько просили, и повторяет само.",
   "stale.fix5xx":
-    "У сервиса сбой API; Pane повторяет попытки, пока тот не восстановится.",
+    "У сервиса сбой API; приложение повторяет попытки, пока тот не восстановится.",
   "stale.fixNet":
-    "Pane не достучался до сервиса — проверьте интернет (или прокси в Настройках).",
+    "Приложение не достучалось до сервиса — проверьте интернет (или прокси в Настройках).",
   "stale.tail": "Пока показываем последние хорошие данные.",
   "stale.relogin.claude": "запустите `claude` в терминале и войдите",
   "stale.relogin.codex": "запустите `codex login` в терминале",
@@ -1102,7 +1075,7 @@ const ru: Dict = {
   "resets.none": "У вас нет сбросов лимитов",
   "resets.expiryUnknown": "Время истечения недоступно",
 
-  "share.tagline": "Следите за подписками ИИ с Pane",
+  "share.tagline": "Отслеживается в AI Task Manager",
   "tray.left": "{label}: осталось {n}%",
 
   "detail.unlimited": "Без лимита",

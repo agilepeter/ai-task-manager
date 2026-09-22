@@ -2026,43 +2026,6 @@ body.drawer-open #drawer {
   opacity: 0.7;
 }
 
-/* Party mode 🎉 (Konami code). Cosmetic only; respects reduced motion via
-   the global override at the bottom of this sheet. */
-@keyframes party-hue {
-  to {
-    filter: hue-rotate(360deg);
-  }
-}
-
-@keyframes party-slide {
-  to {
-    background-position: 300% 0;
-  }
-}
-
-@keyframes party-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-body.party .provider {
-  animation: party-hue 6s linear infinite;
-}
-
-body.party .fill {
-  background: linear-gradient(90deg, #f472b6, #60a5fa, #facc15, #f472b6);
-  background-size: 300% 100%;
-  animation: party-slide 2s linear infinite;
-}
-
-body.party .app-logo {
-  animation: party-spin 2.5s linear infinite;
-}
-
-body.party .trail-tick.active {
-  animation: party-hue 3s linear infinite;
-}
 
 /* --------------------------------------------- customize dock + accordion */
 
@@ -2646,25 +2609,7 @@ body.no-svg-lens .cust-dock {
 }
 
 /* The Settings entry point: a quiet full-width pill above the footer note. */
-#changelog-btn {
-  display: block;
-  width: 100%;
-  margin-top: 14px;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 999px;
-  padding: 6px 14px;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--secondary-foreground);
-  transition: background 0.15s ease;
-}
 
-#changelog-btn:hover {
-  background: var(--accent);
-}
 
 #reset-all-settings {
   display: block;
