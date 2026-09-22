@@ -329,30 +329,8 @@ async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, 
             .push(Metric::progress(&label, percent, None).with_reset(resets_at, Some(7 * DAY)));
     }
 
-    // Extra Usage: pay-as-you-go overage spend, in cents. Bounded meter when
-    // a monthly cap is set, plain dollars when uncapped, absent when unused.
-    if let Some(extra) = usage.get("extra_usage") {
-        let enabled = extra.get("is_enabled").and_then(Value::as_bool).unwrap_or(false);
-        let used_cents = extra.get("used_credits").and_then(Value::as_f64);
-        if enabled {
-            if let Some(used_cents) = used_cents {
-                let used = (used_cents.round()) / 100.0;
-                let cap = extra
-                    .get("monthly_limit")
-                    .and_then(Value::as_f64)
-                    .map(|c| c.round() / 100.0)
-                    .filter(|c| *c > 0.0);
-                if let Some(cap) = cap {
-                    metrics.push(Metric::progress(
-                        "Extra usage",
-                        (used / cap * 100.0).clamp(0.0, 100.0),
-                        Some(format!("${used:.2} of ${cap:.2} limit")),
-                    ));
-                } else if used > 0.0 {
-                    metrics.push(Metric::text("Extra usage", format!("${used:.2} spent")));
-                }
-            }
-        }
+    if let Some(m) = extra_usage_metric(usage.get("extra_usage")) {
+        metrics.push(m);
     }
 
     if metrics.is_empty() {
@@ -412,6 +390,46 @@ fn push_window(metrics: &mut Vec<Metric>, node: Option<&Value>, label: &str, per
 
 /// The account uuid becomes `claude@<hash8>`, which the frontend
 /// interpolates into HTML attributes — only [A-Za-z0-9-] is safe there.
+/// Extra Usage: pay-as-you-go credit spend, in cents.
+///
+/// The switch being **off does not mean nothing was spent**. Anthropic turns
+/// it off once the cap is reached, so the state that matters most — "you went
+/// past the cap and it is now off" — used to render as nothing at all: the old
+/// code returned early unless `is_enabled`. Spend is reported whenever there
+/// is spend; the switch only changes the wording.
+///
+/// `disabled_reason` is server text (`org_level_disabled_until`) and is never
+/// echoed, only used to decide between two fixed phrases.
+pub fn extra_usage_metric(extra: Option<&Value>) -> Option<Metric> {
+    let extra = extra?;
+    let enabled = extra.get("is_enabled").and_then(Value::as_bool).unwrap_or(false);
+    let used = (extra.get("used_credits").and_then(Value::as_f64)?.round()) / 100.0;
+    let cap = extra
+        .get("monthly_limit")
+        .and_then(Value::as_f64)
+        .map(|c| c.round() / 100.0)
+        .filter(|c| *c > 0.0);
+    // Nothing spent and the switch is off: there is genuinely nothing to say.
+    if used <= 0.0 && !enabled {
+        return None;
+    }
+    let reached = extra.get("spend_limit_reached").and_then(Value::as_bool).unwrap_or(false);
+    let state = match (enabled, reached) {
+        (true, _) => "",
+        (false, true) => " · off, limit reached",
+        (false, false) => " · off",
+    };
+    Some(match cap {
+        Some(cap) => Metric::progress(
+            "Extra usage",
+            (used / cap * 100.0).clamp(0.0, 100.0),
+            Some(format!("${used:.2} of ${cap:.2} limit{state}")),
+        ),
+        None if used > 0.0 => Metric::text("Extra usage", format!("${used:.2} spent{state}")),
+        None => return None,
+    })
+}
+
 /// The model family behind a server-supplied display name.
 ///
 /// Server display names are arbitrary text that can reach the telemetry
@@ -537,7 +555,7 @@ fn live_usage_shape() {
         }
         let v: serde_json::Value = resp.json().await.expect("json");
         println!("top-level keys: {:?}", v.as_object().map(|o| o.keys().collect::<Vec<_>>()));
-        for key in ["five_hour", "seven_day", "seven_day_breakdown", "seven_day_opus", "seven_day_sonnet"] {
+        for key in ["extra_usage", "spend"] {
             if let Some(w) = v.get(key) {
                 println!("  {key}: {}", serde_json::to_string(w).unwrap_or_default());
             }
@@ -571,7 +589,7 @@ fn live_claude_labels() {
 
 #[cfg(test)]
 mod tests {
-    use super::{identity_from, keychain_token_usable, model_family, scoped_id_charset};
+    use super::{extra_usage_metric, identity_from, keychain_token_usable, model_family, scoped_id_charset};
     use serde_json::json;
 
     #[test]
@@ -598,6 +616,50 @@ mod tests {
         // account never becomes one).
         assert_eq!(identity_from(&json!({"oauthAccount": {}})), None);
         assert_eq!(identity_from(&json!({})), None);
+    }
+
+    #[test]
+    fn spend_past_the_cap_is_reported_even_though_the_switch_is_off() {
+        // Peter's real state on 2026-09-22: $21.87 against a $20 cap, and
+        // Anthropic switched extra usage off when the cap was reached. The old
+        // code showed nothing at all here.
+        let v = json!({
+            "is_enabled": false, "used_credits": 2187.0, "monthly_limit": 2000.0,
+            "spend_limit_reached": true, "disabled_reason": "org_level_disabled_until"
+        });
+        let m = extra_usage_metric(Some(&v)).expect("must be reported");
+        assert_eq!(m.label, "Extra usage");
+        assert_eq!(m.used_percent, Some(100.0), "over the cap clamps to full");
+        let detail = m.detail.clone().unwrap_or_default();
+        assert!(detail.contains("$21.87 of $20.00"), "{detail}");
+        assert!(detail.contains("limit reached"), "{detail}");
+        assert!(!detail.contains("org_level"), "server text must never be echoed: {detail}");
+    }
+
+    #[test]
+    fn an_untouched_switch_stays_silent() {
+        let off = json!({"is_enabled": false, "used_credits": 0.0, "monthly_limit": 2000.0});
+        assert!(extra_usage_metric(Some(&off)).is_none(), "nothing spent, nothing to say");
+        assert!(extra_usage_metric(None).is_none());
+        let no_field = json!({"is_enabled": true});
+        assert!(extra_usage_metric(Some(&no_field)).is_none());
+    }
+
+    #[test]
+    fn an_enabled_meter_reads_as_before() {
+        let v = json!({"is_enabled": true, "used_credits": 500.0, "monthly_limit": 2000.0});
+        let m = extra_usage_metric(Some(&v)).expect("reported");
+        assert_eq!(m.used_percent, Some(25.0));
+        let detail = m.detail.clone().unwrap_or_default();
+        assert_eq!(detail, "$5.00 of $20.00 limit", "no state suffix while it is on");
+    }
+
+    #[test]
+    fn uncapped_spend_is_dollars_not_a_bar() {
+        let v = json!({"is_enabled": true, "used_credits": 750.0, "monthly_limit": 0.0});
+        let m = extra_usage_metric(Some(&v)).expect("reported");
+        assert_eq!(m.used_percent, None);
+        assert_eq!(m.value.as_deref(), Some("$7.50 spent"));
     }
 
     #[test]

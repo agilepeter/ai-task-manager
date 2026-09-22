@@ -184,6 +184,13 @@ and computed Opportunities). Usage stays the default view.
   Mythos, and anything unknown degrades to "Model weekly". **That degradation is silent**, which
   is how a Fable user ended up staring at "Model weekly 100%" with no way to tell which model
   hit the wall. Add each new family here as it ships; the test lists the exact strings seen.
+- **Extra usage is reported whenever money was spent, switch or no switch**
+  (`providers::claude::extra_usage_metric`). Anthropic turns pay-as-you-go OFF once the cap is
+  reached, and the old code returned early unless `is_enabled` — so the single state that
+  matters most, "you went past the cap and it is now off", rendered as nothing at all. Real
+  example 2026-09-22: $21.87 against a $20 cap, switch off, app silent. `disabled_reason` is
+  server text and is never echoed; it only picks between two fixed phrases. `spend` in the same
+  payload is the newer shape of `extra_usage` and carries no extra facts: do not add a second card.
 - **The vendor publishes a limit for ONE model at a time.** Verified against the real
   endpoint 2026-09-22: `limits[]` carried `session`, `weekly_all` and a single
   `weekly_scoped` (Fable); `seven_day_opus` and `seven_day_sonnet` were null, and
