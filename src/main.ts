@@ -41,12 +41,12 @@ import onenewapiIcon from "./assets/providers/onenewapi.svg?raw";
 import sub2apiIcon from "./assets/providers/sub2api.svg?raw";
 import opencodeIcon from "./assets/providers/opencode.svg?raw";
 import openrouterIcon from "./assets/providers/openrouter.svg?raw";
-// Inlined as data URIs (not URLs) so the share-card SVG snapshot can
-// embed them — rasterized SVG images can't load external resources.
-// The bare ring suits the sidebar; the footer uses the full rounded
-// app icon, which stays legible at tiny sizes.
-import paneLogo from "./assets/pane-logo.png?inline";
-import paneIcon from "./assets/pane-icon.png?inline";
+// OURS, not upstream's. The sidebar takes the flat mark as raw SVG so it is
+// tinted by `currentColor` like the provider icons; the share card takes the
+// rounded icon as a data URI, because a rasterized SVG snapshot cannot load
+// external resources.
+import aitmMark from "./assets/aitm-mark.svg?raw";
+import aitmIcon from "./assets/aitm-icon.png?inline";
 import zaiIcon from "./assets/providers/zai.svg?raw";
 // The repo's changelog ships inside the bundle, so the "What's new" dialog
 // and the Settings changelog viewer read the exact file releases maintain.
@@ -2278,7 +2278,7 @@ async function shareCard(id: string): Promise<void> {
       // literal "]]>" inside CSS would end the section early, so split it.
       `<style><![CDATA[${css.split("]]>").join("]]]]><![CDATA[>")}]]></style>` +
       new XMLSerializer().serializeToString(clone) +
-      `<div id="snap-foot"><img src="${paneIcon}" alt="" /><span>${escapeHtml(t("share.tagline"))}</span></div>` +
+      `<div id="snap-foot"><img src="${aitmIcon}" alt="" /><span>${escapeHtml(t("share.tagline"))}</span></div>` +
       `</div></foreignObject></svg>`;
 
     const img = new Image();
@@ -5097,7 +5097,7 @@ function syncSettingsControls(): void {
 
 window.addEventListener("DOMContentLoaded", () => {
   const appLogo = document.querySelector<HTMLElement>("#app-logo")!;
-  appLogo.innerHTML = `<img src="${paneLogo}" alt="Pane" />`;
+  appLogo.innerHTML = aitmMark;
   // Party mode, the easy way: triple-click the logo. (The Konami code
   // still works, for the culture.)
   let logoClicks = 0;

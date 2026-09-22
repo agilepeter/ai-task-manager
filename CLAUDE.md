@@ -178,6 +178,17 @@ and computed Opportunities). Usage stays the default view.
   (the tray side). Full-window panels keep to the left column, and a closed Settings parks
   off the LEFT in wide mode, because its usual park position lands inside a 760 window.
   The saved choice is applied by `applySavedWide()` after the config loads, not in setup.
+- **Model-specific limits are named from a FIXED vocabulary** (`providers::claude::model_family`).
+  The server sends an arbitrary `display_name`, which must never be echoed: it can reach the
+  telemetry boundary through starred metrics. It is mapped onto Opus / Sonnet / Haiku / Fable /
+  Mythos, and anything unknown degrades to "Model weekly". **That degradation is silent**, which
+  is how a Fable user ended up staring at "Model weekly 100%" with no way to tell which model
+  hit the wall. Add each new family here as it ships; the test lists the exact strings seen.
+- **The in-app marks are ours** (`src/assets/aitm-mark.svg`, `aitm-icon.png`). Upstream's
+  `pane-logo.png` / `pane-icon.png` shipped in the sidebar and the share card until 2026-09-22.
+  The sidebar takes the flat mark as raw SVG so `currentColor` tints it like the provider
+  icons; the share card needs a data URI, because a rasterized SVG snapshot cannot load
+  external resources. If a fork rebrands, these two files and `src/brand.ts` are the set.
 - **The macOS tray is a template glyph plus native title text** (`design/tray-template.svg`,
   `menu_bar_title`). Never draw digits into the icon on macOS: a Retina menu bar scales a
   32 px bitmap into a blur, and a coloured icon ignores the light / dark menu bar. The glyph

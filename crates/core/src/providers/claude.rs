@@ -320,20 +320,7 @@ async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, 
             continue;
         };
         let Some(percent) = entry.get("percent").and_then(Value::as_f64) else { continue };
-        // Server display names are arbitrary text that can reach the
-        // telemetry boundary via starred metrics — map them onto the fixed
-        // family vocabulary the legacy seven_day_<model> labels already use.
-        let lower = name.to_ascii_lowercase();
-        let family = if lower.contains("opus") {
-            "Opus"
-        } else if lower.contains("sonnet") {
-            "Sonnet"
-        } else if lower.contains("haiku") {
-            "Haiku"
-        } else {
-            "Model"
-        };
-        let label = format!("{family} weekly");
+        let label = format!("{} weekly", model_family(name));
         if metrics.iter().any(|m| m.label == label) {
             continue;
         }
@@ -425,6 +412,30 @@ fn push_window(metrics: &mut Vec<Metric>, node: Option<&Value>, label: &str, per
 
 /// The account uuid becomes `claude@<hash8>`, which the frontend
 /// interpolates into HTML attributes — only [A-Za-z0-9-] is safe there.
+/// The model family behind a server-supplied display name.
+///
+/// Server display names are arbitrary text that can reach the telemetry
+/// boundary via starred metrics, so they are never echoed: they are mapped
+/// onto this fixed vocabulary instead. **Keep it current.** A family missing
+/// here does not fail loudly, it silently degrades to "Model weekly", which
+/// is what every Fable user saw — a limit at 100% with no way to tell which
+/// model hit it.
+pub fn model_family(display_name: &str) -> &'static str {
+    let lower = display_name.to_ascii_lowercase();
+    for (needle, family) in [
+        ("opus", "Opus"),
+        ("sonnet", "Sonnet"),
+        ("haiku", "Haiku"),
+        ("fable", "Fable"),
+        ("mythos", "Mythos"),
+    ] {
+        if lower.contains(needle) {
+            return family;
+        }
+    }
+    "Model"
+}
+
 fn scoped_id_charset(raw: &str) -> bool {
     !raw.is_empty() && raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
@@ -492,9 +503,21 @@ fn backup_credentials(path: &std::path::Path) {
     let _ = std::fs::copy(path, &bak);
 }
 
+/// Hits the real account and prints the metric labels this build produces.
+/// Ignored: it needs a signed-in Claude Code and touches the network.
+#[test]
+#[ignore]
+fn live_claude_labels() {
+    let snap = crate::rt::block_on(snapshot());
+    println!("status={} plan={:?} error={:?}", snap.status, snap.plan, snap.error);
+    for m in &snap.metrics {
+        println!("  {:<18} used={:?} detail={:?}", m.label, m.used_percent, m.detail);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{identity_from, keychain_token_usable, scoped_id_charset};
+    use super::{identity_from, keychain_token_usable, model_family, scoped_id_charset};
     use serde_json::json;
 
     #[test]
@@ -521,6 +544,29 @@ mod tests {
         // account never becomes one).
         assert_eq!(identity_from(&json!({"oauthAccount": {}})), None);
         assert_eq!(identity_from(&json!({})), None);
+    }
+
+    #[test]
+    fn every_known_family_is_named_not_called_model() {
+        // The exact strings the server has been seen to send.
+        for (name, want) in [
+            ("Claude Opus 4.8", "Opus"),
+            ("Claude Sonnet 5", "Sonnet"),
+            ("Claude Haiku 4.5", "Haiku"),
+            ("Claude Fable 5.1", "Fable"),
+            ("Claude Mythos 5.1", "Mythos"),
+            ("claude-fable-5-1", "Fable"),
+        ] {
+            assert_eq!(model_family(name), want, "{name}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_family_degrades_without_echoing_the_server() {
+        // A name we do not know must not reach the label verbatim.
+        let odd = "Claude Something-New <script>";
+        assert_eq!(model_family(odd), "Model");
+        assert!(!format!("{} weekly", model_family(odd)).contains("script"));
     }
 
     #[test]
