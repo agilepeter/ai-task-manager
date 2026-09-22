@@ -61,7 +61,7 @@ async fn fetch() -> Result<Snapshot, String> {
 }
 
 /// The console currently answers ConsoleNeedLogin to every API-key auth
-/// shape (it wants a browser session, which Pane will never touch). Keep
+/// shape (it wants a browser session, which this app will never touch). Keep
 /// trying — Alibaba may open key auth someday — but after a failure stand
 /// down for 6 hours so refreshes don't hammer their console.
 static QUOTA_BLOCKED_UNTIL: AtomicI64 = AtomicI64::new(0);

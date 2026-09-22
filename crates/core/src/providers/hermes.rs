@@ -51,14 +51,14 @@ fn fetch() -> Snapshot {
         return Snapshot::no_credentials(
             ID,
             NAME,
-            "Install the Hermes desktop app (Nous Research) — Pane reads its local ledger.",
+            "Install the Hermes desktop app (Nous Research) — AI Task Manager reads its local ledger.",
         );
     };
     if !db_path.exists() {
         return Snapshot::no_credentials(
             ID,
             NAME,
-            "Install the Hermes desktop app (Nous Research) — Pane reads its local ledger.",
+            "Install the Hermes desktop app (Nous Research) — AI Task Manager reads its local ledger.",
         );
     }
     let events = collect_usage_events();

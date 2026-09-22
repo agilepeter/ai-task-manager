@@ -8,7 +8,7 @@
 //!   3. models.dev (USD per million; exact-match only — fuzzy-matching a
 //!      reseller rate would fabricate dollars).
 //!
-//! Each source is cached at %APPDATA%\Pane\pricing\ and refreshed at
+//! Each source is cached at %APPDATA%\AITaskManager\pricing\ and refreshed at
 //! most every 24h (30-minute retry after a failure) with ETag revalidation.
 //! `lookup()` never touches the network; `ensure_fresh()` runs on the spend
 //! engine's blocking thread. The old hardcoded prices in spend.rs remain
@@ -698,7 +698,7 @@ fn resolve(s: &Store, model: &str, depth: u8) -> Option<Price> {
     if let Some(p) = s.supplement.get(&canonical).filter(real) {
         return Some(*p);
     }
-    // Moonshot bills Pane's Kimi Code / API logs on its own card. LiteLLM
+    // Moonshot bills this app's Kimi Code / API logs on its own card. LiteLLM
     // and models.dev mix reseller markups and stubs that drop cache-hit
     // rates, so first-party Kimi slugs take the published Moonshot table
     // before those catalogs. Other baked models (DeepSeek, Grok, Qwen)

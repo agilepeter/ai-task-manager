@@ -9,7 +9,7 @@
 //! CLI stays signed in — same write-back as Claude/Codex.
 //!
 //! Without a CLI login, a Kimi For Coding plan key pasted in Settings
-//! (`%APPDATA%\Pane\kimi.json`) is sent as Bearer to the same endpoint —
+//! (`%APPDATA%\AITaskManager\kimi.json`) is sent as Bearer to the same endpoint —
 //! what cc-switch and the plan's Anthropic-compatible endpoint accept
 //! (issue #173). Login wins when both exist; the key is a fallback only.
 
@@ -62,7 +62,7 @@ pub fn has_credentials() -> bool {
 }
 
 /// Official CLI home. `KIMI_CODE_HOME` is honored only when it is an
-/// absolute path — a relative value would resolve against Pane's cwd and
+/// absolute path — a relative value would resolve against this app's cwd and
 /// could point the spend walk or credential write at the wrong tree.
 pub fn code_home() -> PathBuf {
     if let Some(p) = env_code_home() {
@@ -196,7 +196,7 @@ async fn usages_via_login(path: &Path) -> Result<(Value, Option<String>), String
             match usages {
                 Ok(doc) => Ok((doc, plan)),
                 Err(UsagesError::Unauthorized) => Err(
-                    "Kimi Code sign-in was rotated — run `kimi login` in a terminal once and Pane recovers automatically"
+                    "Kimi Code sign-in was rotated — run `kimi login` in a terminal once and AI Task Manager recovers automatically"
                         .into(),
                 ),
                 Err(UsagesError::Other(e)) => Err(e),
@@ -350,7 +350,7 @@ async fn load_access(path: &Path, force: bool) -> Result<String, String> {
         let body = bounded_text(resp, MAX_TOKEN_BYTES).await;
         if status.as_u16() == 401 || status.as_u16() == 403 || body.contains("invalid_grant") {
             return Err(
-                "Kimi Code sign-in was rotated — run `kimi login` in a terminal once and Pane recovers automatically"
+                "Kimi Code sign-in was rotated — run `kimi login` in a terminal once and AI Task Manager recovers automatically"
                     .into(),
             );
         }

@@ -40,10 +40,10 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": false,
-    "publisher": "Pane",
-    "copyright": "© 2026 Pane contributors (MIT)",
+    "publisher": "StaaS Fund",
+    "copyright": "© 2026 StaaS Fund and the Pane, OpenUsage and CodexBar authors (MIT)",
     "shortDescription": "AI usage limits in your system tray",
-    "longDescription": "Pane shows how much of your session and weekly limits each AI tool has left, directly from the Windows system tray.",
+    "longDescription": "AI Task Manager shows how much of your session and weekly limits each AI tool has left, from the menu bar on macOS and the system tray on Windows.",
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico"

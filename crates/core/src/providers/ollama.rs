@@ -9,7 +9,7 @@ const BASE: &str = "http://127.0.0.1:11434";
 /// configured) — a dedicated no-proxy client rather than the shared one.
 fn client() -> reqwest::Client {
     reqwest::Client::builder()
-        .user_agent("Pane-Windows/0.3")
+        .user_agent(concat!("ai-task-manager/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(20))
         .connect_timeout(std::time::Duration::from_secs(5))
         .no_proxy()

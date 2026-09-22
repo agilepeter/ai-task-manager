@@ -41,7 +41,7 @@ pub struct Metric {
     pub period_ms: Option<i64>,
 }
 
-/// One banked rate-limit reset credit. `id` is present when Pane can redeem
+/// One banked rate-limit reset credit. `id` is present when AI Task Manager can redeem
 /// it (Codex); Grok's are read-only.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ResetCredit {
@@ -440,7 +440,7 @@ pub fn credential_string(target: &str) -> Option<String> {
 }
 
 /// Percent-used meter for pay-as-you-go balances. These APIs report only
-/// what's left — never "of how much" — so Pane remembers the highest
+/// what's left — never "of how much" — so AI Task Manager remembers the highest
 /// balance it has ever seen per provider (a top-up raises it automatically)
 /// and meters usage against that high-water mark. Persisted so restarts
 /// keep the story. As a progress row it also feeds the notification rules

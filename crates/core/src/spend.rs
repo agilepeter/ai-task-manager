@@ -2921,7 +2921,7 @@ fn grok_line(model_by_pid: &mut HashMap<i64, String>, line: &str, data: &mut Fil
 /// OpenCode stores real per-message costs in its database — no pricing
 /// table needed.
 /// OpenCode's local log covers every provider routed through it. Gateway
-/// providers with their own Pane card (AihubMix) split into their own
+/// providers with their own card here (AihubMix) split into their own
 /// spend slice — their dollars belong to that account, and the split gives
 /// the card its Today/Yesterday/30d rows and Usage Trend; everything else
 /// stays under OpenCode.

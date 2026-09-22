@@ -416,7 +416,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("nested").join("devin_spend_cache.json");
-        // Fresh install: %APPDATA%\Pane may not exist yet when the first
+        // Fresh install: %APPDATA%\AITaskManager may not exist yet when the first
         // scan persists — the save must not silently drop the bookmark.
         let mut cache = fresh_cache();
         cache.last_rowid = 3;
@@ -1036,7 +1036,7 @@ pub fn collect_usage_events() -> Vec<UsageEvent> {
     if guard.is_none() {
         // First collect this run: seed from disk (empty when missing or
         // stale) with sentinel stamps so we always refresh once — the
-        // WAL almost certainly moved while Pane wasn't running.
+        // WAL almost certainly moved while this app wasn't running.
         *guard = Some(DevinState {
             db_stamp: (std::time::UNIX_EPOCH, 0),
             wal_stamp: (std::time::UNIX_EPOCH, 0),

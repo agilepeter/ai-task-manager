@@ -1,6 +1,6 @@
 //! AihubMix — an OpenAI-compatible multi-model gateway (aihubmix.com),
 //! pay-as-you-go against a top-up balance. It exposes the legacy OpenAI
-//! dashboard-billing endpoints, so Pane reads the account's spending limit
+//! dashboard-billing endpoints, so this app reads the account's spending limit
 //! and month-to-date usage and meters one against the other.
 //!
 //! Key source: pasted in Settings, `AIHUBMIX_API_KEY`, or — since AihubMix

@@ -257,7 +257,7 @@ fn scoped_id_charset(raw: &str) -> bool {
 }
 
 /// Query the live OpenCode ledger read-only. Copying db+WAL into
-/// `%APPDATA%\Pane\tmp` used the same pattern that grew Devin's temp
+/// `%APPDATA%\AITaskManager\tmp` used the same pattern that grew Devin's temp
 /// journal to tens of GB — never clone a vendor database onto C:.
 fn with_live_db<T>(dir: &Path, f: impl FnOnce(&Path) -> Result<T, String>) -> Result<T, String> {
     let db_path = dir.join("opencode.db");

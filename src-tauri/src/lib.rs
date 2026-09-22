@@ -25,7 +25,7 @@ const SNAPSHOT_CACHE_MS: i64 = 24 * 60 * 60 * 1000;
 const STALE_GRACE_MS: i64 = 3 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
-// App settings, stored at %APPDATA%\Pane\config.json
+// App settings, stored at %APPDATA%\AITaskManager\config.json
 // ---------------------------------------------------------------------------
 
 fn config_path_in(dir: &Path) -> PathBuf {
@@ -62,7 +62,7 @@ fn parse_config_file(path: &PathBuf) -> Result<Value, String> {
     // Tolerate a UTF-8 BOM (Notepad and PowerShell 5.1 both write one).
     let value: Value =
         serde_json::from_str(raw.trim_start_matches('\u{feff}')).map_err(|e| format!("parse: {e}"))?;
-    // `[]` / `null` / `"x"` parse, but Pane's contract is an object.
+    // `[]` / `null` / `"x"` parse, but this app's contract is an object.
     // Treating those as unreadable lets load fall back to the backup
     // and stops a save from copying junk over the last good copy.
     if !value.is_object() {
@@ -822,7 +822,7 @@ fn apply_main_tray_projection(
         tray_projection::MainTrayIconMode::Logo => {
             let default = app
                 .default_window_icon()
-                .ok_or_else(|| "default Pane icon is unavailable".to_string())?;
+                .ok_or_else(|| "default AI Task Manager icon is unavailable".to_string())?;
             tray.set_icon(Some(default.clone()))
                 .map_err(|error| format!("set main tray logo: {error}"))?;
         }
@@ -859,7 +859,7 @@ fn last_main_tray() -> &'static Mutex<LastMainTray> {
     S.get_or_init(|| {
         Mutex::new(LastMainTray {
             lefts: Vec::new(),
-            tooltip: String::from("Pane"),
+            tooltip: String::from("AI Task Manager"),
         })
     })
 }
@@ -1627,7 +1627,7 @@ where
 }
 
 /// The plain API-key providers set_api_key accepts, in
-/// %APPDATA%\Pane\<provider>.json. Single source of truth for both the
+/// %APPDATA%\AITaskManager\<provider>.json. Single source of truth for both the
 /// save command's validation and the credential-context bookkeeping below.
 const API_KEY_PROVIDERS: &[&str] = &[
     "openrouter",
@@ -2918,7 +2918,7 @@ fn set_api_key_in(dir: &Path, provider: &str, key: &str) -> Result<(), String> {
 }
 
 /// Saves (or clears, when `key` is empty) a user-pasted API key to
-/// %APPDATA%\Pane\<provider>.json.
+/// %APPDATA%\AITaskManager\<provider>.json.
 #[tauri::command]
 fn set_api_key(provider: String, key: String) -> Result<(), String> {
     set_api_key_in(&providers::config_dir(), &provider, &key)
@@ -3370,7 +3370,7 @@ async fn live_update_check(app: &tauri::AppHandle) -> Result<Option<String>, Str
 
 /// Update check for the footer. Launch and every popover open hit the
 /// network — same as before the 0.4.49 4 h gate — so a just-published
-/// release shows up the next time you open Pane.
+/// release shows up the next time you open AI Task Manager.
 #[tauri::command]
 async fn check_update(app: tauri::AppHandle) -> Result<Option<String>, String> {
     live_update_check(&app).await

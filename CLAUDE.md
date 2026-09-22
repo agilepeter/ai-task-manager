@@ -118,8 +118,13 @@ and computed Opportunities). Usage stays the default view.
 - **About** (`src/about.ts`): maker, links to staas.fund (Library, Trust Index, Classroom,
   workshop), upstream credits, and the HalperBot mascot with an easter egg (poke him; every
   tenth poke is a dance). Opened from the sidebar or the footer build stamp. **Everything
-  about the maker lives in `src/brand.ts`, so a fork re-brands by editing one file. `CREDITS`
-  in that file is the MIT attribution for Pane and OpenUsage: it stays in any fork.**
+  about the maker lives in `src/brand.ts`. `CREDITS` in that file is the MIT attribution for
+  Pane and OpenUsage: it stays in any fork.** That file is not quite the whole rebrand, and
+  claiming it was hid four places for months: the tray tooltip (`TOOLTIP_TITLE` in
+  `src-tauri/src/tray_projection.rs`), the Quit item (`i18n::quit_label`), the installer's
+  `publisher` / `copyright` / `longDescription` in `tauri.conf.json`, and provider sign-in
+  messages. Those shipped as "Pane" until 2026-09-22. The real set is those four plus
+  `brand.ts`.
 - **`demo.html` is GENERATED from `index.html`** (`scripts/make-demo-html.py`, run by
   `npm run build:demo`). They were hand-maintained copies and drifted: the public demo was
   still telling people their keys live in `%APPDATA%\Pane` long after the app stopped saying
@@ -226,6 +231,14 @@ and computed Opportunities). Usage stays the default view.
   over an open panel (Settings, Customize, Detail, Audit, About) the panel and its pinned
   header step right by the rail's width (`body:has(#side-zone:hover)` rules). In wide mode
   the narrow panels shrink by the same amount so they never cross the detail column.
+- **The tray tooltip has a hard 127 UTF-16 budget** (Windows truncates
+  `NOTIFYICONDATA.szTip` past it). `TOOLTIP_TITLE` and `TOOLTIP_UTF16_CAPACITY` in
+  `tray_projection.rs` are the only copies of the name and the cap: the builder held the
+  string while the length arithmetic held a bare `4` for it, so renaming the app overran the
+  cap by 11 on every tooltip. `title_length_matches_the_builder` pins them together. The
+  longer name costs one provider line on Windows (five, not six) -- that is the price of the
+  correct name, and capacity tests size their fixtures off the constants so a future rename
+  re-tunes them instead of rotting.
 - **Popover anchoring is per platform** (`popover_origin`): above the click for a bottom
   taskbar, below it for the macOS menu bar.
 - **Running now** (`crates/core/src/procs.rs`, `get_running`): the Task Manager half of the
@@ -320,7 +333,8 @@ would let this app and upstream Pane overwrite each other.
 Needs Rust (rustup, official installer: Homebrew has no bottle for Intel macOS 26 and
 builds LLVM from source) and Node. `npm install`, then `npm run tauri dev`.
 Local API for checking real numbers: `curl http://127.0.0.1:6736/v1/usage`.
-Rust tests: `cargo test --workspace` from the repo root (468 on macOS).
+Rust tests: `cargo test --workspace` from the repo root (617 on macOS).
+Frontend tests: `npm test` (`node --test scripts/*.test.mjs`), also run by CI.
 
 ## Tests share process-wide state: serialize, never assume order
 
@@ -335,4 +349,6 @@ suite 20 to 30 times before calling a concurrency fix done.
 `.github/workflows/ci.yml` has no macOS job, on purpose: macOS runners bill at 10x on
 private repos and Mac is built locally. A small `changes` job routes each push: Rust or
 manifest changes run the Windows build and tests (about 15 minutes, 2x billing); UI changes
-run a one-minute Linux type-check and build. Do not widen the Windows job to UI paths.
+run a one-minute Linux type-check, build and `npm test`. Do not widen the Windows job to UI
+paths. `scripts/**` routes to the frontend job, because the frontend tests live there and
+went unrun for weeks when nothing referenced them.

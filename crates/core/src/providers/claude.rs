@@ -236,7 +236,7 @@ async fn fetch(dir: &std::path::Path, id: &str, name: &str) -> Result<Snapshot, 
                 // instead of leaving a bare HTTP code on the card.
                 if body.contains("invalid_grant") {
                     return Err(
-                        "Claude sign-in was rotated by another app — run `claude` in a terminal once and Pane recovers automatically"
+                        "Claude sign-in was rotated by another app — run `claude` in a terminal once and AI Task Manager recovers automatically"
                             .into(),
                     );
                 }

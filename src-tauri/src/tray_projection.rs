@@ -97,7 +97,7 @@ pub(crate) fn project_main_tray(
         return MainTrayProjection {
             icon_mode: MainTrayIconMode::Logo,
             remaining_percentages: Vec::new(),
-            tooltip: "Pane".into(),
+            tooltip: TOOLTIP_TITLE.into(),
         };
     };
     let mut icon_metrics = ordinary_metrics(icon_provider, config.providers.get(&icon_provider.id));
@@ -149,7 +149,7 @@ pub(crate) fn project_main_tray(
             format_provider_line(snapshot, &metrics, &locale),
         ));
     }
-    while tooltip_utf16_len(&tooltip_lines) > 127 {
+    while tooltip_utf16_len(&tooltip_lines) > TOOLTIP_UTF16_CAPACITY {
         let pinned_id = active_pinned.map(|(snapshot, _)| snapshot.id.as_str());
         let remove_at = tooltip_lines
             .iter()
@@ -184,8 +184,21 @@ pub(crate) fn project_main_tray(
     }
 }
 
+/// Windows caps `NOTIFYICONDATA.szTip` at 128 UTF-16 units including the
+/// terminator, so this is every unit we get.
+const TOOLTIP_UTF16_CAPACITY: usize = 127;
+
+/// The first line of every tooltip.
+///
+/// The builder and the capacity arithmetic must both read the name from here.
+/// They used to hold it twice -- a literal in `tooltip_from_lines` and a bare
+/// `4` for its length in `tooltip_utf16_len` -- so renaming the app moved the
+/// string without moving the number and every tooltip overran the cap by the
+/// difference. `title_length_matches_the_builder` now pins the two together.
+const TOOLTIP_TITLE: &str = "AI Task Manager";
+
 fn tooltip_from_lines(lines: &[(&str, String)]) -> String {
-    let mut tooltip = String::from("Pane");
+    let mut tooltip = String::from(TOOLTIP_TITLE);
     for (_, line) in lines {
         tooltip.push('\n');
         tooltip.push_str(line);
@@ -194,10 +207,11 @@ fn tooltip_from_lines(lines: &[(&str, String)]) -> String {
 }
 
 fn tooltip_utf16_len(lines: &[(&str, String)]) -> usize {
-    4 + lines
-        .iter()
-        .map(|(_, line)| 1 + line.encode_utf16().count())
-        .sum::<usize>()
+    TOOLTIP_TITLE.encode_utf16().count()
+        + lines
+            .iter()
+            .map(|(_, line)| 1 + line.encode_utf16().count())
+            .sum::<usize>()
 }
 
 fn ordinary_metrics<'a>(
@@ -371,11 +385,11 @@ mod tests {
         let result = project_main_tray(&snapshots, &cfg, false);
         assert_eq!(result.icon_mode, MainTrayIconMode::Logo);
         assert!(result.remaining_percentages.is_empty());
-        assert_eq!(result.tooltip, "Pane\nFirst: HTTP 401\nSecond: HTTP 403");
+        assert_eq!(result.tooltip, "AI Task Manager\nFirst: HTTP 401\nSecond: HTTP 403");
         cfg.disabled.push("sub2api@first".into());
-        assert_eq!(project_main_tray(&snapshots, &cfg, false).tooltip, "Pane\nSecond: HTTP 403");
+        assert_eq!(project_main_tray(&snapshots, &cfg, false).tooltip, "AI Task Manager\nSecond: HTTP 403");
         cfg.disabled.push("sub2api".into());
-        assert_eq!(project_main_tray(&snapshots, &cfg, false).tooltip, "Pane");
+        assert_eq!(project_main_tray(&snapshots, &cfg, false).tooltip, "AI Task Manager");
     }
 
     #[test]
@@ -407,9 +421,9 @@ mod tests {
         cfg.providers.insert(snap.id.clone(), layout);
         let projected = project_main_tray(std::slice::from_ref(&snap), &cfg, false);
         assert_eq!(projected.remaining_percentages, vec![5]);
-        assert_eq!(projected.tooltip, "Pane\nSite · Key 5h: 5% left");
+        assert_eq!(projected.tooltip, "AI Task Manager\nSite · Key 5h: 5% left");
         cfg.disabled.push("sub2api".into());
-        assert_eq!(project_main_tray(&[snap], &cfg, false).tooltip, "Pane");
+        assert_eq!(project_main_tray(&[snap], &cfg, false).tooltip, "AI Task Manager");
     }
 
     #[test]
@@ -424,7 +438,7 @@ mod tests {
         let result = project_main_tray(&[wallet], &cfg, false);
         assert_eq!(result.icon_mode, MainTrayIconMode::Logo);
         assert!(result.remaining_percentages.is_empty());
-        assert_eq!(result.tooltip, "Pane\n⚠ Wallet Balance: $-2.50 · Overdue");
+        assert_eq!(result.tooltip, "AI Task Manager\n⚠ Wallet Balance: $-2.50 · Overdue");
         let unknown = snapshot("sub2api@tray-wallet", "Wallet", vec![
             Metric::text("Type", "Unknown type".into()),
             Metric::text("Remaining amount", "15.00".into()),
@@ -468,7 +482,7 @@ mod tests {
         assert_eq!(result.remaining_percentages, vec![82, 37]);
         assert_eq!(
             result.tooltip,
-            "Pane\nCodex Session: 82% left, Weekly: 37% left"
+            "AI Task Manager\nCodex Session: 82% left, Weekly: 37% left"
         );
     }
 
@@ -488,7 +502,7 @@ mod tests {
         assert_eq!(result.remaining_percentages, vec![85]);
         assert_eq!(
             result.tooltip,
-            "Pane\nCodex Weekly: 85% left\nClaude Session: 30% left"
+            "AI Task Manager\nCodex Weekly: 85% left\nClaude Session: 30% left"
         );
     }
 
@@ -512,7 +526,7 @@ mod tests {
         let result = project_main_tray(&snapshots, &cfg, false);
 
         assert_eq!(result.remaining_percentages, vec![40]);
-        assert_eq!(result.tooltip, "Pane\nClaude Work Session: 40% left");
+        assert_eq!(result.tooltip, "AI Task Manager\nClaude Work Session: 40% left");
         assert_eq!(cfg.provider_order, vec!["claude@home", "claude@work"]);
     }
 
@@ -539,7 +553,7 @@ mod tests {
         assert_eq!(result.remaining_percentages, vec![40, 80]);
         assert_eq!(
             result.tooltip,
-            "Pane\nCodex Monthly: 40% left, Session: 80% left"
+            "AI Task Manager\nCodex Monthly: 40% left, Session: 80% left"
         );
     }
 
@@ -568,7 +582,7 @@ mod tests {
         assert_eq!(result.remaining_percentages, vec![45, 75]);
         assert_eq!(
             result.tooltip,
-            "Pane\nCodex Session: 90% left\nClaude Weekly: 45% left, Session: 75% left"
+            "AI Task Manager\nCodex Session: 90% left\nClaude Weekly: 45% left, Session: 75% left"
         );
     }
 
@@ -594,10 +608,12 @@ mod tests {
         let result = project_main_tray(&snapshots, &cfg, false);
 
         assert_eq!(result.remaining_percentages, vec![93]);
-        assert!(result.tooltip.contains("\nP5 Usage: 95% left"));
+        // The point of this test: the pin displaces the LAST normal provider
+        // and then survives the capacity trim, which eats from the end.
         assert!(!result.tooltip.contains("\nP6 Usage"));
         assert!(result.tooltip.contains("\nP7 Usage: 93% left"));
-        assert_eq!(result.tooltip.lines().count(), 7);
+        assert!(result.tooltip.lines().count() <= 7);
+        assert!(result.tooltip.encode_utf16().count() <= TOOLTIP_UTF16_CAPACITY);
     }
 
     #[test]
@@ -610,7 +626,7 @@ mod tests {
         let result = project_main_tray(&[stale], &cfg, false);
 
         assert_eq!(result.remaining_percentages, vec![66]);
-        assert_eq!(result.tooltip, "Pane\n⚠ Codex Weekly: 66% left");
+        assert_eq!(result.tooltip, "AI Task Manager\n⚠ Codex Weekly: 66% left");
     }
 
     #[test]
@@ -638,7 +654,11 @@ mod tests {
 
     #[test]
     fn tooltip_keeps_a_complete_line_at_the_exact_utf16_limit() {
-        let provider_name = "a".repeat(106);
+        // Sized off the constants so a renamed title re-tunes the fixture
+        // instead of silently changing what this test is measuring.
+        let provider_name = "a".repeat(
+            TOOLTIP_UTF16_CAPACITY - TOOLTIP_TITLE.encode_utf16().count() - "\n Usage: 50% left".len(),
+        );
         let snapshots = vec![snapshot(
             "p1",
             &provider_name,
@@ -658,7 +678,7 @@ mod tests {
 
         let result = project_main_tray(&[stale], &config(&["p1"]), false);
 
-        assert_eq!(result.tooltip, "Pane");
+        assert_eq!(result.tooltip, "AI Task Manager");
         assert_eq!(result.icon_mode, MainTrayIconMode::Logo);
         assert!(result.remaining_percentages.is_empty());
     }
@@ -667,7 +687,11 @@ mod tests {
     fn tooltip_capacity_keeps_a_complete_two_metric_line_at_the_utf16_limit() {
         let snapshots = vec![snapshot(
             "p1",
-            &"a".repeat(86),
+            &"a".repeat(
+                TOOLTIP_UTF16_CAPACITY
+                    - TOOLTIP_TITLE.encode_utf16().count()
+                    - "\n Session: 50% left, Weekly: 50% left".len(),
+            ),
             vec![progress("Session", 50.0), progress("Weekly", 50.0)],
         )];
 
@@ -677,8 +701,12 @@ mod tests {
         assert_eq!(
             result.tooltip,
             format!(
-                "Pane\n{} Session: 50% left, Weekly: 50% left",
-                "a".repeat(86)
+                "{TOOLTIP_TITLE}\n{} Session: 50% left, Weekly: 50% left",
+                "a".repeat(
+                    TOOLTIP_UTF16_CAPACITY
+                        - TOOLTIP_TITLE.encode_utf16().count()
+                        - "\n Session: 50% left, Weekly: 50% left".len(),
+                )
             )
         );
         assert_eq!(result.icon_mode, MainTrayIconMode::Numbers);
@@ -695,7 +723,7 @@ mod tests {
 
         let result = project_main_tray(&snapshots, &config(&["p1"]), false);
 
-        assert_eq!(result.tooltip, "Pane");
+        assert_eq!(result.tooltip, "AI Task Manager");
         assert_eq!(result.icon_mode, MainTrayIconMode::Logo);
         assert!(result.remaining_percentages.is_empty());
     }
@@ -745,10 +773,10 @@ mod tests {
 
         assert_eq!(en.remaining_percentages, zh.remaining_percentages);
         assert_eq!(en.remaining_percentages, ru.remaining_percentages);
-        assert_eq!(zh.tooltip, "Pane\nCodex 每周: 剩余 77%，会话: 剩余 90%");
+        assert_eq!(zh.tooltip, "AI Task Manager\nCodex 每周: 剩余 77%，会话: 剩余 90%");
         assert_eq!(
             ru.tooltip,
-            "Pane\nCodex За неделю: осталось 77%, Сессия: осталось 90%"
+            "AI Task Manager\nCodex За неделю: осталось 77%, Сессия: осталось 90%"
         );
     }
 
@@ -760,7 +788,7 @@ mod tests {
 
         assert_eq!(result.icon_mode, MainTrayIconMode::Logo);
         assert!(result.remaining_percentages.is_empty());
-        assert_eq!(result.tooltip, "Pane\nCodex Weekly: 77% left");
+        assert_eq!(result.tooltip, "AI Task Manager\nCodex Weekly: 77% left");
     }
 
     #[test]
@@ -775,7 +803,7 @@ mod tests {
 
         assert_eq!(result.icon_mode, MainTrayIconMode::Logo);
         assert!(result.remaining_percentages.is_empty());
-        assert_eq!(result.tooltip, "Pane");
+        assert_eq!(result.tooltip, "AI Task Manager");
     }
 
     #[test]
@@ -814,7 +842,7 @@ mod tests {
         let result = project_main_tray(&snapshots, &cfg, false);
 
         assert_eq!(result.remaining_percentages, vec![30]);
-        assert_eq!(result.tooltip, "Pane\nClaude Weekly: 30% left");
+        assert_eq!(result.tooltip, "AI Task Manager\nClaude Weekly: 30% left");
     }
 
     #[test]
@@ -832,7 +860,7 @@ mod tests {
         let result = project_main_tray(&snapshots, &cfg, false);
 
         assert_eq!(result.remaining_percentages, vec![65]);
-        assert_eq!(result.tooltip, "Pane\nCodex New: 65% left");
+        assert_eq!(result.tooltip, "AI Task Manager\nCodex New: 65% left");
     }
 
     #[test]
@@ -851,8 +879,13 @@ mod tests {
 
         let result = project_main_tray(&snapshots, &config(&order_refs), false);
 
-        assert_eq!(result.tooltip.lines().count(), 7);
+        // Six is the SELECTION cap; the capacity trim can take it lower, so
+        // this pins the ceiling rather than an exact count. The title spends
+        // 15 of the 127 UTF-16 units Windows allows, which is why six 19-unit
+        // lines no longer all fit -- see `title_length_matches_the_builder`.
+        assert!(result.tooltip.lines().count() <= 7);
         assert!(!result.tooltip.contains("\nP7 Usage"));
+        assert!(result.tooltip.encode_utf16().count() <= TOOLTIP_UTF16_CAPACITY);
     }
 
     #[test]
@@ -868,8 +901,8 @@ mod tests {
         cfg.disabled.clear();
         let reenabled = project_main_tray(&snapshots, &cfg, false);
 
-        assert!(disabled.tooltip.starts_with("Pane\nClaude"));
-        assert!(reenabled.tooltip.starts_with("Pane\nCodex"));
+        assert!(disabled.tooltip.starts_with("AI Task Manager\nClaude"));
+        assert!(reenabled.tooltip.starts_with("AI Task Manager\nCodex"));
         assert_eq!(cfg.provider_order, vec!["codex", "claude"]);
     }
 
@@ -909,7 +942,7 @@ mod tests {
 
         assert_eq!(result.icon_mode, MainTrayIconMode::Logo);
         assert!(result.remaining_percentages.is_empty());
-        assert_eq!(result.tooltip, "Pane");
+        assert_eq!(result.tooltip, "AI Task Manager");
         assert_eq!(cfg.provider_order, vec!["onenewapi@k1", "onenewapi@k2"]);
     }
 
@@ -936,7 +969,7 @@ mod tests {
         assert_eq!(result.remaining_percentages, vec![60]);
         assert_eq!(
             result.tooltip,
-            "Pane\nSite · Key 2 Usage: 60% left\nCodex Session: 90% left"
+            "AI Task Manager\nSite · Key 2 Usage: 60% left\nCodex Session: 90% left"
         );
         assert_eq!(
             cfg.provider_order,
@@ -969,8 +1002,33 @@ mod tests {
     }
 
     #[test]
+    fn title_length_matches_the_builder() {
+        // The defect this pins: `tooltip_utf16_len` carried the title's length
+        // as a bare `4` while `tooltip_from_lines` carried the string itself.
+        // Renaming the app moved the string and not the number, so every
+        // tooltip ran 11 UTF-16 units past a cap Windows enforces by
+        // truncating. Neither function is wrong alone; they have to agree.
+        let lines: Vec<(&str, String)> = vec![
+            ("p1", "Claude Session: 50% left".into()),
+            ("p2", "Codex Weekly: 30% left".into()),
+        ];
+        assert_eq!(
+            tooltip_from_lines(&lines).encode_utf16().count(),
+            tooltip_utf16_len(&lines),
+            "the builder and the capacity arithmetic disagree about the title",
+        );
+    }
+
+    #[test]
+    fn the_title_alone_fits_in_what_windows_accepts() {
+        assert!(TOOLTIP_TITLE.encode_utf16().count() < TOOLTIP_UTF16_CAPACITY);
+    }
+
+    #[test]
     fn tooltip_keeps_a_complete_line_just_below_the_utf16_limit() {
-        let provider_name = "a".repeat(105);
+        let provider_name = "a".repeat(
+            TOOLTIP_UTF16_CAPACITY - TOOLTIP_TITLE.encode_utf16().count() - "\n Usage: 50% left".len() - 1,
+        );
         let snapshots = vec![snapshot(
             "p1",
             &provider_name,

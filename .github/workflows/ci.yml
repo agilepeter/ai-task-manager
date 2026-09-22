@@ -14,6 +14,7 @@ on:
       - "Cargo.lock"
       - ".github/workflows/ci.yml"
       - "src/**"
+      - "scripts/**"
       - "index.html"
       - "package.json"
       - "package-lock.json"
@@ -57,7 +58,7 @@ jobs:
           echo "$changed"
           rust=false; web=false
           echo "$changed" | grep -qE '^(crates/|src-tauri/|Cargo\.(toml|lock)$|\.github/workflows/ci\.yml$)' && rust=true
-          echo "$changed" | grep -qE '^(src/|index\.html$|package(-lock)?\.json$|tsconfig\.json$|vite\.config\.ts$|\.github/workflows/ci\.yml$)' && web=true
+          echo "$changed" | grep -qE '^(src/|scripts/|index\.html$|package(-lock)?\.json$|tsconfig\.json$|vite\.config\.ts$|\.github/workflows/ci\.yml$)' && web=true
           echo "rust=$rust" >> "$GITHUB_OUTPUT"; echo "web=$web" >> "$GITHUB_OUTPUT"
 
   frontend:
@@ -74,6 +75,11 @@ jobs:
       - run: npm ci
       - name: Type-check and build
         run: npm run build
+      # These 12 tests existed for weeks with no runner: not in package.json,
+      # not here. They passed the whole time, which is exactly why nobody
+      # noticed they were never being asked.
+      - name: Frontend tests
+        run: npm test
 
   windows:
     needs: changes
