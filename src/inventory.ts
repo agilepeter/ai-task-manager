@@ -4,6 +4,9 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { showLedger } from "./ledger";
+import { localeTag, plural, t } from "./i18n";
+
+const T = (k: string, v?: Record<string, string | number>) => t(`inventory.${k}`, v);
 
 interface McpServer {
   name: string;
@@ -144,8 +147,8 @@ function inScope(item: { scope: string; project: string | null }): boolean {
 }
 
 function scopeChip(item: { scope: string; project: string | null }): string {
-  const label = item.scope === "user" ? "user" : projectLabel(item.project ?? "project");
-  const tip = item.scope === "user" ? "Available in every project" : (item.project ?? "");
+  const label = item.scope === "user" ? T("scope.userChip") : projectLabel(item.project ?? "project");
+  const tip = item.scope === "user" ? T("scope.userTip") : (item.project ?? "");
   return `<span class="inv-chip" title="${esc(tip)}">${esc(label)}</span>`;
 }
 
@@ -182,35 +185,36 @@ function renderOpportunities(list: Opportunity[]): string {
       <div class="inv-opp inv-opp-${o.kind}">
         <div class="inv-opp-title"><span class="inv-dot"></span>${esc(o.title)}</div>
         <p class="inv-opp-detail">${esc(o.detail)}</p>
-        ${o.learnUrl ? `<button class="inv-learn" data-link="${esc(o.learnUrl)}">Learn more ↗</button>` : ""}
+        ${o.learnUrl ? `<button class="inv-learn" data-link="${esc(o.learnUrl)}">${esc(T("learnMore"))}</button>` : ""}
       </div>`,
     )
     .join("");
   const filter = `
-    <label class="inv-filter">Show
+    <label class="inv-filter">${esc(T("filter.show"))}
       <select id="inv-kind">
-        <option value="all"${kindFilter === "all" ? " selected" : ""}>Everything (${list.length})</option>
-        <option value="tighten"${kindFilter === "tighten" ? " selected" : ""}>Gaps to tighten (${list.filter((o) => o.kind === "tighten").length})</option>
-        <option value="learn"${kindFilter === "learn" ? " selected" : ""}>Things to learn (${list.filter((o) => o.kind === "learn").length})</option>
+        <option value="all"${kindFilter === "all" ? " selected" : ""}>${esc(T("filter.everything", { n: list.length }))}</option>
+        <option value="tighten"${kindFilter === "tighten" ? " selected" : ""}>${esc(T("filter.tighten", { n: list.filter((o) => o.kind === "tighten").length }))}</option>
+        <option value="learn"${kindFilter === "learn" ? " selected" : ""}>${esc(T("filter.learn", { n: list.filter((o) => o.kind === "learn").length }))}</option>
       </select>
     </label>`;
   return section(
     "opportunities",
-    "Opportunities",
+    T("section.opportunities"),
     shown.length,
     body,
-    list.length === 0
-      ? "Nothing to flag. This setup is pinned, scoped and guarded."
-      : "Nothing in this category.",
+    list.length === 0 ? T("empty.opportunitiesNone") : T("empty.opportunitiesFiltered"),
     { lead: list.length ? filter : "" },
   );
 }
 
-const TIER_LABEL: Record<string, string> = {
-  "enterprise-verified": "Enterprise Verified",
-  recommended: "Recommended",
-  emerging: "Emerging",
-};
+/// The tier vocabulary the MCP Trust Index publishes. Falls back to the raw
+/// tier string for a value this build does not know yet.
+function tierLabel(tier: string): string {
+  if (tier === "enterprise-verified") return T("trust.enterpriseVerified");
+  if (tier === "recommended") return T("trust.recommended");
+  if (tier === "emerging") return T("trust.emerging");
+  return tier;
+}
 
 function bareName(spec: string): string {
   const at = spec.startsWith("@") ? spec.indexOf("@", 1) : spec.indexOf("@");
@@ -223,8 +227,9 @@ function trustChip(s: McpServer): string {
   if (!trust?.enabled || !trust.ratings.length || !s.package) return "";
   const r = trust.ratings.find((x) => bareName(x.package) === bareName(s.package!));
   if (!r) return "";
-  if (!r.tier) return `<span class="inv-chip inv-trust-none" title="Not on the MCP Trust Index. That is not a verdict: most servers have not been reviewed.">Not rated</span>`;
-  return `<span class="inv-chip inv-trust" title="MCP Trust Index: ${esc(r.listedAs ?? "")}, ${esc(TIER_LABEL[r.tier] ?? r.tier)}, score ${r.score ?? "?"} of 100">${esc(TIER_LABEL[r.tier] ?? r.tier)} ${r.score ?? ""}</span>`;
+  if (!r.tier) return `<span class="inv-chip inv-trust-none" title="${esc(T("trust.notRatedTip"))}">${esc(T("trust.notRated"))}</span>`;
+  const tier = tierLabel(r.tier);
+  return `<span class="inv-chip inv-trust" title="${esc(T("trust.tooltip", { listedAs: r.listedAs ?? "", tier, score: r.score ?? "?" }))}">${esc(tier)} ${r.score ?? ""}</span>`;
 }
 
 async function loadTrust(): Promise<void> {
@@ -248,16 +253,16 @@ function pinKey(s: McpServer): string {
 function pinPanel(s: McpServer): string {
   if (pin?.key !== pinKey(s)) return "";
   if (pin.done) return `<div class="inv-pin"><p class="inv-pin-ok">${esc(pin.note)}</p></div>`;
-  if (!pin.plan) return `<div class="inv-pin"><p class="dt-caption">${esc(pin.note || "Working out the change…")}</p></div>`;
+  if (!pin.plan) return `<div class="inv-pin"><p class="dt-caption">${esc(pin.note || T("pin.workingOut"))}</p></div>`;
   const p = pin.plan;
   return `<div class="inv-pin">
-      <p class="dt-caption">In ${esc(p.file)}${p.occurrences > 1 ? `, ${p.occurrences} places` : ""}:</p>
+      <p class="dt-caption">${esc(plural("inventory.pin.inFile", p.occurrences, { file: p.file }))}</p>
       <pre class="inv-diff"><span class="inv-del">- "${esc(p.from)}"</span>\n<span class="inv-add">+ "${esc(p.to)}"</span></pre>
-      <p class="dt-caption">${esc(p.installedVersion)} is what already runs here, read from the local package cache. Nothing else in the file changes, a backup is saved beside it, and the app that uses this server picks the pin up when it restarts.</p>
+      <p class="dt-caption">${esc(T("pin.explain", { version: p.installedVersion }))}</p>
       ${pin.note ? `<p class="lg-error" role="alert">${esc(pin.note)}</p>` : ""}
       <div class="dt-rule-actions"><span class="spacer"></span>
-        <button class="inv-learn" data-pin-cancel>Cancel</button>
-        <button class="lg-save" data-pin-apply>Apply</button>
+        <button class="inv-learn" data-pin-cancel>${esc(t("dialog.cancel"))}</button>
+        <button class="lg-save" data-pin-apply>${esc(T("pin.apply"))}</button>
       </div>
     </div>`;
 }
@@ -267,8 +272,8 @@ function renderMcp(list: McpServer[]): string {
     .map((s) => {
       const what = s.package ?? s.target;
       const facts = [
-        s.transport === "stdio" ? "runs locally" : `remote · ${s.transport}`,
-        s.envCount > 0 ? `${s.envCount} credential${s.envCount === 1 ? "" : "s"}` : "",
+        s.transport === "stdio" ? T("mcp.runsLocally") : T("mcp.remote", { transport: s.transport }),
+        s.envCount > 0 ? plural("inventory.mcp.credentials", s.envCount) : "",
       ].filter(Boolean);
       return `
         <div class="inv-row">
@@ -276,39 +281,44 @@ function renderMcp(list: McpServer[]): string {
             <span class="inv-name">${esc(s.name)}</span>
             <span class="inv-sub" title="${esc(what)}">${esc(what)}</span>
           </div>
-          <div class="inv-row-meta">${facts.map((f) => `<span class="inv-fact">${esc(f)}</span>`).join("")}${s.pinTo && pin?.key !== pinKey(s) ? `<button class="inv-chip inv-pin-btn" data-pin="${esc(pinKey(s))}" title="Pin to ${esc(s.pinTo)}. Shows the exact change first.">Pin…</button>` : ""}${trustChip(s)}${s.client === "Claude Code" ? scopeChip(s) : `<span class="inv-chip" title="Loaded by ${esc(s.client)}">${esc(s.client)}</span>`}</div>
+          <div class="inv-row-meta">${facts.map((f) => `<span class="inv-fact">${esc(f)}</span>`).join("")}${s.pinTo && pin?.key !== pinKey(s) ? `<button class="inv-chip inv-pin-btn" data-pin="${esc(pinKey(s))}" title="${esc(T("pin.buttonTip", { version: s.pinTo }))}">${esc(T("pin.button"))}</button>` : ""}${trustChip(s)}${s.client === "Claude Code" ? scopeChip(s) : `<span class="inv-chip" title="${esc(T("mcp.loadedBy", { client: s.client }))}">${esc(s.client)}</span>`}</div>
         </div>${pinPanel(s)}`;
     })
     .join("");
   const apps = [...new Set((inventory?.mcpServers ?? []).map((s) => s.client))];
   const on = host?.trustLookup() === true;
   const status = !on
-    ? "Off. Turning it on downloads the public list from staas.fund once a day and matches it on this computer. Nothing about your setup is sent."
+    ? T("trust.offNote")
     : trust?.error
-      ? `Could not fetch the list: ${trust.error}`
+      ? T("trust.fetchError", { error: trust.error })
       : trust?.fetchedAt
-        ? `${trust.listed} servers listed · updated ${new Date(trust.fetchedAt).toLocaleDateString([], { month: "short", day: "numeric" })} · matched on this computer`
-        : "Loading…";
-  const trustLead = `<label class="inv-filter">Trust ratings
+        ? T("trust.status", {
+            listed: trust.listed,
+            date: new Date(trust.fetchedAt).toLocaleDateString(localeTag(), { month: "short", day: "numeric" }),
+          })
+        : t("detail.loading");
+  const trustLead = `<label class="inv-filter">${esc(T("trust.label"))}
       <select id="inv-trust">
-        <option value="off"${on ? "" : " selected"}>Off</option>
-        <option value="on"${on ? " selected" : ""}>On</option>
+        <option value="off"${on ? "" : " selected"}>${esc(t("settings.alertOff"))}</option>
+        <option value="on"${on ? " selected" : ""}>${esc(T("trust.on"))}</option>
       </select>
-      <button class="lg-link" data-link="https://staas.fund/mcp/">About the index</button>
+      <button class="lg-link" data-link="https://staas.fund/mcp/">${esc(T("trust.aboutIndex"))}</button>
     </label><p class="dt-caption inv-trust-note">${esc(status)}</p>`;
   const lead =
     trustLead +
     (apps.length > 1
-      ? `<label class="inv-filter">App
+      ? `<label class="inv-filter">${esc(T("mcp.appLabel"))}
           <select id="inv-app">
-            <option value="${ALL_APPS}"${appFilter === ALL_APPS ? " selected" : ""}>All apps</option>
+            <option value="${ALL_APPS}"${appFilter === ALL_APPS ? " selected" : ""}>${esc(T("mcp.allApps"))}</option>
             ${apps.map((a) => `<option value="${esc(a)}"${appFilter === a ? " selected" : ""}>${esc(a)}</option>`).join("")}
           </select>
         </label>`
       : "");
-  return section("mcp", "MCP servers", list.length, rows, "No MCP servers configured for this scope.", { lead });
+  return section("mcp", T("section.mcp"), list.length, rows, T("empty.mcp"), { lead });
 }
 
+/// MB/GB stay English: format tokens, not prose, same as detail.ts's fileSize()
+/// MB/KB and money()'s $.
 function mbLabel(bytes: number): string {
   const mb = bytes / 1048576;
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
@@ -319,9 +329,9 @@ function upLabel(secs: number): string {
   const d = Math.floor(secs / 86400);
   const h = Math.floor((secs % 86400) / 3600);
   const m = Math.floor((secs % 3600) / 60);
-  if (d) return `${d}d ${h}h`;
-  if (h) return `${h}h ${m}m`;
-  return `${Math.max(1, m)}m`;
+  if (d) return t("time.daysHours", { d, h });
+  if (h) return t("time.hoursMins", { h, m });
+  return t("time.mins", { m: Math.max(1, m) });
 }
 
 /// The Task Manager view: what is in memory right now, heaviest first. The
@@ -333,11 +343,17 @@ function renderRunning(): string {
   const bar = total > 0 ? running.map((r) => r.rssBytes / total) : [];
   const rows = running
     .map((r, i) => {
-      const copies = r.instances > 1 ? `<span class="inv-chip run-dupe" title="Each client app that has this server configured starts its own copy.">&times;${r.instances}</span>` : "";
+      const copies = r.instances > 1 ? `<span class="inv-chip run-dupe" title="${esc(T("running.copiesTip"))}">&times;${r.instances}</span>` : "";
       const end = ending === r.name
-        ? `<span class="run-confirm">End ${esc(r.name)}? <button class="mini-btn run-yes" data-end-yes="${esc(r.name)}">End task</button><button class="mini-btn" data-end-no="1">Cancel</button></span>`
-        : `<button class="mini-btn run-end" data-end="${esc(r.name)}" title="Ask this server to stop. Your client starts a fresh copy the next time it needs one.">End task</button>`;
-      const where = r.configured ? esc(r.client ?? "") : `<span class="inv-chip run-unknown" title="Running, but no config file this app can read declares it.">not in a config</span>`;
+        ? `<span class="run-confirm">${esc(T("running.endConfirm", { name: r.name }))} <button class="mini-btn run-yes" data-end-yes="${esc(r.name)}">${esc(T("running.endTask"))}</button><button class="mini-btn" data-end-no="1">${esc(t("dialog.cancel"))}</button></span>`
+        : `<button class="mini-btn run-end" data-end="${esc(r.name)}" title="${esc(T("running.endTip"))}">${esc(T("running.endTask"))}</button>`;
+      const where = r.configured
+        ? esc(r.client ?? "")
+        : `<span class="inv-chip run-unknown" title="${esc(T("running.notInConfigTip"))}">${esc(T("running.notInConfig"))}</span>`;
+      const processes = plural("inventory.running.processCount", r.pids.length);
+      // `where` may itself carry a <span> chip's markup (the "not in a config" case),
+      // so this line is built from already-escaped pieces and not esc()-wrapped again.
+      const rowSub = T("running.rowSub", { where, time: upLabel(r.elapsedSecs), processes });
       return `
       <div class="inv-row run-row">
         <div class="inv-row-main">
@@ -347,22 +363,20 @@ function renderRunning(): string {
           <span class="run-mem">${mbLabel(r.rssBytes)}</span>
         </div>
         <div class="run-meter"><i style="--w:${(bar[i] * 100).toFixed(1)}%"></i></div>
-        <div class="inv-row-sub">${where} &middot; up ${upLabel(r.elapsedSecs)} &middot; ${r.pids.length} process${r.pids.length === 1 ? "" : "es"}</div>
+        <div class="inv-row-sub">${rowSub}</div>
         <div class="run-actions">${end}</div>
       </div>`;
     })
     .join("");
   const lead = running.length
-    ? `<p class="inv-note run-lead">${mbLabel(total)} of memory across ${procCount} process${procCount === 1 ? "" : "es"}. Servers start when a client asks for one and stay for the session.</p>`
+    ? `<p class="inv-note run-lead">${esc(T("running.summary", { mem: mbLabel(total), processes: plural("inventory.running.processCount", procCount) }))}</p>`
     : "";
   return section(
     "running",
-    "Running now",
+    T("section.running"),
     running.length,
     rows,
-    runningError
-      ? `Could not read the process list: ${runningError}`
-      : "No MCP servers are running. They start when a client asks for one.",
+    runningError ? T("empty.runningError", { error: runningError }) : T("empty.running"),
     { lead },
   );
 }
@@ -374,14 +388,14 @@ function renderSignIns(): string {
     .map((d) => {
       const probes = d.probes
         .map((p) => {
-          const mark = p.found === null ? "not opened" : p.found ? "found" : "missing";
+          const mark = p.found === null ? T("signins.notOpened") : p.found ? T("signins.found") : T("signins.missing");
           const cls = p.found === null ? "sig-unknown" : p.found ? "sig-found" : "sig-missing";
-          return `<div class="sig-probe"><span class="inv-chip ${cls}">${mark}</span><code>${esc(p.location)}</code></div>`;
+          return `<div class="sig-probe"><span class="inv-chip ${cls}">${esc(mark)}</span><code>${esc(p.location)}</code></div>`;
         })
         .join("");
       const unverified = d.verifiedHere
         ? ""
-        : `<span class="inv-chip sig-unverified" title="This provider's layout came across from the Windows build and has not been checked on this operating system. A missing sign-in here may mean the app is looking in the wrong place.">unverified on this OS</span>`;
+        : `<span class="inv-chip sig-unverified" title="${esc(T("signins.unverifiedTip"))}">${esc(T("signins.unverified"))}</span>`;
       const hint = d.probes.length && d.probes.every((p) => p.found === false) ? `<p class="sig-hint">${esc(d.hint)}</p>` : "";
       return `
       <div class="inv-row sig-row">
@@ -396,28 +410,28 @@ function renderSignIns(): string {
     .join("");
   return section(
     "signins",
-    "Sign-ins",
+    T("section.signins"),
     signIns.length,
     rows,
-    "Could not read the sign-in locations.",
-    { lead: `<p class="inv-note">Where this app looks for each tool's sign-in, and whether it is there. Nothing is opened: a keychain entry is named, never read.</p>` },
+    T("empty.signins"),
+    { lead: `<p class="inv-note">${esc(T("signins.note"))}</p>` },
   );
 }
 
 function renderTools(inv: Inventory): string {
   const rows = inv.tools
     .map(
-      (t) => `
+      (tool) => `
       <div class="inv-row">
-        <div class="inv-row-main"><span class="inv-name">${esc(t.name)}</span></div>
+        <div class="inv-row-main"><span class="inv-name">${esc(tool.name)}</span></div>
         <div class="inv-row-meta">
-          ${t.mcpServers ? `<span class="inv-fact">${t.mcpServers} MCP server${t.mcpServers === 1 ? "" : "s"}</span>` : ""}
-          <span class="inv-chip" title="${t.kind === "app" ? "Its settings folder exists" : "Its command is on the PATH"}">${t.kind === "app" ? "set up" : "command"}</span>
+          ${tool.mcpServers ? `<span class="inv-fact">${esc(plural("inventory.tools.mcpServerCount", tool.mcpServers))}</span>` : ""}
+          <span class="inv-chip" title="${esc(tool.kind === "app" ? T("tools.viaApp") : T("tools.viaCommand"))}">${esc(tool.kind === "app" ? T("tools.chipApp") : T("tools.chipCommand"))}</span>
         </div>
       </div>`,
     )
     .join("");
-  return section("tools", "AI tools on this computer", inv.tools.length, rows, "None of the AI tools this app knows were found.");
+  return section("tools", T("section.tools"), inv.tools.length, rows, T("empty.tools"));
 }
 
 function defRows(list: Definition[]): string {
@@ -438,12 +452,12 @@ function defRows(list: Definition[]): string {
 function renderSetup(inv: Inventory, agents: Definition[], skills: Definition[]): string {
   const p = inv.permissions;
   const guardrails = [
-    ["Default model", inv.model ?? "not pinned"],
-    ["Permission mode", p.defaultMode ?? "default (asks each time)"],
-    ["Allow rules", String(p.allow)],
-    ["Ask rules", String(p.ask)],
-    ["Deny rules", String(p.deny)],
-    ...inv.hooks.map((h) => [`Hook · ${h.event}`, String(h.count)]),
+    [T("setup.defaultModel"), inv.model ?? T("setup.modelNotPinned")],
+    [T("setup.permissionMode"), p.defaultMode ?? T("setup.modeDefault")],
+    [T("setup.allowRules"), String(p.allow)],
+    [T("setup.askRules"), String(p.ask)],
+    [T("setup.denyRules"), String(p.deny)],
+    ...inv.hooks.map((h) => [T("setup.hookLabel", { event: h.event }), String(h.count)]),
   ]
     .map(
       ([k, v]) => `
@@ -457,11 +471,11 @@ function renderSetup(inv: Inventory, agents: Definition[], skills: Definition[])
     `<div class="inv-grouphead">${esc(title)} <span class="inv-grouphead-n">${list.length}</span></div>` +
     (list.length ? defRows(list) : `<p class="inv-empty">${esc(hint)}</p>`);
   const body =
-    defs("Agents", agents, "No custom agents in this scope.") +
-    defs("Skills", skills, "No skills in this scope.") +
-    `<div class="inv-grouphead">Guardrails</div>${guardrails}`;
+    defs(T("setup.agents"), agents, T("empty.agents")) +
+    defs(T("setup.skills"), skills, T("empty.skills")) +
+    `<div class="inv-grouphead">${esc(T("setup.guardrails"))}</div>${guardrails}`;
   const count = agents.length + skills.length + p.allow + p.ask + p.deny + inv.hooks.length;
-  return section("setup", "Agents, skills & guardrails", count, body, "", { keepBody: true });
+  return section("setup", T("section.setup"), count, body, "", { keepBody: true });
 }
 
 function scopeOptions(inv: Inventory): string {
@@ -472,9 +486,9 @@ function scopeOptions(inv: Inventory): string {
   const opt = (value: string, label: string) =>
     `<option value="${esc(value)}"${scopeFilter === value ? " selected" : ""}>${esc(label)}</option>`;
   return (
-    opt(ALL_SCOPES, "All scopes") +
-    opt(USER_SCOPE, "User (every project)") +
-    [...projects].sort().map((p) => opt(p, `Project · ${projectLabel(p)}`)).join("")
+    opt(ALL_SCOPES, T("scope.all")) +
+    opt(USER_SCOPE, T("scope.user")) +
+    [...projects].sort().map((p) => opt(p, T("scope.project", { project: projectLabel(p) }))).join("")
   );
 }
 
@@ -482,7 +496,7 @@ function render(): void {
   const el = document.querySelector<HTMLElement>("#inventory");
   if (!el) return;
   if (loadError) {
-    el.innerHTML = `<article class="provider"><div class="card-panel"><p class="inv-empty">Could not read the local setup: ${esc(loadError)}</p></div></article>`;
+    el.innerHTML = `<article class="provider"><div class="card-panel"><p class="inv-empty">${esc(T("loadError", { error: loadError }))}</p></div></article>`;
     return;
   }
   if (!inventory) {
@@ -494,17 +508,18 @@ function render(): void {
   const mcp = inv.mcpServers.filter(inScope).filter((s) => appFilter === ALL_APPS || s.client === appFilter);
   const agents = inv.agents.filter(inScope);
   const skills = inv.skills.filter(inScope);
+  const scanned = plural("inventory.projectsScanned", inv.projects);
   el.innerHTML = `
     <div class="inv-toolbar">
-      <label class="inv-filter">Scope
+      <label class="inv-filter">${esc(T("scope.label"))}
         <select id="inv-scope">${scopeOptions(inv)}</select>
       </label>
       <span class="lg-toolbar">
-        <button class="inv-rescan" id="audit-open-btn" title="A scored read of this whole setup, which you can export">Audit</button>
-        <button class="inv-rescan" id="inv-rescan" title="Read the local setup again">Rescan</button>
+        <button class="inv-rescan" id="audit-open-btn" title="${esc(T("audit.tip"))}">${esc(T("audit.button"))}</button>
+        <button class="inv-rescan" id="inv-rescan" title="${esc(T("rescan.tip"))}">${esc(T("rescan.button"))}</button>
       </span>
     </div>
-    <p class="inv-note">Read from this machine only. Names and counts, never keys or prompts. ${inv.projects} project${inv.projects === 1 ? "" : "s"} scanned.</p>
+    <p class="inv-note">${esc(T("note", { scanned }))}</p>
     ${renderOpportunities(inv.opportunities)}
     ${renderRunning()}
     ${renderSignIns()}
@@ -572,6 +587,14 @@ function show(view: View): void {
 /// Switches the main view from elsewhere (the audit's "Open …" links).
 export function showView(view: "usage" | "inventory" | "ledger"): void {
   show(view);
+}
+
+/// Redraws the Inventory tab in place, e.g. after a locale switch (task 7
+/// wires this into the locale-change handler). A no-op while another view is
+/// showing, or before the first load has produced anything to redraw.
+export function rerender(): void {
+  const el = document.querySelector<HTMLElement>("#inventory");
+  if (el && !el.hidden) render();
 }
 
 export function setupViews(h: InventoryHost): void {
@@ -645,7 +668,7 @@ export function setupViews(h: InventoryHost): void {
       }).then(
         (backup) => {
           current.done = true;
-          current.note = `Pinned to ${p.to}. The original is saved as ${backup}.`;
+          current.note = T("pin.doneNote", { to: p.to, backup });
           render();
           void load(); // the finding should now be gone
         },
