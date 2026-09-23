@@ -96,6 +96,12 @@ function escapeForRegex(s) {
 for (const [rel, prefix] of KEYED_SOURCES) {
   test(`every ${prefix}* key referenced in ${rel} exists in en.json`, () => {
     const source = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+    // A key reference sitting only in a comment (e.g. leftover from a rename) must not
+    // count: strip block comments, then line comments, before either regex runs. `//` is
+    // only a comment starter when it is not part of a `://` URL scheme — this file's own
+    // sources have a live https://staas.fund/... call right beside a real T() reference
+    // on the same line, and a plain `//.*$` strip silently eats everything after it.
+    const stripped = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(?<!:)\/\/.*$/gm, "");
     // Direct, fully-qualified references: t("detail.foo") or plural("inventory.foo", n).
     const qualified = new RegExp(`["'](${escapeForRegex(prefix)}[a-zA-Z0-9_.]+)["']`, "g");
     // Views newer than detail.ts alias T(k) => t(`prefix${k}`, v) for their own keys
@@ -103,8 +109,8 @@ for (const [rel, prefix] of KEYED_SOURCES) {
     // literal; reconstruct it here rather than leave this row checking nothing.
     const aliased = /\bT\(\s*["']([a-zA-Z0-9_.]+)["']/g;
     const referenced = new Set([
-      ...[...source.matchAll(qualified)].map((m) => m[1]),
-      ...[...source.matchAll(aliased)].map((m) => `${prefix}${m[1]}`),
+      ...[...stripped.matchAll(qualified)].map((m) => m[1]),
+      ...[...stripped.matchAll(aliased)].map((m) => `${prefix}${m[1]}`),
     ]);
     // plural(key, n)'s key argument is a family's base ("detail.other"), not a
     // literal key: it's valid if the key itself exists, or its ".one" form does.

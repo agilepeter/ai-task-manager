@@ -255,6 +255,8 @@ function pinPanel(s: McpServer): string {
   if (pin.done) return `<div class="inv-pin"><p class="inv-pin-ok">${esc(pin.note)}</p></div>`;
   if (!pin.plan) return `<div class="inv-pin"><p class="dt-caption">${esc(pin.note || T("pin.workingOut"))}</p></div>`;
   const p = pin.plan;
+  // occurrences is always >= 1 here: rewrite() in crates/core/src/pin.rs errors before
+  // returning a plan for a spec with 0 matches, and plan() propagates that with `?`.
   return `<div class="inv-pin">
       <p class="dt-caption">${esc(plural("inventory.pin.inFile", p.occurrences, { file: p.file }))}</p>
       <pre class="inv-diff"><span class="inv-del">- "${esc(p.from)}"</span>\n<span class="inv-add">+ "${esc(p.to)}"</span></pre>
@@ -420,6 +422,8 @@ function renderSignIns(): string {
 
 function renderTools(inv: Inventory): string {
   const rows = inv.tools
+    // Named `tool`, not `t`: this module imports the translator as `t`, and a
+    // same-named callback param here would shadow it silently.
     .map(
       (tool) => `
       <div class="inv-row">
