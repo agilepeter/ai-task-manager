@@ -12,8 +12,10 @@ use crate::spend::{area_top, ProviderSpend, SessionSpend};
 
 const CLASSROOM: &str = "https://staas.fund/classroom/";
 
-/// Every finding id this module can emit (see inventory::FINDING_IDS).
-#[allow(dead_code)]
+/// The test-side key registry (see inventory::FINDING_IDS): every finding id
+/// this module can emit. Only `i18n.rs`'s test module reads this, so it does
+/// not exist in a release build at all.
+#[cfg(test)]
 pub(crate) const FINDING_IDS: &[&str] = &["mix-top-heavy", "areas-unsorted", "session-long-lived"];
 
 /// Below this much 30-day spend the mix is noise, not a pattern.

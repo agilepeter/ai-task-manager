@@ -177,8 +177,10 @@ pub fn compare(samples: &[ModelCost], price_of: impl Fn(&str) -> Option<Price>) 
     rows
 }
 
-/// Every finding id this module can emit (see inventory::FINDING_IDS).
-#[allow(dead_code)]
+/// The test-side key registry (see inventory::FINDING_IDS): every finding id
+/// this module can emit. Only `i18n.rs`'s test module reads this, so it does
+/// not exist in a release build at all.
+#[cfg(test)]
 pub(crate) const FINDING_IDS: &[&str] = &["pricing-cache-ttl", "pricing-drift"];
 
 /// What the comparison is worth telling the user. Agreement says nothing.

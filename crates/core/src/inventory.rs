@@ -159,12 +159,12 @@ impl Opportunity {
     }
 }
 
-/// Every finding id this module can emit, so a test can walk the JSON files
-/// and confirm each one has the keys it needs, and that nothing in the JSON
-/// claims to be a finding this module never produces. Only `i18n.rs`'s test
-/// module reads this -- a non-test build sees no caller at all, hence the
-/// `allow`.
-#[allow(dead_code)]
+/// The test-side key registry: every finding id this module can emit, so a
+/// test can walk the JSON files and confirm each one has the keys it needs,
+/// and that nothing in the JSON claims to be a finding this module never
+/// produces. Only `i18n.rs`'s test module reads this, so it does not exist
+/// in a release build at all.
+#[cfg(test)]
 pub(crate) const FINDING_IDS: &[&str] = &[
     "mcp-unpinned",
     "mcp-env-secrets",

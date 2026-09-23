@@ -253,18 +253,16 @@ mod tests {
             tools: vec![AiTool { name: "Claude Code".into(), kind: "app".into(), mcp_servers: 1 }],
             hooks: vec![HookEvent { event: "SessionEnd".into(), count: 2 }],
             permissions: Permissions { default_mode: Some("acceptEdits".into()), allow: 1, ask: 0, deny: 9 },
-            opportunities: vec![Opportunity {
-                id: "areas-unsorted".into(),
-                kind: "tighten".into(),
-                title: "30% of spend has no work area".into(),
-                detail: "… while working in site/client-a for Client A …".into(),
-                // The seat report only ever reads the English `title` above
-                // (see `build()` below) -- these Msgs are unused placeholders,
-                // present only because the struct requires them.
-                title_msg: crate::i18n::Msg::new("finding.test.title"),
-                detail_msg: Some(crate::i18n::Msg::new("finding.test.detail")),
-                learn_url: None,
-            }],
+            // The seat report only ever reads the English `title`/`detail`
+            // below (see `build()`), so the placeholder Msg test_only()
+            // builds in their place is never read by anything this test
+            // exercises.
+            opportunities: vec![Opportunity::test_only(
+                "areas-unsorted",
+                "tighten",
+                "30% of spend has no work area",
+                "… while working in site/client-a for Client A …",
+            )],
             ..Inventory::default()
         };
         let spend = vec![ProviderSpend {

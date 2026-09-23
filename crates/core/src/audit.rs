@@ -39,11 +39,13 @@ pub struct Section {
     pub checks: Vec<Check>,
 }
 
-/// Every `check.<id>.<variant>` key prefix this module can emit on its own
-/// account, plus the `.pass` variant of every finding id it turns into a
-/// check via `from_finding` (see below) -- together, every `check.*` prefix
-/// that can ever reach the popover. Only `i18n.rs`'s test module reads this.
-#[allow(dead_code)]
+/// The test-side key registry: every `check.<id>.<variant>` key prefix this
+/// module can emit on its own account, plus the `.pass` variant of every
+/// finding id it turns into a check via `from_finding` (see below) --
+/// together, every `check.*` prefix that can ever reach the popover. Only
+/// `i18n.rs`'s test module reads this, so it does not exist in a release
+/// build at all.
+#[cfg(test)]
 pub(crate) const CHECK_KEYS: &[&str] = &[
     "check.tools.info",
     "check.mcp.none",
@@ -76,8 +78,9 @@ pub(crate) const CHECK_KEYS: &[&str] = &[
     "check.agents-none.pass",
 ];
 
-/// Only `i18n.rs`'s test module reads this.
-#[allow(dead_code)]
+/// The test-side key registry, matching `CHECK_KEYS` above. Only `i18n.rs`'s
+/// test module reads this, so it does not exist in a release build at all.
+#[cfg(test)]
 pub(crate) const SECTION_KEYS: &[&str] = &["section.setup", "section.guardrails", "section.usage", "section.money"];
 
 #[derive(Serialize, Debug, Clone, PartialEq)]

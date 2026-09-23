@@ -367,8 +367,10 @@ fn mb(bytes: u64) -> u64 {
     bytes / 1_048_576
 }
 
-/// Every finding id this module can emit (see inventory::FINDING_IDS).
-#[allow(dead_code)]
+/// The test-side key registry (see inventory::FINDING_IDS): every finding id
+/// this module can emit. Only `i18n.rs`'s test module reads this, so it does
+/// not exist in a release build at all.
+#[cfg(test)]
 pub(crate) const FINDING_IDS: &[&str] = &["mcp-duplicate-processes", "mcp-running-unconfigured", "mcp-memory"];
 
 /// What the running picture suggests. Same contract as the setup ones: every
