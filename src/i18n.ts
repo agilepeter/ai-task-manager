@@ -68,24 +68,104 @@ export function localeTag(): string {
   return LOCALE_TAGS[active];
 }
 
-export function t(key: string, vars?: Record<string, string | number>): string {
-  // `||`, not `??`: translators hand-edit these files, and a blank cell
-  // (present but "") must paint English rather than nothing, same as an
-  // absent key does.
-  let s = DICTS[active][key] || DICTS.en[key] || key;
-  if (vars) {
-    for (const [k, v] of Object.entries(vars)) {
+/// The wire shape Rust's `Msg` (crates/core/src/i18n.rs) serialises to —
+/// serde's `camelCase` rename leaves these three field names unchanged, so
+/// the JSON Rust sends decodes directly into this shape. `vars` values are
+/// always strings on the wire (Rust's builder stringifies them); `t()`
+/// itself is more permissive (numbers too) for TS-side callers.
+export type Msg = { key: string; vars: Record<string, string>; count?: number | null };
+
+/// CLDR cardinal-plural forms for the nine languages this app plans to ship.
+/// `Locale` is `LOCALES[number]`, so this `Record<Locale, ...>` can only be
+/// keyed by locales that already exist — only en/zh/ru are keyed below.
+/// Tasks 12-17 add a row each as they extend LOCALES, not a new rule; the
+/// full nine-language table (mirrored by `pluralForm` below and by Rust's
+/// `plural_form`, which a test keeps identical to this one) is:
+///   en, es, de, pt-BR: ["one", "other"]
+///   fr:                ["one", "other"]  (0 and 1 both resolve to "one")
+///   ru:                ["one", "few", "many"]
+///   zh, ja, ko:        ["other"]
+export const PLURAL_FORMS: Record<Locale, readonly string[]> = {
+  en: ["one", "other"],
+  zh: ["other"],
+  ru: ["one", "few", "many"],
+};
+
+// Rule-family membership for pluralForm, written for all nine locales this
+// app plans to ship (not just the three keyed in PLURAL_FORMS above) so a
+// future language task adds a locale code to the right family instead of
+// inventing new branch logic. Plain string[], not Locale[]: these families
+// intentionally list locale codes LOCALES doesn't carry yet. ru's %10/%100
+// split doesn't fit a "which family" shape and is handled directly below;
+// en/es/de/pt-BR are the default (n === 1 -> "one"), so they need no row.
+const PLURAL_ALWAYS_OTHER: readonly string[] = ["zh", "ja", "ko"];
+const PLURAL_ONE_IF_0_OR_1: readonly string[] = ["fr"];
+
+/// CLDR cardinal rule for exactly those nine locales. Same rules as Rust's
+/// `plural_form`; `scripts/i18n.test.mjs`/the Rust test suite keep the two
+/// in step.
+export function pluralForm(locale: Locale, n: number): string {
+  if (locale === "ru") {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return "one";
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "few";
+    return "many";
+  }
+  if (PLURAL_ALWAYS_OTHER.includes(locale)) return "other";
+  if (PLURAL_ONE_IF_0_OR_1.includes(locale)) return n === 0 || n === 1 ? "one" : "other";
+  return n === 1 ? "one" : "other"; // en, es, de, pt-BR, and the default for anything else
+}
+
+/// `dict[key]`, empty string treated as absent -- same convention as t()'s
+/// `||` fallback below, factored out so the count-aware path in t() can try
+/// several candidate keys without repeating the "" -> undefined dance.
+function lookupExact(locale: Locale, key: string): string | undefined {
+  return DICTS[locale][key] || undefined;
+}
+
+export function t(key: string, vars?: Record<string, string | number>, count?: number): string {
+  let s: string;
+  if (count === undefined) {
+    // `||`-equivalent (via lookupExact): translators hand-edit these files,
+    // and a blank cell (present but "") must paint English rather than
+    // nothing, same as an absent key does.
+    s = lookupExact(active, key) ?? lookupExact("en", key) ?? key;
+  } else {
+    // key.<form> -> key.other -> key, each through the active -> en -> key
+    // fallback in turn, so a locale missing just the picked form still
+    // prefers English's version of THAT form over jumping straight to
+    // English's "other" or the bare key.
+    const form = pluralForm(active, count);
+    s =
+      lookupExact(active, `${key}.${form}`) ??
+      lookupExact("en", `${key}.${form}`) ??
+      lookupExact(active, `${key}.other`) ??
+      lookupExact("en", `${key}.other`) ??
+      lookupExact(active, key) ??
+      lookupExact("en", key) ??
+      key;
+  }
+  const allVars = count === undefined ? vars : { count, ...vars };
+  if (allVars) {
+    for (const [k, v] of Object.entries(allVars)) {
       s = s.split(`{${k}}`).join(String(v));
     }
   }
   return s;
 }
 
-// one/other is the English-shaped rule; task 8 replaces this with per-locale
-// plural forms via t(key, vars, count), and every call site below is what it
-// will migrate.
+export function tm(msg: Msg): string {
+  return t(msg.key, msg.vars, msg.count ?? undefined);
+}
+
+// Per-locale plural forms via t(key, vars, count) below; every existing call
+// site keeps working unchanged since plural()'s own signature does not
+// move -- an English-active n=1 still resolves the same `.one` form as
+// before, and zh/ru now resolve their own real forms instead of English's
+// one/other split.
 export function plural(key: string, n: number, vars: Record<string, string | number> = {}): string {
-  return t(`${key}.${n === 1 ? "one" : "other"}`, { n, ...vars });
+  return t(key, { n, ...vars }, n);
 }
 
 export function displayMetricLabel(label: string): string {

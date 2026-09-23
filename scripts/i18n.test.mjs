@@ -30,10 +30,76 @@ function tokensOf(value) {
   return new Set([...value.matchAll(/\{([a-zA-Z0-9_]+)\}/g)].map((m) => m[1]));
 }
 
+// Plural-aware machinery (task 8). A count-sensitive key is stored as
+// key.one / key.few / key.many / key.other (src/i18n.ts's t(key, vars,
+// count)); English always carries exactly key.one + key.other, so that pair
+// is what marks a key as a plural family in the first place.
+const PLURAL_SUFFIXES = ["one", "few", "many", "other"];
+
+function stripPluralSuffix(key) {
+  for (const suffix of PLURAL_SUFFIXES) {
+    if (key.endsWith(`.${suffix}`)) return key.slice(0, -(suffix.length + 1));
+  }
+  return key;
+}
+
+const pluralBases = new Set();
+for (const key of Object.keys(dicts.en)) {
+  if (key.endsWith(".one")) {
+    const base = key.slice(0, -".one".length);
+    if (`${base}.other` in dicts.en) pluralBases.add(base);
+  }
+}
+
+// PLURAL_FORMS (locale -> which forms it carries) is parsed out of the real
+// src/i18n.ts rather than re-typed here, so this file and that table cannot
+// silently drift apart. Same parse, independently, on the Rust side
+// (crates/core/src/i18n.rs's plural_forms_match_the_typescript_table) --
+// each reads its own language's source rather than one reading the other's.
+function parsePluralForms(source) {
+  const block = source.match(/PLURAL_FORMS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  assert.ok(block, "could not find a `PLURAL_FORMS = { ... };` block in src/i18n.ts");
+  const table = {};
+  for (const row of block[1].matchAll(/([\w-]+):\s*\[([^\]]*)\]/g)) {
+    table[row[1]] = [...row[2].matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
+  }
+  return table;
+}
+
+const i18nSource = readFileSync(fileURLToPath(new URL("../src/i18n.ts", import.meta.url)), "utf8");
+const PLURAL_FORMS = parsePluralForms(i18nSource);
+
+// {n} and {count} are always allowed to appear or not: English's own .one
+// form sometimes drops the number word entirely ("In {file}:" vs "In
+// {file}, {n} places:"), and a locale is free to do the same or to use
+// {count} instead of {n} for the same slot -- t(key, vars, count)
+// substitutes both.
+const PLURAL_TOKEN_EXEMPT = new Set(["n", "count"]);
+
+for (const base of pluralBases) {
+  test(`${base}: every locale has exactly the forms it needs`, () => {
+    const violations = [];
+    for (const [locale, dict] of Object.entries(dicts)) {
+      const expected = new Set(PLURAL_FORMS[locale]);
+      assert.ok(expected.size > 0, `no PLURAL_FORMS entry parsed for locale "${locale}"`);
+      const actual = new Set(
+        Object.keys(dict)
+          .filter((k) => k.startsWith(`${base}.`))
+          .map((k) => k.slice(base.length + 1))
+          .filter((suffix) => PLURAL_SUFFIXES.includes(suffix)),
+      );
+      const missing = [...expected].filter((f) => !actual.has(f));
+      const extra = [...actual].filter((f) => !expected.has(f));
+      if (missing.length || extra.length) violations.push(`${locale} (missing ${missing}, extra ${extra})`);
+    }
+    assert.deepEqual(violations, [], `${base}: forms don't match PLURAL_FORMS -- ${violations.join("; ")}`);
+  });
+}
+
 for (const locale of otherLocales) {
-  test(`${locale}: has exactly the keys English has`, () => {
-    const enKeys = new Set(Object.keys(dicts.en));
-    const localeKeys = new Set(Object.keys(dicts[locale]));
+  test(`${locale}: has exactly the base keys English has`, () => {
+    const enKeys = new Set(Object.keys(dicts.en).map(stripPluralSuffix));
+    const localeKeys = new Set(Object.keys(dicts[locale]).map(stripPluralSuffix));
     const missing = [...enKeys].filter((k) => !localeKeys.has(k));
     const extra = [...localeKeys].filter((k) => !enKeys.has(k));
     assert.deepEqual({ missing, extra }, { missing: [], extra: [] }, `${locale}: key set differs from English`);
@@ -42,10 +108,22 @@ for (const locale of otherLocales) {
   test(`${locale}: every value keeps the {tokens} its English value has`, () => {
     const mismatches = [];
     for (const [key, value] of Object.entries(dicts[locale])) {
-      const enValue = dicts.en[key];
+      const base = stripPluralSuffix(key);
+      const isPluralForm = base !== key && pluralBases.has(base);
+      // Every form of a plural key is checked against English's .other --
+      // not its own same-named form -- because English's .one sometimes has
+      // a different token set than its .other (see PLURAL_TOKEN_EXEMPT
+      // above), and ru's .few/.many have no same-named English form to
+      // compare against in the first place.
+      const enKey = isPluralForm ? `${base}.other` : key;
+      const enValue = dicts.en[enKey];
       if (enValue === undefined) continue; // extra key, already reported above
-      const enTokens = tokensOf(enValue);
-      const localeTokens = tokensOf(value);
+      let enTokens = tokensOf(enValue);
+      let localeTokens = tokensOf(value);
+      if (isPluralForm) {
+        enTokens = new Set([...enTokens].filter((t) => !PLURAL_TOKEN_EXEMPT.has(t)));
+        localeTokens = new Set([...localeTokens].filter((t) => !PLURAL_TOKEN_EXEMPT.has(t)));
+      }
       const same = enTokens.size === localeTokens.size && [...enTokens].every((t) => localeTokens.has(t));
       if (!same) mismatches.push(key);
     }

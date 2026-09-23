@@ -5,8 +5,9 @@
 //! dictionary per language for both halves instead of a parallel Rust table
 //! that could drift from the JSON one.
 
+use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 
 /// The one list of locales on the Rust side. A later task adds a language by
@@ -182,6 +183,123 @@ pub fn system_ui_locale() -> &'static str {
     locale_for_env_tag(&tag)
 }
 
+/// The wire shape the popover's `tm()` (`src/i18n.ts`) decodes: a message
+/// key plus its substitution vars and an optional plural count. Rust hands
+/// over structured data instead of an already-formatted sentence, so the
+/// popover can pick the active locale's own word order and plural form at
+/// paint time -- this is the type tasks 9-10 build tray/toast sentences
+/// from; nothing constructs one yet.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Msg {
+    pub key: &'static str,
+    pub vars: BTreeMap<&'static str, String>,
+    pub count: Option<i64>,
+}
+
+impl Msg {
+    pub fn new(key: &'static str) -> Self {
+        Self { key, vars: BTreeMap::new(), count: None }
+    }
+
+    /// Builder: `Msg::new("a.b").var("x", 1).var("y", "z")`.
+    pub fn var(mut self, k: &'static str, v: impl std::fmt::Display) -> Self {
+        self.vars.insert(k, v.to_string());
+        self
+    }
+
+    pub fn count(mut self, n: i64) -> Self {
+        self.count = Some(n);
+        self
+    }
+}
+
+/// CLDR cardinal rule for exactly the nine locales this app plans to ship.
+/// Same rules as `pluralForm` in `src/i18n.ts`; `plural_forms_match_the_typescript_table`
+/// keeps the two identical instead of letting them drift apart by hand.
+fn plural_form(locale: &str, n: i64) -> &'static str {
+    match locale {
+        "ru" => {
+            let mod10 = n % 10;
+            let mod100 = n % 100;
+            if mod10 == 1 && mod100 != 11 {
+                "one"
+            } else if (2..=4).contains(&mod10) && !(12..=14).contains(&mod100) {
+                "few"
+            } else {
+                "many"
+            }
+        }
+        "zh" | "ja" | "ko" => "other",
+        "fr" => {
+            if n == 0 || n == 1 {
+                "one"
+            } else {
+                "other"
+            }
+        }
+        // en, es, de, pt-BR, and the default for anything else.
+        _ => {
+            if n == 1 {
+                "one"
+            } else {
+                "other"
+            }
+        }
+    }
+}
+
+/// Shared candidate search behind `render` and (test-only) `render_with`:
+/// try `key.<form>` -> `key.other` -> `key`, each through a `(locale, key)
+/// -> Option<String>` lookup the caller supplies -- production hits the
+/// real `dict()` cache, tests inject a scratch table. Falls back to the
+/// literal key when nothing resolves anywhere, then substitutes {vars} and
+/// {count}.
+fn render_core(lookup_in: impl Fn(&str, &str) -> Option<String>, locale: &str, msg: &Msg) -> String {
+    let candidates: Vec<String> = match msg.count {
+        Some(n) => {
+            let form = plural_form(locale, n);
+            vec![format!("{}.{form}", msg.key), format!("{}.other", msg.key), msg.key.to_string()]
+        }
+        None => vec![msg.key.to_string()],
+    };
+
+    let template = candidates
+        .iter()
+        .find_map(|cand| lookup_in(locale, cand).or_else(|| lookup_in("en", cand)))
+        .unwrap_or_else(|| msg.key.to_string());
+
+    let mut pairs: Vec<(&str, &str)> = msg.vars.iter().map(|(&k, v)| (k, v.as_str())).collect();
+    let count_str = msg.count.map(|n| n.to_string());
+    if let Some(c) = &count_str {
+        pairs.push(("count", c.as_str()));
+    }
+    substitute(&template, &pairs)
+}
+
+/// `key.<plural_form(locale, count)>` -> `key.other` -> `key`; substitutes
+/// {vars} and {count}; each candidate falls back en -> key like `lookup`.
+pub fn render(locale: &str, msg: &Msg) -> String {
+    render_core(|loc, key| non_empty(dict(loc), key).map(str::to_string), locale, msg)
+}
+
+/// `render`, but against an explicit locale -> key -> value table instead of
+/// the static, `include_str!`-backed `dict()` cache. Lets tests exercise
+/// locales (fr, ja) this build doesn't ship yet, and missing-key fallback,
+/// without editing a real locale file.
+#[cfg(test)]
+fn render_with(dicts: &HashMap<&str, HashMap<&str, &str>>, locale: &str, msg: &Msg) -> String {
+    render_core(
+        |loc, key| dicts.get(loc).and_then(|d| d.get(key)).copied().filter(|s| !s.is_empty()).map(str::to_string),
+        locale,
+        msg,
+    )
+}
+
+pub fn t(cfg: &Value, msg: &Msg) -> String {
+    render(resolved_locale(cfg), msg)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +411,111 @@ mod tests {
         assert_eq!(resolved, system_ui_locale());
         assert!(LOCALES.contains(&resolved), "{resolved} is not one of LOCALES");
         assert_ne!(resolved, "xx");
+    }
+
+    #[test]
+    fn msg_builder_serialises_camel_case() {
+        let msg = Msg::new("a.b").var("x", 1).count(2);
+        let value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(value, json!({"key": "a.b", "vars": {"x": "1"}, "count": 2}));
+    }
+
+    /// A scratch locale -> key -> value table for `render_with`, covering
+    /// locales (fr, ja) this build doesn't ship in LOCALES yet, plus an
+    /// English-only key for the fallback test below.
+    fn scratch_dict() -> HashMap<&'static str, HashMap<&'static str, &'static str>> {
+        HashMap::from([
+            (
+                "en",
+                HashMap::from([
+                    ("greet.one", "{count} thing"),
+                    ("greet.other", "{count} things"),
+                    ("enOnly.other", "only in english"),
+                ]),
+            ),
+            (
+                "ru",
+                HashMap::from([
+                    ("greet.one", "{count} штука"),
+                    ("greet.few", "{count} штуки"),
+                    ("greet.many", "{count} штук"),
+                ]),
+            ),
+            ("fr", HashMap::from([("greet.one", "{count} chose"), ("greet.other", "{count} choses")])),
+            ("ja", HashMap::from([("greet.other", "{count} 個")])),
+        ])
+    }
+
+    #[test]
+    fn render_picks_the_locale_s_plural_form() {
+        let dicts = scratch_dict();
+        let msg = |n: i64| Msg::new("greet").count(n);
+        assert_eq!(render_with(&dicts, "ru", &msg(1)), "1 штука");
+        assert_eq!(render_with(&dicts, "ru", &msg(3)), "3 штуки");
+        assert_eq!(render_with(&dicts, "ru", &msg(5)), "5 штук");
+        assert_eq!(render_with(&dicts, "fr", &msg(0)), "0 chose");
+        assert_eq!(render_with(&dicts, "ja", &msg(2)), "2 個");
+        assert_eq!(render_with(&dicts, "en", &msg(1)), "1 thing");
+        assert_eq!(render_with(&dicts, "en", &msg(2)), "2 things");
+    }
+
+    #[test]
+    fn render_falls_back_to_english_then_the_key() {
+        let dicts = scratch_dict();
+        // "enOnly" has no ru forms at all: candidates enOnly.few and
+        // enOnly.other both miss in ru, then enOnly.other hits in en.
+        assert_eq!(render_with(&dicts, "ru", &Msg::new("enOnly").count(3)), "only in english");
+        // Present nowhere -> the literal key comes back unresolved.
+        assert_eq!(render_with(&dicts, "ru", &Msg::new("nowhere.atAll")), "nowhere.atAll");
+    }
+
+    /// Parses the `PLURAL_FORMS` array literal (not its conditional-logic
+    /// twin, `pluralForm`, which would need a much less mechanical parse)
+    /// out of the real `src/i18n.ts`, so the file this test reads is the
+    /// same one a developer edits -- not a hand-copied fixture that could
+    /// silently drift from it.
+    fn parse_plural_forms_table(ts_source: &str) -> HashMap<String, Vec<String>> {
+        let block_re = regex::Regex::new(r"(?s)PLURAL_FORMS[^=]*=\s*\{(.*?)\n\};").expect("valid regex");
+        let block = block_re
+            .captures(ts_source)
+            .unwrap_or_else(|| panic!("could not find a `PLURAL_FORMS = {{ ... }};` block in src/i18n.ts"))
+            .get(1)
+            .unwrap()
+            .as_str();
+        let row_re = regex::Regex::new(r#"([\w-]+):\s*\[([^\]]*)\]"#).expect("valid regex");
+        let form_re = regex::Regex::new(r#""([a-z]+)""#).expect("valid regex");
+        let table: HashMap<String, Vec<String>> = row_re
+            .captures_iter(block)
+            .map(|cap| {
+                let locale = cap[1].to_string();
+                let forms = form_re.captures_iter(&cap[2]).map(|m| m[1].to_string()).collect();
+                (locale, forms)
+            })
+            .collect();
+        assert!(!table.is_empty(), "parsed zero rows out of PLURAL_FORMS in src/i18n.ts");
+        table
+    }
+
+    #[test]
+    fn plural_forms_match_the_typescript_table() {
+        // For each locale PLURAL_FORMS lists in src/i18n.ts, the SET of
+        // forms Rust's plural_form produces over a fixed n sample must
+        // equal that locale's listed forms exactly: every listed form is
+        // reachable (e.g. ru really does hit few and many in this sample,
+        // not just one/many), and Rust never invents a form TypeScript
+        // doesn't know about. A mismatch here means the two files' rules
+        // have drifted apart.
+        let ts_source = include_str!("../../../src/i18n.ts");
+        let table = parse_plural_forms_table(ts_source);
+        let samples: [i64; 12] = [0, 1, 2, 3, 5, 11, 12, 21, 22, 25, 100, 101];
+        for (locale, expected_forms) in &table {
+            let expected: std::collections::BTreeSet<&str> = expected_forms.iter().map(String::as_str).collect();
+            let produced: std::collections::BTreeSet<&str> =
+                samples.iter().map(|&n| plural_form(locale, n)).collect();
+            assert_eq!(
+                produced, expected,
+                "{locale}: plural_form over n={samples:?} produced {produced:?}, but src/i18n.ts's PLURAL_FORMS says {expected:?}"
+            );
+        }
     }
 }
