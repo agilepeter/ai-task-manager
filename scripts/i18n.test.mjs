@@ -224,6 +224,24 @@ for (const locale of otherLocales) {
   });
 }
 
+// A base key is either a bare value or a set of plural forms, never both: a
+// key that carries both is two different sentences hiding under one base
+// (a no-count reading via the bare value, a counted reading via the forms),
+// which reads as one thing everywhere else this file reasons about keys --
+// pluralBases above, and every per-base "has exactly the forms it needs"
+// test it drives, only ever look at .one/.few/.many/.other, so a coexisting
+// bare sibling is invisible to them, not rejected by them.
+test("no base key is both bare and pluralised", () => {
+  const violations = [];
+  for (const [locale, dict] of Object.entries(dicts)) {
+    for (const key of Object.keys(dict)) {
+      if (PLURAL_SUFFIXES.some((suffix) => key.endsWith(`.${suffix}`))) continue;
+      if (PLURAL_SUFFIXES.some((suffix) => `${key}.${suffix}` in dict)) violations.push(`${locale}.${key}`);
+    }
+  }
+  assert.deepEqual(violations, [], `keys that are both a bare value and a set of plural forms: ${violations.join(", ")}`);
+});
+
 test("no value is empty or whitespace-only", () => {
   const violations = [];
   for (const [locale, dict] of Object.entries(dicts)) {

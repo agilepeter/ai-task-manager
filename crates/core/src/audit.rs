@@ -174,16 +174,25 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
     let inv = i.inventory;
     let packaged = inv.mcp_servers.iter().filter(|s| s.package.is_some()).count();
 
-    let mut setup = vec![check_data(
-        "tools",
-        "info",
-        Msg::new("check.tools.info.title").count(inv.tools.len() as i64),
-        if inv.tools.is_empty() {
-            "None of the AI tools this app knows were found.".to_string()
-        } else {
-            inv.tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", ")
-        },
-    )];
+    // The title's own count already reads fine at zero ("0 AI tools found"),
+    // so only the detail needs a branch: a real sentence when the list is
+    // empty, pure data (the joined names, untranslated -- there is nothing
+    // in a name to translate) when it is not.
+    let mut setup = vec![if inv.tools.is_empty() {
+        check(
+            "tools",
+            "info",
+            Msg::new("check.tools.info.title").count(0),
+            Msg::new("check.tools.info.detail"),
+        )
+    } else {
+        check_data(
+            "tools",
+            "info",
+            Msg::new("check.tools.info.title").count(inv.tools.len() as i64),
+            inv.tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "),
+        )
+    }];
     if inv.mcp_servers.is_empty() {
         setup.push(check(
             "mcp",

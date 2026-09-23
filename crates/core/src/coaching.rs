@@ -141,16 +141,18 @@ pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend]) 
         .collect();
     if let Some((worst, days)) = long.iter().max_by(|a, b| a.0.cost.total_cmp(&b.0.cost)) {
         let others = long.len() - 1;
-        // `others` drives an optional trailing clause, not the whole
-        // sentence's grammar, so it is only ever attached as a count when
-        // there is a clause to pick a form for: at 0 the plain, unsuffixed
-        // "finding.session-long-lived.detail" key is looked up directly
-        // (render_core tries the bare key whenever a Msg carries no count
-        // at all), and it is the one form with no trailing clause.
-        let mut detail_msg = Msg::new("finding.session-long-lived.detail").var("cost", money(worst.cost));
-        if others > 0 {
-            detail_msg = detail_msg.count(others as i64);
-        }
+        // `others` picks which of two whole sentences this is, not a
+        // trailing clause bolted onto one: a base key is either a bare
+        // value or a set of plural forms, never both, so "no other session"
+        // and "N other sessions too" are two separate keys rather than one
+        // key that sometimes has a count and sometimes does not. The count
+        // itself is meaningless to the no-others sentence, so it is only
+        // ever set on the Msg that names the other-sessions key.
+        let detail_msg = if others > 0 {
+            Msg::new("finding.session-long-lived.detailOthers").var("cost", money(worst.cost)).count(others as i64)
+        } else {
+            Msg::new("finding.session-long-lived.detail").var("cost", money(worst.cost))
+        };
         push(
             "session-long-lived",
             "learn",

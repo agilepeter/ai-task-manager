@@ -549,13 +549,17 @@ mod tests {
     /// Every finding id each emitting module registers, and every check
     /// prefix `audit.rs` registers: `en.json` has a `.title` (bare, or the
     /// full plural-form set) and a `.detail` (same) for each -- unless the
-    /// id is in `NO_DETAIL`, where the detail is deliberately not a Msg at
-    /// all (pure data, or an empty pass detail; see audit.rs's check_data).
-    /// This is the loud half of the pair with `no_orphan_finding_or_check_keys`
-    /// below: this one catches a registered id nobody wrote a key for.
+    /// id is in `NO_DETAIL`, where NEITHER branch that produces this prefix
+    /// ever carries a detail Msg (pure data, or an empty pass detail; see
+    /// audit.rs's check_data). "check.tools.info" is deliberately NOT here:
+    /// its empty-list branch has a real detail sentence even though its
+    /// names branch does not, so the prefix as a whole still needs the key
+    /// this test would otherwise let it skip. This is the loud half of the
+    /// pair with `no_orphan_finding_or_check_keys` below: this one catches a
+    /// registered id nobody wrote a key for.
     #[test]
     fn every_finding_and_check_id_has_title_and_detail_keys() {
-        const NO_DETAIL: &[&str] = &["check.tools.info", "check.mcp.configured", "check.perm-none.pass"];
+        const NO_DETAIL: &[&str] = &["check.mcp.configured", "check.perm-none.pass"];
         let en = dict("en");
         let has_key_or_forms = |base: &str| -> bool {
             non_empty(en, base).is_some() || ["one", "other"].iter().all(|f| non_empty(en, &format!("{base}.{f}")).is_some())
