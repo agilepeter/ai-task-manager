@@ -8,6 +8,7 @@
 // legend with live values; line charts get a crosshair, bars a per-mark tip.
 
 import { invoke } from "@tauri-apps/api/core";
+import { displayMetricDetail, displayMetricLabel, localeTag, t } from "./i18n";
 
 interface Metric {
   label: string;
@@ -144,16 +145,18 @@ type GroupKey = "model" | "client" | "area" | "project" | "day" | "session";
 /** Rows shown before the rest fold into one "Other" row. */
 const MAX_BAR_ROWS = 12;
 
-const RANGES: [hours: number, label: string][] = [
-  [24, "Last 24 hours"],
-  [24 * 7, "Last 7 days"],
-  [24 * 30, "Last 30 days"],
-  [24 * 90, "Last 90 days"],
+// Values are i18n keys, translated at the point of use (inside render(),
+// never baked in here) so a locale switch is picked up on the next redraw.
+const RANGES: [hours: number, key: string][] = [
+  [24, "detail.range.last24h"],
+  [24 * 7, "detail.range.last7d"],
+  [24 * 30, "detail.range.last30d"],
+  [24 * 90, "detail.range.last90d"],
 ];
 const WINDOWS: [WindowKey, string][] = [
-  ["today", "Today"],
-  ["yesterday", "Yesterday"],
-  ["last30", "Last 30 days"],
+  ["today", "detail.range.today"],
+  ["yesterday", "detail.range.yesterday"],
+  ["last30", "detail.range.last30d"],
 ];
 /** Series slots 1 to 4, fixed order. Validated per theme in styles.css. */
 const SERIES_VARS = ["--viz-1", "--viz-2", "--viz-3", "--viz-4"];
@@ -177,8 +180,13 @@ let clientNote = "";
 /** Every session of the last 30 days, for Group by → Session; null until loaded. */
 let sessionsAll: SessionSpend[] | null = null;
 let sessionNote = "";
-/** Where "Reveal" puts the file. Named so the button says what will open. */
-const REVEAL_IN = /Mac|iPhone|iPad/.test(navigator.platform) ? "Finder" : "your file manager";
+/** Where "Reveal" puts the file. Named so the button says what will open. A
+ * function, not a module-level const, so a locale switch picks it up. */
+function revealWord(): string {
+  return /Mac|iPhone|iPad/.test(navigator.platform)
+    ? t("detail.session.revealFinder")
+    : t("detail.session.revealOther");
+}
 /** What the Spend section is showing, kept so Export CSV saves exactly that. */
 let lastTable: { name: string; headers: string[]; rows: string[][] } | null = null;
 /** Forecasts per card, refreshed with the history. */
@@ -214,22 +222,25 @@ function tokens(n: number): string {
 function when(ms: number, spanHours: number): string {
   const d = new Date(ms);
   return spanHours <= 48
-    ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    : d.toLocaleDateString([], { month: "short", day: "numeric" });
+    ? d.toLocaleTimeString(localeTag(), { hour: "numeric", minute: "2-digit" })
+    : d.toLocaleDateString(localeTag(), { month: "short", day: "numeric" });
 }
 
 /// "resets in 2h 5m", or "resetting now" once the time has passed.
 function resetText(ms: number): string {
-  return ms - Date.now() <= 0 ? "resetting now" : `resets in ${until(ms)}`;
+  return ms - Date.now() <= 0 ? t("detail.now.resettingNow") : t("detail.now.resetsIn", { time: until(ms) });
 }
 
+/// Reuses the app-wide time.* duration keys (same ones main.ts's fmtDuration
+/// uses) rather than a detail-only duplicate, unpadded to match this file's
+/// original look ("2h 5m", not "2h 05m").
 function until(ms: number): string {
   const left = ms - Date.now();
-  if (left <= 0) return "0m";
+  if (left <= 0) return t("time.mins", { m: 0 });
   const m = Math.floor(left / 60_000);
-  if (m >= 1440) return `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
-  if (m >= 60) return `${Math.floor(m / 60)}h ${m % 60}m`;
-  return `${m}m`;
+  if (m >= 1440) return t("time.daysHours", { d: Math.floor(m / 1440), h: Math.floor((m % 1440) / 60) });
+  if (m >= 60) return t("time.hoursMins", { h: Math.floor(m / 60), m: m % 60 });
+  return t("time.mins", { m });
 }
 
 /// "/Users/me/work/acme" → "acme"; an unresolved folder name stays as it is.
@@ -265,7 +276,7 @@ function lineChart(all: Series[], width: number): string {
     .filter((s) => s.points.length > 0);
   const count = shown.reduce((n, s) => n + s.points.length, 0);
   if (count < 2) {
-    return `<p class="dt-empty">History starts now. A reading is saved on this computer at each refresh, so this fills in over the next few hours.</p>`;
+    return `<p class="dt-empty">${esc(t("detail.chart.historyStarts"))}</p>`;
   }
   const W = Math.max(260, width);
   const H = 150;
@@ -296,21 +307,21 @@ function lineChart(all: Series[], width: number): string {
       ? `<div class="dt-legend">${shown
           .map((s) => {
             const last = s.points[s.points.length - 1];
-            return `<span class="dt-key"><i style="background:var(${SERIES_VARS[s.slot]})"></i>${esc(s.metric)} <b>${last.used.toFixed(0)}%</b></span>`;
+            return `<span class="dt-key"><i style="background:var(${SERIES_VARS[s.slot]})"></i>${esc(displayMetricLabel(s.metric))} <b>${last.used.toFixed(0)}%</b></span>`;
           })
           .join("")}</div>`
       : "";
   return `${legend}
     <div class="dt-plot" data-t0="${t0}" data-t1="${t1}" data-pl="${pad.l}" data-pr="${pad.r}" data-w="${W}">
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Percent of each limit used over time">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(t("detail.chart.ariaLabel"))}">
         ${grid}${lines}
         <line class="dt-cross" x1="0" x2="0" y1="${pad.t}" y2="${H - pad.b}" visibility="hidden"/>
         <text class="dt-axis" x="${pad.l}" y="${H - 5}">${esc(when(t0, hours))}</text>
-        <text class="dt-axis" x="${W - pad.r}" y="${H - 5}" text-anchor="end">now</text>
+        <text class="dt-axis" x="${W - pad.r}" y="${H - 5}" text-anchor="end">${esc(t("detail.chart.now"))}</text>
       </svg>
       <div class="dt-tip" hidden></div>
     </div>
-    <p class="dt-caption">Percent of each limit used. A drop to zero is a reset.</p>`;
+    <p class="dt-caption">${esc(t("detail.chart.caption"))}</p>`;
 }
 
 /** Crosshair: snaps to the nearest reading in time and lists every series there. */
@@ -346,11 +357,11 @@ function wireCrosshair(root: HTMLElement): void {
         // The reading in force at that moment: the latest one not after it.
         const p = [...s.points].reverse().find((q) => q.at <= nearest);
         return p
-          ? `<div><i style="background:var(${SERIES_VARS[s.slot]})"></i>${esc(s.metric)} <b>${p.used.toFixed(0)}%</b></div>`
+          ? `<div><i style="background:var(${SERIES_VARS[s.slot]})"></i>${esc(displayMetricLabel(s.metric))} <b>${p.used.toFixed(0)}%</b></div>`
           : "";
       })
       .join("");
-    tip.innerHTML = `<div class="dt-tip-when">${esc(new Date(nearest).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</div>${rows}`;
+    tip.innerHTML = `<div class="dt-tip-when">${esc(new Date(nearest).toLocaleString(localeTag(), { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</div>${rows}`;
     tip.hidden = false;
     const tw = tip.offsetWidth;
     tip.style.left = `${Math.min(Math.max(cx - tw / 2, 0), W - tw)}px`;
@@ -378,25 +389,42 @@ async function loadForecast(id: string): Promise<void> {
   }
 }
 
+// Reuses the app-wide time.today / time.dateAt keys (same shape main.ts's
+// fmtExact uses for "today at 6:38 PM" / "Sat, Jul 11 at 9:00 AM").
 function atText(ms: number): string {
   const d = new Date(ms);
   const sameDay = d.toDateString() === new Date().toDateString();
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  return sameDay ? `today at ${time}` : `${d.toLocaleDateString([], { weekday: "short" })} at ${time}`;
+  const time = d.toLocaleTimeString(localeTag(), { hour: "numeric", minute: "2-digit" });
+  if (sameDay) return t("time.today", { time });
+  const weekday = d.toLocaleDateString(localeTag(), { weekday: "short" });
+  return t("time.dateAt", { date: weekday, time });
 }
 
 /// One forecast as a sentence. `short` is for the card, where space is tight.
+/// Each branch is one full translated sentence (never a translated fragment
+/// glued to another) so word order can move freely per language.
 function forecastText(f: Forecast, short = false): string {
-  const basis =
-    f.basis === "recent"
-      ? `at the pace of the last ${f.windowHours >= 1.5 ? `${Math.round(f.windowHours)} hours` : "hour"}`
-      : "at this period's average pace";
+  const metric = displayMetricLabel(f.metric);
   if (f.hitsLimitAt !== null) {
-    return short ? `${f.metric} runs out ${atText(f.hitsLimitAt)} at this pace` : `${f.metric} runs out ${atText(f.hitsLimitAt)}, ${basis}.`;
+    const when = atText(f.hitsLimitAt);
+    if (short) return t("detail.forecast.hitsAtShort", { metric, when });
+    if (f.basis === "recent") {
+      return f.windowHours >= 1.5
+        ? t("detail.forecast.hitsAt", { metric, when, hours: Math.round(f.windowHours) })
+        : t("detail.forecast.hitsAtHour", { metric, when });
+    }
+    return t("detail.forecast.hitsAtPeriod", { metric, when });
   }
   if (f.projectedAtReset === null) return "";
-  if (f.ratePerHour === 0) return short ? "" : `${f.metric} has not moved lately: it holds at ${f.projectedAtReset.toFixed(0)}% until the reset.`;
-  return short ? "" : `${f.metric} reaches about ${f.projectedAtReset.toFixed(0)}% by the reset, ${basis}.`;
+  if (short) return "";
+  const pct = f.projectedAtReset.toFixed(0);
+  if (f.ratePerHour === 0) return t("detail.forecast.flat", { metric, pct });
+  if (f.basis === "recent") {
+    return f.windowHours >= 1.5
+      ? t("detail.forecast.reaches", { metric, pct, hours: Math.round(f.windowHours) })
+      : t("detail.forecast.reachesHour", { metric, pct });
+  }
+  return t("detail.forecast.reachesPeriod", { metric, pct });
 }
 
 function forecastSection(id: string): string {
@@ -411,22 +439,28 @@ function forecastSection(id: string): string {
 // Your week: when the limit gets used, and when it resets
 // ---------------------------------------------------------------------------
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+/// Weekday short names from a real date (2024-01-01 was a Monday), never a
+/// hardcoded "Mon".."Sun" table, so they follow the app's language.
+function weekdayShort(mondayIndex: number): string {
+  const d = new Date(2024, 0, 1 + mondayIndex);
+  return new Intl.DateTimeFormat(localeTag(), { weekday: "short" }).format(d);
+}
 
 function hourLabel(h: number): string {
-  return new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric" });
+  return new Date(2000, 0, 1, h).toLocaleTimeString(localeTag(), { hour: "numeric" });
 }
 
 function weekSection(snap: Snapshot): string {
   const usable = burn.filter((b) => b.cells.some((row) => row.some((v) => v > 0)));
   if (!usable.length) {
-    return `<p class="dt-empty">This fills in as the app watches you work: after a few days it shows which hours of the week use a limit hardest, so heavy work can be planned around the reset.</p>`;
+    return `<p class="dt-empty">${esc(t("detail.week.empty"))}</p>`;
   }
   if (!usable.some((b) => b.metric === burnMetric)) {
     // The longest window is the one worth planning a week around.
     burnMetric = (usable.find((b) => /week/i.test(b.metric)) ?? usable[0]).metric;
   }
   const profile = usable.find((b) => b.metric === burnMetric)!;
+  const metricLabel = displayMetricLabel(profile.metric);
   const max = Math.max(...profile.cells.flat(), 0.0001);
   const live = snap.metrics.find((m) => m.label === profile.metric);
   const reset = live?.resets_at ? new Date(live.resets_at) : null;
@@ -440,11 +474,20 @@ function weekSection(snap: Snapshot): string {
           // Sequential, one hue: more burn is more of the same blue.
           const level = v <= 0 ? 0 : Math.max(0.16, v / max);
           const isReset = d === resetDay && h === resetHour;
-          const tip = `${DAYS[d]} ${hourLabel(h)}: ${v > 0 ? `${v.toFixed(v < 10 ? 1 : 0)} points of ${profile.metric}` : "nothing recorded"}${isReset ? ". Resets here" : ""}`;
+          const day = weekdayShort(d);
+          const hour = hourLabel(h);
+          const tip =
+            v > 0
+              ? isReset
+                ? t("detail.week.cellPointsReset", { day, hour, points: v.toFixed(v < 10 ? 1 : 0), metric: metricLabel })
+                : t("detail.week.cellPoints", { day, hour, points: v.toFixed(v < 10 ? 1 : 0), metric: metricLabel })
+              : isReset
+                ? t("detail.week.cellEmptyReset", { day, hour })
+                : t("detail.week.cellEmpty", { day, hour });
           return `<span class="dt-heat${isReset ? " dt-heat-reset" : ""}" style="--level:${level.toFixed(3)}" title="${esc(tip)}"></span>`;
         })
         .join("");
-      return `<span class="dt-heat-day">${DAYS[d]}</span>${cells}`;
+      return `<span class="dt-heat-day">${esc(weekdayShort(d))}</span>${cells}`;
     })
     .join("");
   const busiest = profile.cells
@@ -452,18 +495,29 @@ function weekSection(snap: Snapshot): string {
     .sort((a, b) => b.v - a.v)[0];
   const note =
     busiest && busiest.v > 0
-      ? `Hardest hour so far: ${DAYS[busiest.d]} around ${hourLabel(busiest.h)}.${reset ? ` Next reset: ${DAYS[resetDay]} ${hourLabel(resetHour)}, outlined.` : ""}`
+      ? reset
+        ? t("detail.week.hardestWithReset", {
+            day: weekdayShort(busiest.d),
+            hour: hourLabel(busiest.h),
+            resetDay: weekdayShort(resetDay),
+            resetHour: hourLabel(resetHour),
+          })
+        : t("detail.week.hardest", { day: weekdayShort(busiest.d), hour: hourLabel(busiest.h) })
       : "";
+  const fromDays =
+    profile.daysObserved === 1
+      ? t("detail.week.fromDays.one", { n: profile.daysObserved })
+      : t("detail.week.fromDays.other", { n: profile.daysObserved });
   return `
     <div class="dt-controls">
-      ${usable.length > 1 ? `<label>Limit ${select("dt-burn-metric", usable.map((b): [string, string] => [b.metric, b.metric]), burnMetric)}</label>` : ""}
+      ${usable.length > 1 ? `<label>${esc(t("detail.control.limit"))} ${select("dt-burn-metric", usable.map((b): [string, string] => [b.metric, displayMetricLabel(b.metric)]), burnMetric)}</label>` : ""}
     </div>
-    <div class="dt-heat-grid" role="img" aria-label="Points of ${esc(profile.metric)} used in each hour of the week">
+    <div class="dt-heat-grid" role="img" aria-label="${esc(t("detail.week.ariaLabel", { metric: metricLabel }))}">
       <span></span>${[0, 6, 12, 18].map((h) => `<span class="dt-heat-hour" style="grid-column:${h + 2} / span 6">${esc(hourLabel(h))}</span>`).join("")}
       ${rows}
     </div>
-    <div class="dt-heat-key"><span>less</span><i style="--level:0.16"></i><i style="--level:0.45"></i><i style="--level:0.75"></i><i style="--level:1"></i><span>more</span></div>
-    <p class="dt-caption">${esc(note)} From ${profile.daysObserved} day${profile.daysObserved === 1 ? "" : "s"} of readings on this computer, over the last four weeks at most.</p>`;
+    <div class="dt-heat-key"><span>${esc(t("detail.week.less"))}</span><i style="--level:0.16"></i><i style="--level:0.45"></i><i style="--level:0.75"></i><i style="--level:1"></i><span>${esc(t("detail.week.more"))}</span></div>
+    <p class="dt-caption">${esc(note)} ${esc(fromDays)}</p>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -500,22 +554,25 @@ async function loadClients(): Promise<void> {
 }
 
 function clientSection(): string {
-  if (!clientView) return `<p class="dt-empty">Loading…</p>`;
+  if (!clientView) return `<p class="dt-empty">${esc(t("detail.loading"))}</p>`;
   const rows = clientView.rows
     .map((c) => ({
+      // "Unassigned" is a fixed sentinel this app's Rust side sends (never a
+      // user-typed name): stays as it arrives, like "(unsorted)" for areas.
       label: c.client,
       tip: `${c.client} (${c.areas.slice(0, 6).join(", ")}${c.areas.length > 6 ? ", …" : ""})`,
       cost: c[windowKey].cost,
       tokens: c[windowKey].tokens,
     }))
     .filter((r) => r.cost > 0.004 || r.tokens > 0);
-  const chart = rows.length ? bars(rows) : `<p class="dt-empty">Nothing in this period.</p>`;
+  const chart = rows.length ? bars(rows) : `<p class="dt-empty">${esc(t("detail.spend.nothing"))}</p>`;
   const budgets = clientView.rules
     .filter((r) => r.monthlyBudget)
     .map((r) => {
       const spent = clientView!.rows.find((c) => c.client === r.client)?.monthToDate ?? 0;
       const over = spent >= r.monthlyBudget!;
-      return `<p class="dt-caption${over ? " dt-forecast-hit" : ""}">${esc(r.client)}: ${money(spent)} of ${money(r.monthlyBudget!)} this month${over ? ", over budget" : ""}.</p>`;
+      const key = over ? "detail.client.budgetOver" : "detail.client.budgetStatus";
+      return `<p class="dt-caption${over ? " dt-forecast-hit" : ""}">${esc(t(key, { client: r.client, spent: money(spent), budget: money(r.monthlyBudget!) }))}</p>`;
     })
     .join("");
 
@@ -524,31 +581,43 @@ function clientSection(): string {
   const unassigned = clientView.rows.find((c) => c.client === "Unassigned");
   const hint =
     unassigned && unassigned.areas.length
-      ? `<p class="dt-caption">Not assigned yet: ${unassigned.areas.slice(0, 8).map(esc).join(", ")}${unassigned.areas.length > 8 ? `, and ${unassigned.areas.length - 8} more` : ""}.</p>`
+      ? `<p class="dt-caption">${esc(
+          unassigned.areas.length > 8
+            ? unassigned.areas.length - 8 === 1
+              ? t("detail.client.unassignedHintMore.one", {
+                  areas: unassigned.areas.slice(0, 8).join(", "),
+                  n: unassigned.areas.length - 8,
+                })
+              : t("detail.client.unassignedHintMore.other", {
+                  areas: unassigned.areas.slice(0, 8).join(", "),
+                  n: unassigned.areas.length - 8,
+                })
+            : t("detail.client.unassignedHint", { areas: unassigned.areas.slice(0, 8).join(", ") }),
+        )}</p>`
       : "";
   const editor = editing
     ? `<div class="dt-rules">${rules
         .map(
           (r, i) => `
         <div class="dt-rule">
-          <input data-rule-client="${i}" type="text" maxlength="96" placeholder="Client" value="${esc(r.client)}" aria-label="Client name" />
-          <input data-rule-patterns="${i}" type="text" placeholder="folder, folder/sub*" value="${esc(r.patterns.join(", "))}" aria-label="Folder patterns" />
-          <input data-rule-budget="${i}" type="number" min="0" step="1" placeholder="$ / month" value="${r.monthlyBudget ? r.monthlyBudget : ""}" aria-label="Monthly budget in dollars, optional" title="Optional. Alerts once when this client's month passes it." />
+          <input data-rule-client="${i}" type="text" maxlength="96" placeholder="${esc(t("detail.group.client"))}" value="${esc(r.client)}" aria-label="${esc(t("detail.client.nameAria"))}" />
+          <input data-rule-patterns="${i}" type="text" placeholder="${esc(t("detail.client.patternsPh"))}" value="${esc(r.patterns.join(", "))}" aria-label="${esc(t("detail.client.patterns"))}" />
+          <input data-rule-budget="${i}" type="number" min="0" step="1" placeholder="${esc(t("detail.client.budgetPh"))}" value="${r.monthlyBudget ? r.monthlyBudget : ""}" aria-label="${esc(t("detail.client.budgetAria"))}" title="${esc(t("detail.client.budgetTip"))}" />
         </div>`,
         )
         .join("")}
-        <p class="dt-caption">Folders as they appear under Work area. A plain folder covers everything beneath it, * is a wildcard, and the first matching client wins.</p>
+        <p class="dt-caption">${esc(t("detail.client.rulesCaption"))}</p>
         ${clientNote ? `<p class="lg-error" role="alert">${esc(clientNote)}</p>` : ""}
         <div class="dt-rule-actions">
-          <button class="inv-learn" id="dt-rule-add">+ Client</button>
+          <button class="inv-learn" id="dt-rule-add">${esc(t("detail.client.add"))}</button>
           <span class="spacer"></span>
-          <button class="inv-learn" id="dt-rule-cancel">Cancel</button>
-          <button class="lg-save" id="dt-rule-save">Save</button>
+          <button class="inv-learn" id="dt-rule-cancel">${esc(t("dialog.cancel"))}</button>
+          <button class="lg-save" id="dt-rule-save">${esc(t("settings.save"))}</button>
         </div></div>`
     : `<div class="dt-rule-actions">
-        <button class="inv-learn" id="dt-rule-edit">${rules.length ? `Edit clients (${rules.length})` : "Set up clients"}</button>
+        <button class="inv-learn" id="dt-rule-edit">${rules.length ? esc(t("detail.client.edit", { n: rules.length })) : esc(t("detail.client.setUp"))}</button>
         <span class="spacer"></span>
-        <button class="inv-learn" id="dt-export" title="Save this table as a CSV in your Downloads folder">Export CSV</button>
+        <button class="inv-learn" id="dt-export" title="${esc(t("detail.csv.saveTableTip"))}">${esc(t("detail.csv.export"))}</button>
       </div>${clientNote ? `<p class="dt-caption">${esc(clientNote)}</p>` : ""}`;
   return `${chart}${budgets}${hint}${editor}`;
 }
@@ -577,15 +646,17 @@ function span(s: SessionSpend): [string, string] {
   if (s.startedMs === null || s.endedMs === null) return ["", ""];
   const start = new Date(s.startedMs);
   const mins = Math.max(Math.round((s.endedMs - s.startedMs) / 60_000), 1);
+  // mins >= 2880 (48h) here, so the day count is always >= 2; detail.session.spanDays.one
+  // exists for task 8's real plural rules and is unreachable through this branch today.
   const length =
     mins >= 2880
-      ? `${Math.round(mins / 1440)} days`
+      ? t("detail.session.spanDays.other", { n: Math.round(mins / 1440) })
       : mins >= 60
-        ? `${Math.floor(mins / 60)}h ${mins % 60}m`
-        : `${mins}m`;
-  const day = start.toLocaleDateString([], { month: "short", day: "numeric" });
-  const time = start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  return [`${day}, ${time}`, `spans ${length}`];
+        ? t("time.hoursMins", { h: Math.floor(mins / 60), m: mins % 60 })
+        : t("time.mins", { m: mins });
+  const day = start.toLocaleDateString(localeTag(), { month: "short", day: "numeric" });
+  const time = start.toLocaleTimeString(localeTag(), { hour: "numeric", minute: "2-digit" });
+  return [t("detail.session.startedAt", { day, time }), t("detail.session.spans", { length })];
 }
 
 /// "active today", "active yesterday", "last active 12 days ago": when the
@@ -594,7 +665,11 @@ function span(s: SessionSpend): [string, string] {
 function lastActive(s: SessionSpend): string {
   if (s.endedMs === null) return "";
   const days = Math.floor((Date.now() - s.endedMs) / 86_400_000);
-  return days <= 0 ? "active today" : days === 1 ? "active yesterday" : `last active ${days} days ago`;
+  if (days <= 0) return t("detail.session.activeToday");
+  if (days === 1) return t("detail.session.activeYesterday");
+  // days is always >= 2 here (0 and 1 handled above); detail.session.lastActive.one
+  // exists for task 8's real plural rules and is unreachable through this branch today.
+  return t("detail.session.lastActive.other", { n: days });
 }
 
 function fileSize(bytes: number): string {
@@ -611,9 +686,9 @@ function sessionRows(sessions: SessionSpend[]): string {
       const facts = [
         length,
         lastActive(s),
-        s.topModel ? `mostly ${s.topModel}` : "",
+        s.topModel ? t("detail.session.mostly", { model: s.topModel }) : "",
         where,
-        s.dayCost !== null ? `${money(s.cost)} over 30 days` : "",
+        s.dayCost !== null ? t("detail.session.over30Days", { money: money(s.cost) }) : "",
         s.bytes ? fileSize(s.bytes) : "",
       ]
         .filter(Boolean)
@@ -621,8 +696,8 @@ function sessionRows(sessions: SessionSpend[]): string {
         .join(" · ");
       return `
       <div class="dt-session">
-        <div class="lg-item-head"><span class="inv-name">${esc(started || "Time not recorded")}</span><span class="lg-price">${money(shown)}</span></div>
-        <div class="dt-session-sub">${facts} <button class="inv-chip" data-reveal-session="${esc(s.id)}" title="Show this session's log file in ${REVEAL_IN}">Reveal</button></div>
+        <div class="lg-item-head"><span class="inv-name">${esc(started || t("detail.session.timeNotRecorded"))}</span><span class="lg-price">${money(shown)}</span></div>
+        <div class="dt-session-sub">${facts} <button class="inv-chip" data-reveal-session="${esc(s.id)}" title="${esc(t("detail.session.revealTitle", { where: revealWord() }))}">${esc(t("detail.session.reveal"))}</button></div>
       </div>`;
     })
     .join("");
@@ -630,21 +705,32 @@ function sessionRows(sessions: SessionSpend[]): string {
 
 function drillSection(): string {
   const d = drill!;
-  const head = `<div class="dt-drill-head"><button class="inv-learn" id="dt-drill-back">&#8592; Back</button><span>Sessions · ${esc(d.title)}</span></div>`;
-  if (!d.sessions) return `${head}<p class="dt-empty">Loading…</p>`;
-  if (!d.sessions.length) return `${head}<p class="dt-empty">No sessions found for this.</p>`;
-  return `${head}${sessionRows(d.sessions)}<p class="dt-caption">One row per Claude Code session, most expensive first. Times and totals only: conversation titles and content are never read.</p>`;
+  const head = `<div class="dt-drill-head"><button class="inv-learn" id="dt-drill-back">${esc(t("detail.panel.back"))}</button><span>${esc(t("detail.session.drillTitle", { title: d.title }))}</span></div>`;
+  if (!d.sessions) return `${head}<p class="dt-empty">${esc(t("detail.loading"))}</p>`;
+  if (!d.sessions.length) return `${head}<p class="dt-empty">${esc(t("detail.session.drillEmpty"))}</p>`;
+  return `${head}${sessionRows(d.sessions)}<p class="dt-caption">${esc(t("detail.session.drillCaption"))}</p>`;
 }
 
 /// Group by → Session: every session of the last 30 days, heaviest first.
 /// The janitor's view, minus the broom: the app shows you the file and you
 /// decide, because deleting a session log also deletes the spend it produced.
 function sessionsSection(): string {
-  if (!sessionsAll) return `<p class="dt-empty">Loading…</p>`;
-  if (!sessionsAll.length) return `<p class="dt-empty">No sessions in the last 30 days.</p>`;
+  if (!sessionsAll) return `<p class="dt-empty">${esc(t("detail.loading"))}</p>`;
+  if (!sessionsAll.length) return `<p class="dt-empty">${esc(t("detail.session.noneIn30"))}</p>`;
   lastTable = {
+    // The CSV file name is not user-facing chrome; it stays English.
     name: "sessions last 30 days",
-    headers: ["Started", "Last active", "Length", "Cost (USD)", "Tokens", "Top model", "Areas", "Size (bytes)", "Session id"],
+    headers: [
+      t("detail.csv.started"),
+      t("detail.csv.lastActive"),
+      t("detail.csv.length"),
+      t("detail.csv.costUsd"),
+      t("detail.csv.tokens"),
+      t("detail.csv.topModel"),
+      t("detail.csv.areas"),
+      t("detail.csv.sizeBytes"),
+      t("detail.csv.sessionId"),
+    ],
     rows: sessionsAll.map((s) => {
       const [started, length] = span(s);
       return [
@@ -661,7 +747,7 @@ function sessionsSection(): string {
     }),
   };
   const note = sessionNote ? `<p class="dt-caption">${esc(sessionNote)}</p>` : "";
-  return `${sessionRows(sessionsAll)}${note}<p class="dt-caption">One row per Claude Code session, most expensive over the last 30 days first. Times, sizes and totals only: conversation titles and content are never read. Reveal shows the log file in ${REVEAL_IN} so you can archive it yourself; the app never deletes a session, because these logs are also where its spend figures come from.</p>`;
+  return `${sessionRows(sessionsAll)}${note}<p class="dt-caption">${esc(t("detail.session.allCaption", { where: revealWord() }))}</p>`;
 }
 
 async function loadSessions(): Promise<void> {
@@ -691,21 +777,33 @@ async function openDrill(next: { title: string; area?: string; day?: string }): 
 // ---------------------------------------------------------------------------
 
 function bars(rows: { label: string; tip: string; cost: number; tokens: number; drillArea?: string }[]): string {
+  const groupHeader =
+    groupKey === "model"
+      ? t("detail.group.model")
+      : groupKey === "client"
+        ? t("detail.group.client")
+        : groupKey === "project"
+          ? t("detail.group.project")
+          : t("detail.group.area");
   lastTable = {
+    // The CSV file name is not user-facing chrome; it stays English.
     name: `spend by ${groupKey} ${windowKey}`,
-    headers: [groupKey === "model" ? "Model" : groupKey === "client" ? "Client" : groupKey === "project" ? "Project" : "Work area", "Cost (USD)", "Tokens"],
+    headers: [groupHeader, t("detail.csv.costUsd"), t("detail.csv.tokens")],
     rows: rows.map((r) => [r.tip, r.cost.toFixed(2), String(Math.round(r.tokens))]),
   };
   const max = Math.max(...rows.map((r) => r.cost), 0.0001);
   return `<div class="dt-bars">${rows
-    .map(
-      (r) => `
-      <div class="dt-bar-row${r.drillArea ? " dt-drillable" : ""}"${r.drillArea ? ` data-drill-area="${esc(r.drillArea)}" role="button" tabindex="0"` : ""} title="${esc(`${r.tip}: ${money(r.cost)}, ${tokens(r.tokens)} tokens${r.drillArea ? ". Click for its sessions" : ""}`)}">
+    .map((r) => {
+      const tip = r.drillArea
+        ? t("detail.spend.barTipDrill", { label: r.tip, money: money(r.cost), tokens: tokens(r.tokens) })
+        : t("detail.spend.barTip", { label: r.tip, money: money(r.cost), tokens: tokens(r.tokens) });
+      return `
+      <div class="dt-bar-row${r.drillArea ? " dt-drillable" : ""}"${r.drillArea ? ` data-drill-area="${esc(r.drillArea)}" role="button" tabindex="0"` : ""} title="${esc(tip)}">
         <span class="dt-bar-label">${esc(r.label)}</span>
         <span class="dt-bar-track"><span class="dt-bar" style="width:${Math.max((r.cost / max) * 100, r.cost > 0 ? 1.5 : 0)}%"></span></span>
         <span class="dt-bar-value">${money(r.cost)}</span>
-      </div>`,
-    )
+      </div>`;
+    })
     .join("")}</div>`;
 }
 
@@ -713,8 +811,9 @@ function dayBars(daily: number[]): string {
   const max = Math.max(...daily, 0.0001);
   const today = new Date();
   lastTable = {
+    // The CSV file name is not user-facing chrome; it stays English.
     name: "spend by day",
-    headers: ["Date", "Cost (USD)"],
+    headers: [t("detail.csv.date"), t("detail.csv.costUsd")],
     rows: daily.map((cost, i) => {
       const d = new Date(today);
       d.setDate(today.getDate() - (daily.length - 1 - i));
@@ -725,15 +824,18 @@ function dayBars(daily: number[]): string {
     .map((cost, i) => {
       const d = new Date(today);
       d.setDate(today.getDate() - (daily.length - 1 - i));
-      const label = d.toLocaleDateString([], { month: "short", day: "numeric" });
+      const label = d.toLocaleDateString(localeTag(), { month: "short", day: "numeric" });
       const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       const can = cost > 0.004;
-      return `<span class="dt-day${can ? " dt-drillable" : ""}"${can ? ` data-drill-day="${iso}" data-drill-label="${esc(label)}" role="button" tabindex="0"` : ""} title="${esc(`${label}: ${money(cost)}${can ? ". Click for its sessions" : ""}`)}"><span style="height:${Math.max((cost / max) * 100, cost > 0 ? 2 : 0)}%"></span></span>`;
+      const tip = can
+        ? t("detail.spend.dayTipDrill", { label, money: money(cost) })
+        : t("detail.spend.dayTip", { label, money: money(cost) });
+      return `<span class="dt-day${can ? " dt-drillable" : ""}"${can ? ` data-drill-day="${iso}" data-drill-label="${esc(label)}" role="button" tabindex="0"` : ""} title="${esc(tip)}"><span style="height:${Math.max((cost / max) * 100, cost > 0 ? 2 : 0)}%"></span></span>`;
     })
     .join("");
   const total = daily.reduce((a, b) => a + b, 0);
   return `<div class="dt-days">${cols}</div>
-    <div class="dt-days-axis"><span>30 days ago</span><span>${money(total)} total · peak ${money(max)}</span><span>today</span></div>`;
+    <div class="dt-days-axis"><span>${esc(t("detail.spend.axisStart"))}</span><span>${esc(t("detail.spend.axisTotal", { total: money(total), peak: money(max) }))}</span><span>${esc(t("detail.spend.axisToday"))}</span></div>`;
 }
 
 /// Dollars per commit for the folders that are in git. A ratio, not a verdict:
@@ -742,8 +844,12 @@ function dayBars(daily: number[]): string {
 function effortCaption(): string {
   const rows = effort.filter((e) => e.costPerCommit !== null).slice(0, 4);
   if (!rows.length) return "";
-  const parts = rows.map((e) => `${esc(e.area)} ${money(e.costPerCommit!)} (${e.commits} commit${e.commits === 1 ? "" : "s"})`);
-  return `<p class="dt-caption">Per commit, last 30 days: ${parts.join(" &middot; ")}. Folders outside git are left out. A commit is not a unit of work, so read this as a ratio, not a score.</p>`;
+  const parts = rows.map((e) => {
+    const commits =
+      e.commits === 1 ? t("detail.effort.commits.one", { n: e.commits }) : t("detail.effort.commits.other", { n: e.commits! });
+    return t("detail.effort.row", { area: esc(e.area), money: money(e.costPerCommit!), commits });
+  });
+  return `<p class="dt-caption">${t("detail.effort.caption", { parts: parts.join(" &middot; ") })}</p>`;
 }
 
 /// "up 22% on last week". Absent when there is no fortnight to compare, and
@@ -752,18 +858,19 @@ function weekLine(week: WeekDelta | null | undefined): string {
   if (!week) return "";
   if (week.changePercent === null) {
     return week.thisWeek > 0
-      ? `<p class="dt-caption">${money(week.thisWeek)} in the last 7 days; nothing the 7 before.</p>`
+      ? `<p class="dt-caption">${esc(t("detail.spend.weekNoPrior", { money: money(week.thisWeek) }))}</p>`
       : "";
   }
   const pct = week.changePercent;
-  const dir = pct >= 0 ? "up" : "down";
   const cls = pct >= 0 ? "dt-week-up" : "dt-week-down";
-  return `<p class="dt-caption">${money(week.thisWeek)} in the last 7 days, <span class="${cls}">${dir} ${Math.abs(pct).toFixed(0)}%</span> on the ${money(week.lastWeek)} before.</p>`;
+  const dir =
+    pct >= 0 ? t("detail.spend.dirUp", { pct: Math.abs(pct).toFixed(0) }) : t("detail.spend.dirDown", { pct: Math.abs(pct).toFixed(0) });
+  return `<p class="dt-caption">${t("detail.spend.weekChange", { money: esc(money(week.thisWeek)), cls, dir: esc(dir), lastMoney: esc(money(week.lastWeek)) })}</p>`;
 }
 
 function spendSection(sp: ProviderSpend | undefined): string {
   if (!sp || (sp.last30.cost < 0.005 && sp.last30.tokens <= 0)) {
-    return `<p class="dt-empty">No local spend logs for this tool. Spend is read from the logs a command-line tool writes on this computer.</p>`;
+    return `<p class="dt-empty">${esc(t("detail.spend.noLogs"))}</p>`;
   }
   if (drill) return drillSection();
   const hasProjects = (sp.projects?.length ?? 0) > 0;
@@ -771,14 +878,14 @@ function spendSection(sp: ProviderSpend | undefined): string {
   if (groupKey === "project" && !hasProjects) groupKey = "model";
   if (groupKey === "area" && !hasAreas) groupKey = "model";
   if (groupKey === "client" && !hasAreas) groupKey = "model";
-  const groups: [string, string][] = [["model", "Model"]];
-  if (hasAreas) groups.push(["client", "Client"], ["area", "Work area"]);
-  if (hasProjects) groups.push(["project", "Project"]);
-  groups.push(["day", "Day"], ["session", "Session"]);
+  const groups: [string, string][] = [["model", t("detail.group.model")]];
+  if (hasAreas) groups.push(["client", t("detail.group.client")], ["area", t("detail.group.area")]);
+  if (hasProjects) groups.push(["project", t("detail.group.project")]);
+  groups.push(["day", t("detail.group.day")], ["session", t("detail.group.session")]);
   const controls = `<div class="dt-controls">
-      <label>Group by ${select("dt-group", groups, groupKey)}</label>
-      ${groupKey === "day" || groupKey === "session" ? "" : `<label>Period ${select("dt-window", WINDOWS, windowKey)}</label>`}
-      ${groupKey === "area" ? `<label>Detail ${select("dt-depth", [["1", "Top folders"], ["2", "Two levels"]], areaDepth)}</label>` : ""}
+      <label>${esc(t("detail.control.groupBy"))} ${select("dt-group", groups, groupKey)}</label>
+      ${groupKey === "day" || groupKey === "session" ? "" : `<label>${esc(t("detail.control.period"))} ${select("dt-window", WINDOWS.map(([v, k]): [string, string] => [v, t(k)]), windowKey)}</label>`}
+      ${groupKey === "area" ? `<label>${esc(t("detail.control.detail"))} ${select("dt-depth", [["1", t("detail.control.topFolders")], ["2", t("detail.control.twoLevels")]], areaDepth)}</label>` : ""}
     </div>`;
 
   const week = weekLine(sp.week);
@@ -811,40 +918,45 @@ function spendSection(sp: ProviderSpend | undefined): string {
     const rest = all.slice(MAX_BAR_ROWS);
     if (rest.length) {
       top.push({
-        label: `Other (${rest.length})`,
-        tip: `${rest.length} smaller areas`,
+        label: rest.length === 1 ? t("detail.other.one", { n: rest.length }) : t("detail.other.other", { n: rest.length }),
+        tip:
+          rest.length === 1
+            ? t("detail.spend.smallerAreas.one", { n: rest.length })
+            : t("detail.spend.smallerAreas.other", { n: rest.length }),
         cost: rest.reduce((n, r) => n + r.cost, 0),
         tokens: rest.reduce((n, r) => n + r.tokens, 0),
       });
     }
-    body = top.length ? bars(top) : `<p class="dt-empty">Nothing in this period.</p>`;
+    body = top.length ? bars(top) : `<p class="dt-empty">${esc(t("detail.spend.nothing"))}</p>`;
     body += effortCaption();
-    body += `<p class="dt-caption">A work area is the top-level folder a session was working in: where its shell was, or the files it touched. "(unsorted)" is spend before a session had gone anywhere.</p>`;
+    body += `<p class="dt-caption">${esc(t("detail.spend.areaCaption"))}</p>`;
   } else if (groupKey === "project") {
     const rows = (sp.projects ?? [])
       .map((p) => ({ label: projectLabel(p.project), tip: p.project, cost: p[windowKey].cost, tokens: p[windowKey].tokens }))
       .filter((r) => r.cost > 0.004 || r.tokens > 0)
       .sort((a, b) => b.cost - a.cost);
-    body = rows.length ? bars(rows) : `<p class="dt-empty">Nothing in this period.</p>`;
+    body = rows.length ? bars(rows) : `<p class="dt-empty">${esc(t("detail.spend.nothing"))}</p>`;
     if (rows.length === 1) {
-      body += `<p class="dt-caption">Projects are the folders Claude Code was started in. Everything here ran from one folder, so there is one row.</p>`;
+      body += `<p class="dt-caption">${esc(t("detail.spend.projectSingleCaption"))}</p>`;
     }
   } else {
     const rows = [...sp[windowKey].models]
       .sort((a, b) => b.cost - a.cost)
       .slice(0, 12)
       .map((m) => ({ label: m.model, tip: m.model, cost: m.cost, tokens: m.tokens }));
-    body = rows.length ? bars(rows) : `<p class="dt-empty">Nothing in this period.</p>`;
+    body = rows.length ? bars(rows) : `<p class="dt-empty">${esc(t("detail.spend.nothing"))}</p>`;
   }
   const w = sp[windowKey];
   const headline =
-    groupKey === "day" ? "" : `<div class="dt-headline"><b>${money(w.cost)}</b><span>${tokens(w.tokens)} tokens</span></div>`;
+    groupKey === "day"
+      ? ""
+      : `<div class="dt-headline"><b>${money(w.cost)}</b><span>${esc(t("card.tokens", { n: tokens(w.tokens) }))}</span></div>`;
   const exportBtn =
     groupKey === "client" || !lastTable
       ? ""
-      : `<div class="dt-rule-actions"><span class="spacer"></span><button class="inv-learn" id="dt-export-table" title="Save what is shown here as a CSV in your Downloads folder">Export CSV</button></div>${clientNote ? `<p class="dt-caption">${esc(clientNote)}</p>` : ""}`;
+      : `<div class="dt-rule-actions"><span class="spacer"></span><button class="inv-learn" id="dt-export-table" title="${esc(t("detail.csv.saveShownTip"))}">${esc(t("detail.csv.export"))}</button></div>${clientNote ? `<p class="dt-caption">${esc(clientNote)}</p>` : ""}`;
   return `${controls}${headline}${week}${body}${exportBtn}
-    <p class="dt-caption">From local logs, priced at API rates. On a flat-rate plan this is equivalent value, not a charge.</p>`;
+    <p class="dt-caption">${esc(t("detail.spend.footer"))}</p>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -866,9 +978,9 @@ function miniHtml(id: string): string {
     .filter((s) => s.points.length > 1);
   let chart: string;
   if (!cached) {
-    chart = `<p class="dt-mini-note">Loading the last 24 hours…</p>`;
+    chart = `<p class="dt-mini-note">${esc(t("detail.card.loading24h"))}</p>`;
   } else if (series.length === 0) {
-    chart = `<p class="dt-mini-note">The 24-hour trend appears once a few readings are saved.</p>`;
+    chart = `<p class="dt-mini-note">${esc(t("detail.card.noTrend"))}</p>`;
   } else {
     const W = 300;
     const H = 36;
@@ -887,11 +999,11 @@ function miniHtml(id: string): string {
     const keys = series
       .map((s, slot) => {
         const last = s.points[s.points.length - 1];
-        return `<span class="dt-key"><i style="background:var(${SERIES_VARS[slot]})"></i>${esc(s.metric)} <b>${last.used.toFixed(0)}%</b></span>`;
+        return `<span class="dt-key"><i style="background:var(${SERIES_VARS[slot]})"></i>${esc(displayMetricLabel(s.metric))} <b>${last.used.toFixed(0)}%</b></span>`;
       })
       .join("");
-    chart = `<svg class="dt-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Percent used over the last 24 hours">${paths}</svg>
-      <div class="dt-legend dt-mini-legend"><span class="dt-mini-span">24h, % used</span>${keys}</div>`;
+    chart = `<svg class="dt-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(t("detail.card.sparkAriaLabel"))}">${paths}</svg>
+      <div class="dt-legend dt-mini-legend"><span class="dt-mini-span">${esc(t("detail.card.sparkLegend"))}</span>${keys}</div>`;
   }
   const sp = source?.spend(id);
   const wall = (forecasts.get(id) ?? [])
@@ -899,8 +1011,8 @@ function miniHtml(id: string): string {
     .sort((a, b) => a.hitsLimitAt! - b.hitsLimitAt!)[0];
   const warn = wall ? `<p class="dt-mini-note dt-forecast-hit">${esc(forecastText(wall, true))}</p>` : "";
   const facts =
-    sp && sp.today.cost > 0.004 ? `<span>Today ${money(sp.today.cost)}</span>` : `<span></span>`;
-  return `${chart}${warn}${modelSplit(sp)}<div class="dt-mini-foot">${facts}<button class="inv-learn dt-mini-open" data-detail="${esc(id)}">Details</button></div>`;
+    sp && sp.today.cost > 0.004 ? `<span>${esc(t("detail.card.todaySpend", { money: money(sp.today.cost) }))}</span>` : `<span></span>`;
+  return `${chart}${warn}${modelSplit(sp)}<div class="dt-mini-foot">${facts}<button class="inv-learn dt-mini-open" data-detail="${esc(id)}">${esc(t("detail.card.detailsBtn"))}</button></div>`;
 }
 
 async function loadSpark(id: string): Promise<void> {
@@ -936,7 +1048,7 @@ function modelSplit(sp: ProviderSpend | undefined): string {
   const rest = all.slice(MINI_MODELS);
   if (rest.length) {
     shown.push({
-      model: `Other (${rest.length})`,
+      model: rest.length === 1 ? t("detail.other.one", { n: rest.length }) : t("detail.other.other", { n: rest.length }),
       cost: rest.reduce((n, m) => n + m.cost, 0),
       tokens: rest.reduce((n, m) => n + m.tokens, 0),
     });
@@ -945,14 +1057,15 @@ function modelSplit(sp: ProviderSpend | undefined): string {
   const rows = shown
     .map((m) => {
       const pct = Math.round((m.cost / total) * 100);
-      return `<div class="dt-ms-row" title="${esc(`${m.model}: ${money(m.cost)}, ${tokens(m.tokens)} tokens today`)}">
+      const tip = t("detail.card.modelTip", { model: m.model, money: money(m.cost), tokens: tokens(m.tokens) });
+      return `<div class="dt-ms-row" title="${esc(tip)}">
         <span class="dt-ms-name">${esc(m.model)}</span>
         <span class="dt-ms-bar"><i style="--w:${Math.max(2, (m.cost / total) * 100).toFixed(1)}%"></i></span>
         <span class="dt-ms-val">${pct}%</span>
       </div>`;
     })
     .join("");
-  return `<div class="dt-ms"><div class="dt-ms-head">Models today</div>${rows}</div>`;
+  return `<div class="dt-ms"><div class="dt-ms-head">${esc(t("detail.card.modelsToday"))}</div>${rows}</div>`;
 }
 
 export function cardExtras(id: string): string {
@@ -971,16 +1084,17 @@ function nowSection(snap: Snapshot): string {
       if (m.kind === "progress" && m.used_percent !== null) {
         const used = Math.min(Math.max(m.used_percent, 0), 100);
         const reset = m.resets_at ? resetText(m.resets_at) : "";
-        return `<div class="dt-now-row"><span class="dt-now-label">${esc(m.label)}</span>
-          <span class="dt-now-facts">${[`${used.toFixed(0)}% used`, m.detail ?? "", reset].filter(Boolean).map(esc).join(" · ")}</span></div>`;
+        const detail = displayMetricDetail(m.detail ?? "");
+        return `<div class="dt-now-row"><span class="dt-now-label">${esc(displayMetricLabel(m.label))}</span>
+          <span class="dt-now-facts">${[t("card.pctUsed", { n: used.toFixed(0) }), detail, reset].filter(Boolean).map(esc).join(" · ")}</span></div>`;
       }
       if (m.kind === "text" && m.value) {
-        return `<div class="dt-now-row"><span class="dt-now-label">${esc(m.label)}</span><span class="dt-now-facts">${esc(m.value)}</span></div>`;
+        return `<div class="dt-now-row"><span class="dt-now-label">${esc(displayMetricLabel(m.label))}</span><span class="dt-now-facts">${esc(m.value)}</span></div>`;
       }
       return "";
     })
     .join("");
-  return rows || `<p class="dt-empty">No live readings.</p>`;
+  return rows || `<p class="dt-empty">${esc(t("detail.now.empty"))}</p>`;
 }
 
 /// `fromRefresh`: the redraw was caused by new data, not by something the
@@ -1001,29 +1115,32 @@ function render(fromRefresh = false): void {
   }
   const plan = snap.plan ? snap.plan.charAt(0).toUpperCase() + snap.plan.slice(1) : "";
   if (title) title.textContent = plan ? `${snap.name} · ${plan}` : snap.name;
-  const metrics: [string, string][] = [["__all__", "All limits"], ...history.map((s): [string, string] => [s.metric, s.metric])];
+  const metrics: [string, string][] = [
+    ["__all__", t("detail.control.allLimits")],
+    ...history.map((s): [string, string] => [s.metric, s.metric]),
+  ];
   if (!metrics.some(([v]) => v === metricFilter)) metricFilter = "__all__";
   const width = Math.floor(el.clientWidth) - 28;
   el.innerHTML = `
     <section class="dt-section">
-      <h3>Limits over time</h3>
+      <h3>${esc(t("detail.section.limitsOverTime"))}</h3>
       <div class="dt-controls">
-        <label>Range ${select("dt-range", RANGES.map(([h, l]): [string, string] => [String(h), l]), String(hours))}</label>
-        ${history.length > 1 ? `<label>Limit ${select("dt-metric", metrics, metricFilter)}</label>` : ""}
+        <label>${esc(t("detail.control.range"))} ${select("dt-range", RANGES.map(([h, l]): [string, string] => [String(h), t(l)]), String(hours))}</label>
+        ${history.length > 1 ? `<label>${esc(t("detail.control.limit"))} ${select("dt-metric", metrics, metricFilter)}</label>` : ""}
       </div>
-      ${loading && historyFor !== openId ? `<p class="dt-empty">Loading…</p>` : lineChart(history, width)}
+      ${loading && historyFor !== openId ? `<p class="dt-empty">${esc(t("detail.loading"))}</p>` : lineChart(history, width)}
       ${forecastSection(openId)}
     </section>
     <section class="dt-section">
-      <h3>Your week</h3>
-      ${burnFor === openId ? weekSection(snap) : `<p class="dt-empty">Loading…</p>`}
+      <h3>${esc(t("detail.section.yourWeek"))}</h3>
+      ${burnFor === openId ? weekSection(snap) : `<p class="dt-empty">${esc(t("detail.loading"))}</p>`}
     </section>
     <section class="dt-section">
-      <h3>Spend</h3>
+      <h3>${esc(t("detail.section.spend"))}</h3>
       ${spendSection(source.spend(openId))}
     </section>
     <section class="dt-section">
-      <h3>Right now</h3>
+      <h3>${esc(t("detail.section.rightNow"))}</h3>
       ${nowSection(snap)}
     </section>`;
   wireCrosshair(el);
@@ -1091,7 +1208,7 @@ async function setWide(next: boolean, save: boolean): Promise<void> {
   document.body.classList.toggle("wide", wide);
   const btn = document.querySelector<HTMLElement>("#detail-wide");
   if (btn) {
-    btn.textContent = wide ? "Narrow" : "Wide";
+    btn.textContent = wide ? t("detail.panel.narrow") : t("detail.panel.wide");
     btn.setAttribute("aria-pressed", String(wide));
   }
   if (save) source?.saveWide(wide);
@@ -1119,6 +1236,12 @@ export function refreshDetail(): void {
   if (groupKey === "session") void loadSessions();
   if (Date.now() - lastLoad < 60_000) return;
   void loadHistory();
+}
+
+/// Redraws the open detail page in place, e.g. after a locale switch (task 7
+/// wires this into the locale-change handler). A no-op while nothing is open.
+export function rerender(): void {
+  if (openId) render();
 }
 
 /// Restores the saved wide-mode choice. Call once the config has loaded:
@@ -1232,7 +1355,7 @@ export function setupDetail(src: DetailSource): void {
     } else if (target.closest("#dt-export-table")) {
       if (!lastTable) return;
       void invoke<string>("export_table", lastTable).then(
-        (path) => { clientNote = `Saved ${path}`; render(); },
+        (path) => { clientNote = t("detail.csv.saved", { path }); render(); },
         (err) => { clientNote = String(err); render(); },
       );
       return;
@@ -1240,7 +1363,7 @@ export function setupDetail(src: DetailSource): void {
       const sp = openId ? source?.spend(openId) : undefined;
       if (!sp) return;
       void invoke<string>("export_clients_csv", { areas: allAreas(sp) }).then(
-        (path) => { clientNote = `Saved ${path}`; render(); },
+        (path) => { clientNote = t("detail.csv.saved", { path }); render(); },
         (err) => { clientNote = String(err); render(); },
       );
       return;
