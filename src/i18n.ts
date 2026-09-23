@@ -70,10 +70,13 @@ export function t(key: string, vars?: Record<string, string | number>): string {
 }
 
 export function displayMetricLabel(label: string): string {
-  return (
-    DICTS[active][`label.${label}`] ??
-    (label.endsWith(" weekly") ? t("label.weeklySuffix", { model: label.slice(0, -7) }) : label)
-  );
+  const key = `label.${label}`;
+  const translated = t(key);
+  if (translated !== key) return translated;
+  if (label.endsWith(" weekly")) {
+    return t("label.weeklySuffix", { model: label.slice(0, -7) });
+  }
+  return label;
 }
 
 export function displayLinkLabel(label: string): string {

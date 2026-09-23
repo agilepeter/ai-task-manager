@@ -211,7 +211,6 @@
   "spend.today": "今天",
   "spend.yesterday": "昨天",
   "spend.days30": "30 天",
-  "spend.last30": "最近 30 天",
   "spend.trend": "30 天 · 词元",
   "spend.trendTip": "最近 30 天（{from} – {to}）· 峰值 {tokens} tokens，在 {peak} · 来自本地日志",
   "spend.others": "其他",

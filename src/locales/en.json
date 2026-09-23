@@ -211,7 +211,6 @@
   "spend.today": "Today",
   "spend.yesterday": "Yesterday",
   "spend.days30": "30 Days",
-  "spend.last30": "Last 30 Days",
   "spend.trend": "30 days · tokens",
   "spend.trendTip": "Last 30 days ({from} – {to}) · peak {tokens} tokens on {peak} · from local logs",
   "spend.others": "Others",
