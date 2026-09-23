@@ -85,6 +85,11 @@ await page.selectOption('#dt-group', 'client');
 await page.waitForTimeout(1400);
 await scrollTo('Spend');
 await shot('clients');
+// The janitor's view: every session of the month by cost, age and size, with Reveal.
+await page.selectOption('#dt-group', 'session');
+await page.waitForTimeout(1400);
+await scrollTo('Spend');
+await shot('sessions');
 
 await boot();
 await tab('Inventory');
