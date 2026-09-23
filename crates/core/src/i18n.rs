@@ -1,168 +1,135 @@
-//! UI locale for tray + Windows toasts. The popover translates in TypeScript;
-//! these strings have to live here because they are painted by Rust.
+//! UI locale for tray + Windows toasts. The popover translates in TypeScript
+//! from the same dictionaries (`src/i18n.ts` + `src/locales/*.json`); these
+//! functions paint the strings that only Rust ever renders (the tray
+//! tooltip, the Quit menu item) from the identical files, so there is one
+//! dictionary per language for both halves instead of a parallel Rust table
+//! that could drift from the JSON one.
 
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
-pub fn resolved_locale(cfg: &Value) -> &'static str {
-    match cfg.get("locale").and_then(Value::as_str) {
-        Some("zh") => "zh",
-        Some("ru") => "ru",
-        Some("en") => "en",
-        _ => system_ui_locale(),
+/// The one list of locales on the Rust side. A later task adds a language by
+/// appending here, adding a row to `WINDOWS_LANGIDS` and/or `ENV_PREFIXES` if
+/// it needs one, and adding a match arm in `locale_source` below (`include_str!`
+/// needs a literal path, so it cannot be driven from this list directly).
+pub const LOCALES: &[&str] = &["en", "zh", "ru"];
+
+/// Primary Windows UI language id (`langid & 0x03FF`) → locale. Only the
+/// locales that need a non-English match have a row; anything else falls
+/// back to "en". Used on Windows and, via `locale_for_langid`, in tests.
+#[cfg(any(windows, test))]
+const WINDOWS_LANGIDS: &[(u16, &str)] = &[(0x04, "zh"), (0x19, "ru")];
+
+/// `LC_ALL` / `LC_MESSAGES` / `LANG` tag prefix (lowercased) → locale.
+const ENV_PREFIXES: &[(&str, &str)] = &[("zh", "zh"), ("ru", "ru")];
+
+/// `include_str!` needs a literal path per file, so this is the one place
+/// that lists them; `LOCALES` above stays the only list of which locales
+/// exist. Unknown locale → the English file.
+fn locale_source(locale: &str) -> &'static str {
+    match locale {
+        "zh" => include_str!("../../../src/locales/zh.json"),
+        "ru" => include_str!("../../../src/locales/ru.json"),
+        _ => include_str!("../../../src/locales/en.json"),
     }
 }
 
-pub fn quit_label(cfg: &Value) -> &'static str {
-    match resolved_locale(cfg) {
-        "zh" => "退出 AI Task Manager",
-        "ru" => "Выйти из AI Task Manager",
-        _ => "Quit AI Task Manager",
+/// Every locale's dictionary, parsed once. A file that fails to parse yields
+/// an empty map rather than panicking; `every_locale_file_parses` catches
+/// that as a normal test failure instead of aborting the whole run.
+fn dict(locale: &str) -> &'static HashMap<String, String> {
+    static CACHE: OnceLock<HashMap<&'static str, HashMap<String, String>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| {
+        LOCALES
+            .iter()
+            .map(|&l| (l, serde_json::from_str(locale_source(l)).unwrap_or_default()))
+            .collect()
+    });
+    cache
+        .get(locale)
+        .or_else(|| cache.get("en"))
+        .expect("the en locale is always in LOCALES")
+}
+
+/// `dict[key]`, empty string treated as absent (a translator's blank cell
+/// falls through rather than painting nothing).
+fn non_empty<'a>(d: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
+    d.get(key).map(String::as_str).filter(|s| !s.is_empty())
+}
+
+/// `dict(locale)[key]`, falling back to English, then to the key itself —
+/// same order as `t()` in `src/i18n.ts`. An empty string counts as missing,
+/// so a translator's blank cell paints English rather than nothing.
+fn lookup(locale: &str, key: &str) -> String {
+    non_empty(dict(locale), key)
+        .or_else(|| non_empty(dict("en"), key))
+        .unwrap_or(key)
+        .to_string()
+}
+
+/// Replaces each `{name}` with its value; a brace with no matching var is
+/// left untouched. Mirrors the split/join substitution in `t()`.
+fn substitute(template: &str, vars: &[(&str, &str)]) -> String {
+    let mut out = template.to_string();
+    for (name, value) in vars {
+        out = out.replace(&format!("{{{name}}}"), value);
     }
+    out
+}
+
+pub fn resolved_locale(cfg: &Value) -> &'static str {
+    let requested = cfg.get("locale").and_then(Value::as_str);
+    match requested.and_then(|l| LOCALES.iter().copied().find(|&loc| loc == l)) {
+        Some(locale) => locale,
+        None => system_ui_locale(),
+    }
+}
+
+pub fn quit_label(cfg: &Value) -> String {
+    lookup(resolved_locale(cfg), "tray.quit")
 }
 
 pub fn metric_label(cfg: &Value, label: &str) -> String {
-    match resolved_locale(cfg) {
-        "zh" => zh_metric(label),
-        "ru" => ru_metric(label),
-        _ => label.to_string(),
+    let locale = resolved_locale(cfg);
+    let key = format!("label.{label}");
+    let translated = lookup(locale, &key);
+    if translated != key {
+        return translated;
     }
-}
-
-fn zh_metric(label: &str) -> String {
-    match label {
-        "Session" => "会话".into(),
-        "Weekly" => "每周".into(),
-        "Monthly" => "每月".into(),
-        "Daily" => "每天".into(),
-        "5 Hours" => "5 小时".into(),
-        "Video" => "视频".into(),
-        "Usage" => "用量".into(),
-        "Credits" => "额度".into(),
-        "Credits used" => "已用额度".into(),
-        "API" => "API".into(),
-        "Balance" => "余额".into(),
-        "Total quota" => "总额度".into(),
-        "5h" => "5 小时".into(),
-        "1d" => "1 天".into(),
-        "7d" => "7 天".into(),
-        "Remaining amount" => "剩余金额".into(),
-        "Subscription" => "订阅".into(),
-        "Type" => "类型".into(),
-        "Status" => "状态".into(),
-        "Unknown type" => "类型未知".into(),
-        "Unknown" => "未知".into(),
-        "Unlimited" => "无限额".into(),
-        "Overdue" => "欠费".into(),
-        "Expired" => "已过期".into(),
-        "Quota exhausted" => "额度已耗尽".into(),
-        "Disabled" => "已禁用".into(),
-        "Vouchers" => "代金券".into(),
-        "Cash" => "现金".into(),
-        "Limit" => "上限".into(),
-        "Used" => "已用".into(),
-        "On-demand" => "按量".into(),
-        "Cursor Models" => "Cursor 模型".into(),
-        "Grok Bot" => "Grok Bot".into(),
-        "Other Models" => "其他模型".into(),
-        "Total usage" => "总用量".into(),
-        "Bonus" => "赠送".into(),
-        "Extra usage" => "额外用量".into(),
-        "Extra credits" => "额外额度".into(),
-        "Rate Limit Resets" => "速率限制重置".into(),
-        "Extra balance" => "额外余额".into(),
-        "Kilo Pass" => "Kilo Pass".into(),
-        "Requests today" => "今日请求".into(),
-        "Requests this month" => "本月请求".into(),
-        "Requests this cycle" => "本周期请求".into(),
-        "Last used" => "上次使用".into(),
-        "Recent models" => "最近使用的模型".into(),
-        "Via" => "经由".into(),
-        "Sessions" => "会话数".into(),
-        other if other.ends_with(" weekly") => {
-            format!("{} 每周", other.trim_end_matches(" weekly"))
-        }
-        other => other.to_string(),
+    if let Some(model) = label.strip_suffix(" weekly") {
+        return substitute(&lookup(locale, "label.weeklySuffix"), &[("model", model)]);
     }
-}
-
-fn ru_metric(label: &str) -> String {
-    match label {
-        "Session" => "Сессия".into(),
-        "Weekly" => "За неделю".into(),
-        "Monthly" => "За месяц".into(),
-        "Daily" => "За день".into(),
-        "5 Hours" => "5 часов".into(),
-        "Video" => "Видео".into(),
-        "Usage" => "Использование".into(),
-        "Credits" => "Кредиты".into(),
-        "Credits used" => "Использовано кредитов".into(),
-        "API" => "API".into(),
-        "Balance" => "Баланс".into(),
-        "Total quota" => "Общий лимит".into(),
-        "5h" => "5 ч".into(),
-        "1d" => "1 день".into(),
-        "7d" => "7 дней".into(),
-        "Remaining amount" => "Остаток".into(),
-        "Subscription" => "Подписка".into(),
-        "Type" => "Тип".into(),
-        "Status" => "Статус".into(),
-        "Unknown type" => "Неизвестный тип".into(),
-        "Unknown" => "Неизвестно".into(),
-        "Unlimited" => "Без лимита".into(),
-        "Overdue" => "Задолженность".into(),
-        "Expired" => "Истекло".into(),
-        "Quota exhausted" => "Лимит исчерпан".into(),
-        "Disabled" => "Отключено".into(),
-        "Vouchers" => "Ваучеры".into(),
-        "Cash" => "Наличные".into(),
-        "Limit" => "Лимит".into(),
-        "Used" => "Использовано".into(),
-        "On-demand" => "По факту".into(),
-        "Cursor Models" => "Модели Cursor".into(),
-        "Grok Bot" => "Grok Bot".into(),
-        "Other Models" => "Другие модели".into(),
-        "Total usage" => "Всего".into(),
-        "Bonus" => "Бонус".into(),
-        "Extra usage" => "Дополнительно".into(),
-        "Extra credits" => "Доп. кредиты".into(),
-        "Rate Limit Resets" => "Сбросы лимитов".into(),
-        "Extra balance" => "Доп. баланс".into(),
-        "Kilo Pass" => "Kilo Pass".into(),
-        "Requests today" => "Запросы сегодня".into(),
-        "Requests this month" => "Запросы в этом месяце".into(),
-        "Requests this cycle" => "Запросы за цикл".into(),
-        "Last used" => "Последнее использование".into(),
-        "Recent models" => "Недавние модели".into(),
-        "Via" => "Через".into(),
-        "Sessions" => "Сессии".into(),
-        other if other.ends_with(" weekly") => {
-            format!("{} за неделю", other.trim_end_matches(" weekly"))
-        }
-        other => other.to_string(),
-    }
+    label.to_string()
 }
 
 pub fn pct_left(cfg: &Value, name: &str, label: &str, left: f64) -> String {
+    let locale = resolved_locale(cfg);
     let shown = metric_label(cfg, label);
-    match resolved_locale(cfg) {
-        "zh" => format!("{name} {shown}: 剩余 {left:.0}%"),
-        "ru" => format!("{name} {shown}: осталось {left:.0}%"),
-        _ => format!("{name} {shown}: {left:.0}% left"),
-    }
+    let left = format!("{left:.0}");
+    substitute(&lookup(locale, "tray.pctLeft"), &[("name", name), ("label", &shown), ("left", &left)])
 }
 
-/// Primary language 0x04 = Chinese (zh-CN, zh-TW, zh-HK, …).
+/// Windows langid → locale via `WINDOWS_LANGIDS`, matched on the primary
+/// language id (`langid & 0x03FF`). Unknown id → "en".
+#[cfg(any(windows, test))]
+fn locale_for_langid(langid: u16) -> &'static str {
+    let primary = langid & 0x03FF;
+    WINDOWS_LANGIDS
+        .iter()
+        .find(|&&(id, _)| id == primary)
+        .map(|&(_, locale)| locale)
+        .unwrap_or("en")
+}
+
 #[cfg(any(windows, test))]
 fn langid_is_zh(langid: u16) -> bool {
-    const LANG_CHINESE: u16 = 0x04;
-    langid & 0x03FF == LANG_CHINESE
+    locale_for_langid(langid) == "zh"
 }
 
-/// Primary language 0x19 = Russian (ru-RU, ru-MD, …).
 #[cfg(any(windows, test))]
 fn langid_is_ru(langid: u16) -> bool {
-    const LANG_RUSSIAN: u16 = 0x19;
-    langid & 0x03FF == LANG_RUSSIAN
+    locale_for_langid(langid) == "ru"
 }
 
 /// Windows *display* language, not the regional-format locale.
@@ -171,13 +138,20 @@ fn langid_is_ru(langid: u16) -> bool {
 pub fn system_ui_locale() -> &'static str {
     use windows::Win32::Globalization::GetUserDefaultUILanguage;
     let langid = unsafe { GetUserDefaultUILanguage() };
-    if langid_is_zh(langid) {
-        "zh"
-    } else if langid_is_ru(langid) {
-        "ru"
-    } else {
-        "en"
-    }
+    locale_for_langid(langid)
+}
+
+/// Env tag prefix (already lowercased internally) → locale via
+/// `ENV_PREFIXES`. Factored out as a pure function so it is testable without
+/// touching the process environment. Unmatched (including empty) → "en".
+#[cfg(any(not(windows), test))]
+fn locale_for_env_tag(tag: &str) -> &'static str {
+    let tag = tag.to_ascii_lowercase();
+    ENV_PREFIXES
+        .iter()
+        .find(|&&(prefix, _)| tag.starts_with(prefix))
+        .map(|&(_, locale)| locale)
+        .unwrap_or("en")
 }
 
 /// macOS / Linux: the first language tag in the usual locale env vars
@@ -189,15 +163,8 @@ pub fn system_ui_locale() -> &'static str {
         .iter()
         .filter_map(|k| std::env::var(k).ok())
         .find(|v| !v.is_empty())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if tag.starts_with("zh") {
-        "zh"
-    } else if tag.starts_with("ru") {
-        "ru"
-    } else {
-        "en"
-    }
+        .unwrap_or_default();
+    locale_for_env_tag(&tag)
 }
 
 #[cfg(test)]
@@ -246,5 +213,59 @@ mod tests {
         assert!(langid_is_ru(0x0419)); // ru-RU
         assert!(!langid_is_ru(0x0409)); // en-US
         assert!(!langid_is_ru(0x0804)); // zh-CN
+    }
+
+    #[test]
+    fn every_locale_file_parses() {
+        for &locale in LOCALES {
+            assert!(!dict(locale).is_empty(), "{locale}.json parsed to an empty dict");
+        }
+    }
+
+    #[test]
+    fn every_locale_has_the_tray_keys() {
+        for &locale in LOCALES {
+            for key in ["tray.quit", "tray.pctLeft"] {
+                let value = dict(locale).get(key);
+                assert!(
+                    matches!(value, Some(s) if !s.is_empty()),
+                    "{locale}.json is missing a non-empty \"{key}\""
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_locale_translates_every_label_any_other_locale_does() {
+        fn label_keys(d: &HashMap<String, String>) -> std::collections::BTreeSet<&str> {
+            d.keys().filter(|k| k.starts_with("label.")).map(String::as_str).collect()
+        }
+        let en_keys = label_keys(dict("en"));
+        for &locale in LOCALES {
+            assert_eq!(label_keys(dict(locale)), en_keys, "{locale}.json's label.* keys differ from en.json");
+        }
+    }
+
+    #[test]
+    fn windows_langids_map_to_locales() {
+        assert_eq!(locale_for_langid(0x0804), "zh"); // zh-CN
+        assert_eq!(locale_for_langid(0x0404), "zh"); // zh-TW
+        assert_eq!(locale_for_langid(0x0419), "ru"); // ru-RU
+        assert_eq!(locale_for_langid(0x0819), "ru"); // ru-MD
+        assert_eq!(locale_for_langid(0x0409), "en"); // en-US
+        assert_eq!(locale_for_langid(0xFFFF), "en"); // unknown
+    }
+
+    #[test]
+    fn env_prefixes_map_to_locales() {
+        assert_eq!(locale_for_env_tag("zh_CN.UTF-8"), "zh");
+        assert_eq!(locale_for_env_tag("ru_RU"), "ru");
+        assert_eq!(locale_for_env_tag("en_US.UTF-8"), "en");
+        assert_eq!(locale_for_env_tag(""), "en");
+    }
+
+    #[test]
+    fn an_unknown_config_locale_falls_back_to_the_system() {
+        assert_eq!(resolved_locale(&json!({"locale": "xx"})), system_ui_locale());
     }
 }

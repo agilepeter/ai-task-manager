@@ -144,6 +144,8 @@
   "settings.onenewapiSaveKey": "保存密钥",
   "settings.onenewapiDeleteKey": "删除密钥",
   "settings.onenewapiKeyKeepHint": "留空则保留现有密钥",
+  "tray.quit": "退出 AI Task Manager",
+  "tray.pctLeft": "{name} {label}: 剩余 {left}%",
   "dialog.cancel": "取消",
   "dialog.gotIt": "知道了",
   "card.notConnected": "未连接",

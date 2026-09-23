@@ -144,6 +144,8 @@
   "settings.onenewapiSaveKey": "Save key",
   "settings.onenewapiDeleteKey": "Delete key",
   "settings.onenewapiKeyKeepHint": "Leave empty to keep the current key",
+  "tray.quit": "Quit AI Task Manager",
+  "tray.pctLeft": "{name} {label}: {left}% left",
   "dialog.cancel": "Cancel",
   "dialog.gotIt": "Got it",
   "card.notConnected": "Not connected",

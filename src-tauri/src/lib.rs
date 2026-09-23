@@ -506,7 +506,7 @@ fn apply_config_patch(cfg: &mut Value, patch: &Value) {
         for (k, v) in source {
             if CONFIG_KEYS.contains(&k.as_str()) {
                 if k == "locale" {
-                    let ok = matches!(v.as_str(), Some("auto" | "en" | "zh" | "ru"));
+                    let ok = matches!(v.as_str(), Some(s) if s == "auto" || i18n::LOCALES.contains(&s));
                     target.insert(k.clone(), if ok { v.clone() } else { json!("auto") });
                 } else {
                     target.insert(k.clone(), v.clone());

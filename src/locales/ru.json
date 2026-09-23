@@ -144,6 +144,8 @@
   "settings.onenewapiSaveKey": "Сохранить ключ",
   "settings.onenewapiDeleteKey": "Удалить ключ",
   "settings.onenewapiKeyKeepHint": "Оставьте пустым, чтобы оставить текущий ключ",
+  "tray.quit": "Выйти из AI Task Manager",
+  "tray.pctLeft": "{name} {label}: осталось {left}%",
   "dialog.cancel": "Отмена",
   "dialog.gotIt": "Понятно",
   "card.notConnected": "Не подключено",
