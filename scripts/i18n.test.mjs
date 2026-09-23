@@ -234,3 +234,28 @@ for (const [rel, prefix] of KEYED_SOURCES) {
     );
   });
 }
+
+// Guard against a regression task 8's follow-up fixed by hand (src/detail.ts
+// used to spell "detail.session.spanDays.other" / "...lastActive.other"
+// literally, which broke the moment ru.json's .other was renamed to .many).
+// A plural form is only ever picked by plural()/t(key, vars, count) — never
+// a literal ".one"/".few"/".many"/".other" suffix typed into a t()/T() call
+// — same spirit as the template-literal guard above, one combined check
+// across every KEYED_SOURCES file rather than a copy per file.
+test("no keyed source spells a plural form by hand", () => {
+  const handSpelledForm = /\b[tT]\(\s*["']([a-zA-Z0-9_.]+\.(?:one|few|many|other))["']/g;
+  const violations = [];
+  for (const [rel] of KEYED_SOURCES) {
+    const source = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+    const stripped = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(?<!:)\/\/.*$/gm, "");
+    for (const m of stripped.matchAll(handSpelledForm)) {
+      violations.push(`${rel}: ${m[0].trim()}`);
+    }
+  }
+  assert.deepEqual(
+    violations,
+    [],
+    "a plural form must be picked by plural()/t(key, vars, count), not spelled by hand in a t()/T() call: " +
+      violations.join("; "),
+  );
+});

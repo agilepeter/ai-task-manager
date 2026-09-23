@@ -640,11 +640,13 @@ function span(s: SessionSpend): [string, string] {
   if (s.startedMs === null || s.endedMs === null) return ["", ""];
   const start = new Date(s.startedMs);
   const mins = Math.max(Math.round((s.endedMs - s.startedMs) / 60_000), 1);
-  // mins >= 2880 (48h) here, so the day count is always >= 2; detail.session.spanDays.one
-  // exists for task 8's real plural rules and is unreachable through this branch today.
+  // mins >= 2880 (48h) here, so the day count passed to plural() below is
+  // always >= 2 through this branch -- unreachable-at-zero/one gets a
+  // comment, not a guard (amendment 14). plural() still picks the right
+  // form (ru's few/many, zh's other) for whatever count actually lands here.
   const length =
     mins >= 2880
-      ? t("detail.session.spanDays.other", { n: Math.round(mins / 1440) })
+      ? plural("detail.session.spanDays", Math.round(mins / 1440))
       : mins >= 60
         ? t("time.hoursMins", { h: Math.floor(mins / 60), m: mins % 60 })
         : t("time.mins", { m: mins });
@@ -661,9 +663,11 @@ function lastActive(s: SessionSpend): string {
   const days = Math.floor((Date.now() - s.endedMs) / 86_400_000);
   if (days <= 0) return t("detail.session.activeToday");
   if (days === 1) return t("detail.session.activeYesterday");
-  // days is always >= 2 here (0 and 1 handled above); detail.session.lastActive.one
-  // exists for task 8's real plural rules and is unreachable through this branch today.
-  return t("detail.session.lastActive.other", { n: days });
+  // days is always >= 2 here (0 and 1 handled above) -- unreachable-at-
+  // zero/one gets a comment, not a guard (amendment 14). plural() still
+  // picks the right form (ru's few/many, zh's other) for whatever count
+  // actually lands here.
+  return plural("detail.session.lastActive", days);
 }
 
 /// MB/KB stay English: format tokens, not prose, same as tokens()'s B/M/K and money()'s $.
