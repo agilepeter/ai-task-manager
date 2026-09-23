@@ -3092,14 +3092,18 @@ async function refresh(force = false, usageOnly = false): Promise<void> {
       typeof s.fetched_at === "number"
         ? new Date(s.fetched_at).toLocaleTimeString(localeTag(), { hour: "2-digit", minute: "2-digit" })
         : "";
-    const heldBack = force
-      ? snapshots.filter((s) => s.attempt_failed).map((s) => (dataTime(s) ? `${s.name} (${dataTime(s)})` : s.name))
-      : [];
+    const held = force ? snapshots.filter((s) => s.attempt_failed) : [];
+    const heldBack = held.map((s) => (dataTime(s) ? `${s.name} (${dataTime(s)})` : s.name));
     status.textContent = configSaveError
       ? t("footer.configSaveFailed", { err: configSaveError })
       : heldBack.length > 0
         ? t("footer.refreshPartial", { time, names: heldBack.join(", ") })
         : t("footer.updated", { time });
+    // The reason, on hover: the footer stays one line, the why is a tooltip.
+    (status as HTMLElement).title = held
+      .filter((s) => s.warning)
+      .map((s) => `${s.name}: ${s.warning}`)
+      .join("\n");
   } catch (err) {
     status.textContent = configSaveError
       ? t("footer.configSaveFailed", { err: configSaveError })

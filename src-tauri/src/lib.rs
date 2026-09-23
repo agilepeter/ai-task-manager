@@ -1679,9 +1679,11 @@ fn api_key_baseline_ids(provider: &str) -> Vec<String> {
 /// same minute is what Anthropic answers with a 429 -- which then benched
 /// the loop's own fetches for five minutes, so clicking Refresh made the
 /// numbers *stop*. Two reports in two days (2026-09-22 and 23) were exactly
-/// that. Forty-five seconds is under the loop's own period, so the loop is
-/// never starved by it; and forty-five-second-old numbers are current.
-const FRESH_REUSE_MS: i64 = 45_000;
+/// that. One minute is the app's own minimum polling interval, so the rule
+/// this makes true for every caller -- the loop, a click, a reset timer --
+/// is: never two vendor calls inside a minute. A minute-old number is
+/// current; a 429 is not.
+const FRESH_REUSE_MS: i64 = 60_000;
 
 async fn guarded<F>(id: String, name: String, fut: F) -> providers::Snapshot
 where
@@ -1842,9 +1844,13 @@ fn restore_last_success_after_error(
     let warning = current.error.clone();
     *current = previous.clone();
     current.attempt_failed = true;
+    // The reason travels whatever the age. The card's Outdated chip is gated
+    // on `stale`, so inside the grace window nothing new appears -- but the
+    // footer of a refresh the user asked for, and the chip's tooltip once it
+    // does show, can say WHY the numbers are held back instead of shrugging.
+    current.warning = warning;
     if sub2api || age_ms > STALE_GRACE_MS {
         current.stale = true;
-        current.warning = warning;
     }
     true
 }
@@ -3975,6 +3981,17 @@ mod tests {
         assert!(current.attempt_failed);
         assert_eq!(current.warning.as_deref(), Some("HTTP 401"));
         assert_eq!(current.metrics[0].used_percent, Some(25.0));
+    }
+
+    #[test]
+    fn a_failure_inside_the_grace_window_keeps_its_reason_but_not_the_chip() {
+        let previous = Snapshot::ok("claude", "Claude", Some("max".into()), vec![Metric::progress("Weekly", 5.0, None)]);
+        let mut current = Snapshot::error("claude", "Claude", "usage endpoint: HTTP 429 (retry_after_s=30)".into());
+        assert!(restore_last_success_after_error(&mut current, &previous, 1_000));
+        assert!(!current.stale, "one hiccup inside the grace window is not Outdated");
+        assert!(current.attempt_failed);
+        assert_eq!(current.warning.as_deref(), Some("usage endpoint: HTTP 429 (retry_after_s=30)"), "but the reason is kept for the footer");
+        assert_eq!(current.metrics[0].used_percent, Some(5.0), "the last good numbers stand in");
     }
 
     #[test]
