@@ -350,6 +350,13 @@ the non-obvious parts are in [CLAUDE.md](CLAUDE.md). Distribution status is in
 [SHIPPING.md](SHIPPING.md). What came from upstream and how to take a fix from
 it is in [UPSTREAM.md](UPSTREAM.md).
 
+## Questions
+
+The [FAQ on the product page](https://staas.fund/task-manager/#faq) answers the
+ones that come up first: why there is no download, whether anything leaves the
+machine, why a row can sit at 100% after a weekly reset, why the spend figures
+are a floor, and whether it will delete old sessions (it will not).
+
 ## Credits
 
 Built on two projects that did the hard provider research first, both MIT:
