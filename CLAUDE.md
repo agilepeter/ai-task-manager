@@ -52,8 +52,10 @@ file under `crates/core/src/providers/` and port it by hand.
   suspends JavaScript timers in a hidden webview, and a tray app is hidden nearly always:
   history, alerts, reminders and feeds stalled for hours. The loop yields to an open window
   through shared last-fetch timestamps, so providers are never fetched twice. Do not move
-  scheduling back into the frontend. Note `tauri dev` only watches `src-tauri/`: a change
-  under `crates/` needs the app restarted by hand.
+  scheduling back into the frontend. Note: `tauri dev` is documented as watching `src-tauri/` only, but on
+  2026-09-22 a write under `crates/core` relaunched the app within a second. Do not rely on
+  either: after a change under `crates/`, check the binary (`strings target/debug/ai-task-manager |
+  grep <new text>`) and, if it did not rebuild, `touch src-tauri/src/lib.rs`.
 - The HTTP user-agent is `ai-task-manager/<version>`: the same for every install, never an id.
 - **Self-update is off** (`UPDATES_ENABLED` in `src-tauri/src/lib.rs`). The pubkey in
   `tauri.conf.json` is now OURS (minisign `6CDFF96385CA8101`; private half in `~/.tauri/` and
