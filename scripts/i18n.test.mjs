@@ -1,6 +1,12 @@
 // Mechanical checks over src/locales/*.json. Plain fs.readFileSync + JSON.parse
 // on purpose (not import assertions): CI runs Node 22, local is Node 25, and
 // import-assertion syntax has moved between the two — this stays portable.
+//
+// This is the only thing that turns a missing key into a loud failure: t() in
+// src/i18n.ts silently falls back to English on any gap, so a hole here would
+// otherwise ship as quietly-wrong text. Per-locale key sets are therefore
+// checked for exact equality against English, both ways — six more locales
+// will be guarded by this same file.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
@@ -11,7 +17,11 @@ const localesDir = fileURLToPath(new URL("../src/locales/", import.meta.url));
 const dicts = {};
 for (const file of readdirSync(localesDir).filter((f) => f.endsWith(".json")).sort()) {
   const locale = path.basename(file, ".json");
-  dicts[locale] = JSON.parse(readFileSync(path.join(localesDir, file), "utf8"));
+  try {
+    dicts[locale] = JSON.parse(readFileSync(path.join(localesDir, file), "utf8"));
+  } catch (e) {
+    throw new Error(`${file}: ${e.message}`);
+  }
 }
 assert.ok(dicts.en, "src/locales/en.json must exist as the reference locale");
 const otherLocales = Object.keys(dicts).filter((l) => l !== "en").sort();
@@ -26,8 +36,7 @@ for (const locale of otherLocales) {
     const localeKeys = new Set(Object.keys(dicts[locale]));
     const missing = [...enKeys].filter((k) => !localeKeys.has(k));
     const extra = [...localeKeys].filter((k) => !enKeys.has(k));
-    assert.deepEqual(missing, [], `${locale} is missing keys English has`);
-    assert.deepEqual(extra, [], `${locale} has keys English does not have`);
+    assert.deepEqual({ missing, extra }, { missing: [], extra: [] }, `${locale}: key set differs from English`);
   });
 
   test(`${locale}: every value keeps the {tokens} its English value has`, () => {
@@ -40,7 +49,7 @@ for (const locale of otherLocales) {
       const same = enTokens.size === localeTokens.size && [...enTokens].every((t) => localeTokens.has(t));
       if (!same) mismatches.push(key);
     }
-    assert.deepEqual(mismatches, []);
+    assert.deepEqual(mismatches, [], `${locale}: these keys lost or gained {tokens} vs. English`);
   });
 
   test(`${locale}: differs from English on at least 80% of its keys`, () => {
