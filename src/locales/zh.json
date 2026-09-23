@@ -667,5 +667,7 @@
   "ledger.csv.price": "价格",
   "ledger.csv.billed": "计费周期",
   "ledger.csv.paysFor": "对应工具",
-  "ledger.csv.notes": "备注"
+  "ledger.csv.notes": "备注",
+  "usage.tab": "用量",
+  "usage.views": "视图"
 }

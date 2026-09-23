@@ -667,5 +667,7 @@
   "ledger.csv.price": "Цена",
   "ledger.csv.billed": "Периодичность оплаты",
   "ledger.csv.paysFor": "Оплачивает",
-  "ledger.csv.notes": "Заметки"
+  "ledger.csv.notes": "Заметки",
+  "usage.tab": "Использование",
+  "usage.views": "Виды"
 }

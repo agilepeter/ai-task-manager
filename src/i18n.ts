@@ -47,6 +47,12 @@ export function normalizeLocalePref(raw: unknown): LocalePref {
   return typeof raw === "string" && (LOCALES as readonly string[]).includes(raw) ? (raw as Locale) : "auto";
 }
 
+/// Same idea as normalizeLocalePref, but for callers (setSystemLocale) that need a
+/// bare Locale and cannot take "auto".
+export function asLocale(raw: unknown): Locale {
+  return typeof raw === "string" && (LOCALES as readonly string[]).includes(raw) ? (raw as Locale) : "en";
+}
+
 export function setActiveLocale(locale: Locale): void {
   active = locale;
 }

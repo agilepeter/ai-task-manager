@@ -667,5 +667,7 @@
   "ledger.csv.price": "Price",
   "ledger.csv.billed": "Billed",
   "ledger.csv.paysFor": "Pays for",
-  "ledger.csv.notes": "Notes"
+  "ledger.csv.notes": "Notes",
+  "usage.tab": "Usage",
+  "usage.views": "Views"
 }

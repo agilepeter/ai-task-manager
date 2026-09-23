@@ -1,14 +1,15 @@
-import { setupViews, showView } from "./inventory";
-import { maybeFirstRunAudit, setupAudit } from "./audit";
-import { setupAbout } from "./about";
-import { setupLedger } from "./ledger";
-import { applySavedWide, cardExtras, refreshDetail, setupDetail } from "./detail";
+import { rerender as rerenderInventory, setupViews, showView } from "./inventory";
+import { maybeFirstRunAudit, rerender as rerenderAudit, setupAudit } from "./audit";
+import { rerender as rerenderAbout, setupAbout } from "./about";
+import { rerender as rerenderLedger, setupLedger } from "./ledger";
+import { applySavedWide, cardExtras, refreshDetail, rerender as rerenderDetail, setupDetail } from "./detail";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { reconcileSub2ApiLayout, sub2ApiLiveLayout, sub2ApiOnDemand, sub2ApiPrimaryMetric, Sub2ApiSnapshotContexts, sub2ApiStatusDetails } from "./sub2api-display";
 import {
   applyStaticI18n,
+  asLocale,
   displayLinkLabel,
   displayMetricDetail,
   displayMetricLabel,
@@ -4419,6 +4420,11 @@ function applyLocale(): void {
     }
   }
   if (lastSnapshots.length) renderIfVisible();
+  rerenderDetail();
+  rerenderInventory();
+  rerenderAudit();
+  rerenderAbout();
+  rerenderLedger();
   populatePinnedOptions();
   renderBuildInfo();
 }
@@ -4428,7 +4434,7 @@ async function initSettings(): Promise<void> {
   config.locale = normalizeLocalePref(config.locale);
   try {
     const sys = await invoke<string>("system_ui_locale");
-    setSystemLocale(sys === "zh" || sys === "ru" ? sys : "en");
+    setSystemLocale(asLocale(sys));
   } catch {
     // Dev / missing command — fall back to navigator.language.
   }
