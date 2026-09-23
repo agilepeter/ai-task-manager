@@ -718,4 +718,193 @@ mod tests {
         assert!(has_state_for_test("onenewapi@ticket07-abcd:Usage"));
         forget_snapshot("onenewapi@ticket07-abcd");
     }
+
+    /// Written BEFORE `Alert` gains a `Msg` field, against the inline
+    /// `match crate::i18n::resolved_locale(cfg) { "zh" => …, "ru" => …, _
+    /// => … }` arms this file has today. Drives every alert case for all
+    /// three shipped locales and pins the exact text as literal
+    /// assertions, table-driven (fixture -> expected title/body per
+    /// locale). Once the arms move into the locale JSON files, this test
+    /// is repointed at `i18n::render(locale, &msg)` with the SAME literal
+    /// expectations -- a reword during that migration fails here first.
+    ///
+    /// The "Limit reset" case appends a "next reset in …" clause built
+    /// from the real clock (see `evaluate_at`), so those two fixtures
+    /// check the fixed lead-in and the fixed tail with `contains` on each
+    /// side of the clock-derived duration instead of one `assert_eq!` on
+    /// the whole string; every other case has no clock-derived content
+    /// and is checked exactly.
+    #[test]
+    fn zh_and_ru_alert_text_is_unchanged() {
+        let locales = ["en", "zh", "ru"];
+
+        // -- Limit reset: back to (near) 100% --------------------------
+        let title = ["Limit reset", "额度已重置", "Лимит сброшен"];
+        let lead = [
+            "Codex Weekly is back to 100%.",
+            "Codex 每周 已恢复到 100%。",
+            "Codex За неделю снова 100%.",
+        ];
+        let next_lead = ["Next reset in", "下次重置：", "Следующий сброс через"];
+        for (i, locale) in locales.iter().enumerate() {
+            let id = format!("snap-reset-back-{locale}");
+            let cfg = serde_json::json!({"notifyReset": true, "locale": locale});
+            let period = 7 * 86_400_000_i64;
+            let t = chrono::Utc::now().timestamp_millis() + 2 * 3_600_000;
+            let make = |used, resets| {
+                Snapshot::ok(&id, "Codex", None, vec![
+                    crate::providers::Metric::progress("Weekly", used, None).with_reset(Some(resets), Some(period)),
+                ])
+            };
+            forget_snapshot(&id);
+            assert!(evaluate_at(&[make(80.0, t)], &cfg, t).is_empty(), "{locale}: baseline must be silent");
+            let alerts = evaluate_at(&[make(0.0, t + period)], &cfg, t + period);
+            assert_eq!(alerts.len(), 1, "{locale}");
+            assert_eq!(alerts[0].title, title[i], "{locale} reset title");
+            assert!(alerts[0].body.starts_with(lead[i]), "{locale}: {}", alerts[0].body);
+            assert!(alerts[0].body.contains(next_lead[i]), "{locale}: {}", alerts[0].body);
+            forget_snapshot(&id);
+        }
+
+        // -- Limit reset: usage already resumed, 80% available ---------
+        let avail_lead = [
+            "Codex Weekly has reset — 80% available.",
+            "Codex 每周 已重置 — 可用 80%。",
+            "Codex За неделю сброшен — доступно 80%.",
+        ];
+        for (i, locale) in locales.iter().enumerate() {
+            let id = format!("snap-reset-avail-{locale}");
+            let cfg = serde_json::json!({"notifyReset": true, "locale": locale});
+            let period = 7 * 86_400_000_i64;
+            let t = chrono::Utc::now().timestamp_millis() + 2 * 3_600_000;
+            let make = |used, resets| {
+                Snapshot::ok(&id, "Codex", None, vec![
+                    crate::providers::Metric::progress("Weekly", used, None).with_reset(Some(resets), Some(period)),
+                ])
+            };
+            forget_snapshot(&id);
+            assert!(evaluate_at(&[make(80.0, t)], &cfg, t).is_empty(), "{locale}: baseline must be silent");
+            let alerts = evaluate_at(&[make(20.0, t + period)], &cfg, t + period);
+            assert_eq!(alerts.len(), 1, "{locale}");
+            assert_eq!(alerts[0].title, title[i], "{locale} reset title");
+            assert!(alerts[0].body.starts_with(avail_lead[i]), "{locale}: {}", alerts[0].body);
+            assert!(alerts[0].body.contains(next_lead[i]), "{locale}: {}", alerts[0].body);
+            forget_snapshot(&id);
+        }
+
+        // -- Will Run Out ------------------------------------------------
+        let run_out_title = ["Will Run Out", "将会用完", "Кончится до сброса"];
+        let run_out_body = [
+            "Codex Weekly is on pace to hit its limit before the reset.",
+            "Codex 每周 按当前速度会在重置前用完。",
+            "Codex За неделю при текущем темпе исчерпается до сброса.",
+        ];
+        for (i, locale) in locales.iter().enumerate() {
+            let id = format!("snap-runout-{locale}");
+            let cfg = serde_json::json!({"notifyWillRunOut": true, "locale": locale});
+            let t = chrono::Utc::now().timestamp_millis() + 2 * 3_600_000;
+            let period = 7 * 86_400_000_i64;
+            let make = |used| {
+                Snapshot::ok(&id, "Codex", None, vec![
+                    crate::providers::Metric::progress("Weekly", used, None).with_reset(Some(t), Some(period)),
+                ])
+            };
+            forget_snapshot(&id);
+            assert!(evaluate(&[make(10.0)], &cfg).is_empty(), "{locale}: baseline must be silent");
+            let alerts = evaluate(&[make(99.0)], &cfg);
+            assert_eq!(alerts.len(), 1, "{locale}");
+            assert_eq!(alerts[0].title, run_out_title[i], "{locale}");
+            assert_eq!(alerts[0].body, run_out_body[i], "{locale}");
+            forget_snapshot(&id);
+        }
+
+        // -- Cutting It Close ---------------------------------------------
+        let close_title = ["Cutting It Close", "余量紧张", "Запас на исходе"];
+        let close_body = [
+            "Codex Weekly is on pace to finish with only ~9% spare.",
+            "Codex 每周 按当前速度重置时大约只剩 9%。",
+            "Codex За неделю к сбросу останется примерно 9%.",
+        ];
+        for (i, locale) in locales.iter().enumerate() {
+            let id = format!("snap-close-{locale}");
+            let cfg = serde_json::json!({"notifyCuttingClose": true, "locale": locale});
+            let t = chrono::Utc::now().timestamp_millis() + 2 * 3_600_000;
+            let period = 7 * 86_400_000_i64;
+            let make = |used| {
+                Snapshot::ok(&id, "Codex", None, vec![
+                    crate::providers::Metric::progress("Weekly", used, None).with_reset(Some(t), Some(period)),
+                ])
+            };
+            forget_snapshot(&id);
+            assert!(evaluate(&[make(10.0)], &cfg).is_empty(), "{locale}: baseline must be silent");
+            let alerts = evaluate(&[make(90.0)], &cfg);
+            assert_eq!(alerts.len(), 1, "{locale}");
+            assert_eq!(alerts[0].title, close_title[i], "{locale}");
+            assert_eq!(alerts[0].body, close_body[i], "{locale}");
+            forget_snapshot(&id);
+        }
+
+        // -- Almost Out ----------------------------------------------------
+        let almost_title = ["Almost Out", "即将用完", "Почти кончилось"];
+        let almost_body = [
+            "Codex Weekly is under 10% remaining (5% left).",
+            "Codex 每周 剩余不足 10%（还剩 5%）。",
+            "Codex За неделю осталось меньше 10% (ещё 5%).",
+        ];
+        for (i, locale) in locales.iter().enumerate() {
+            let id = format!("snap-almost-{locale}");
+            let cfg = serde_json::json!({"notifyAlmostOut": true, "locale": locale});
+            let make = |used| Snapshot::ok(&id, "Codex", None, vec![crate::providers::Metric::progress("Weekly", used, None)]);
+            forget_snapshot(&id);
+            assert!(evaluate(&[make(50.0)], &cfg).is_empty(), "{locale}: baseline must be silent");
+            let alerts = evaluate(&[make(95.0)], &cfg);
+            assert_eq!(alerts.len(), 1, "{locale}");
+            assert_eq!(alerts[0].title, almost_title[i], "{locale}");
+            assert_eq!(alerts[0].body, almost_body[i], "{locale}");
+            forget_snapshot(&id);
+        }
+
+        // -- Burning Fast ----------------------------------------------------
+        let burn_title = ["Burning Fast", "消耗过快", "Быстрый расход"];
+        let burn_body = [
+            "Codex Weekly used 17% in 20 min. 63% left.",
+            "Codex 每周 在 20 分钟内用掉了 17%，剩余 63%。",
+            "Codex За неделю: 17% за 20 мин, осталось 63%.",
+        ];
+        for (i, locale) in locales.iter().enumerate() {
+            let id = format!("snap-burn-{locale}");
+            let cfg = serde_json::json!({"burnAlertPoints": 15, "locale": locale});
+            let t0 = 20_000 * 60_000_i64;
+            let weekly = |used: f64| {
+                Snapshot::ok(&id, "Codex", None, vec![
+                    crate::providers::Metric::progress("Weekly", used, None)
+                        .with_reset(Some(t0 + 3 * 24 * 60 * 60_000), Some(7 * 24 * 3_600_000)),
+                ])
+            };
+            forget_snapshot(&id);
+            assert!(evaluate_at(&[weekly(20.0)], &cfg, t0).is_empty(), "{locale}: baseline must be silent");
+            assert!(evaluate_at(&[weekly(26.0)], &cfg, t0 + 10 * 60_000).is_empty(), "{locale}: 6 points is normal");
+            let alerts = evaluate_at(&[weekly(37.0)], &cfg, t0 + 20 * 60_000);
+            assert_eq!(alerts.len(), 1, "{locale}");
+            assert_eq!(alerts[0].title, burn_title[i], "{locale}");
+            assert_eq!(alerts[0].body, burn_body[i], "{locale}");
+            forget_snapshot(&id);
+        }
+
+        // -- Daily Spend -------------------------------------------------
+        let spend_title = ["Daily Spend", "今日花费", "Расход за день"];
+        let spend_body = [
+            "$62 spent today, past your $50 mark.",
+            "今天已花费 $62，超过了你设定的 $50。",
+            "Сегодня потрачено $62, это больше вашего порога $50.",
+        ];
+        for (i, locale) in locales.iter().enumerate() {
+            reset_spend_alert_for_test();
+            let cfg = serde_json::json!({"dailySpendAlert": 50, "locale": locale});
+            let alert = evaluate_spend(62.4, "2026-09-21", &cfg).expect("crossed $50");
+            assert_eq!(alert.title, spend_title[i], "{locale}");
+            assert_eq!(alert.body, spend_body[i], "{locale}");
+        }
+        reset_spend_alert_for_test();
+    }
 }
