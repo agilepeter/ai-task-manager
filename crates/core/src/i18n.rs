@@ -11,8 +11,11 @@ use std::sync::OnceLock;
 
 /// The one list of locales on the Rust side. A later task adds a language by
 /// appending here, adding a row to `WINDOWS_LANGIDS` and/or `ENV_PREFIXES` if
-/// it needs one, and adding a match arm in `locale_source` below (`include_str!`
-/// needs a literal path, so it cannot be driven from this list directly).
+/// it needs one, and adding a match arm for it in `locale_source` below
+/// (`include_str!` needs a literal path, so it cannot be driven from this
+/// list directly). `locale_source` has no catch-all: forgetting that arm
+/// fails `every_locale_file_parses` loudly instead of silently degrading
+/// that locale to English.
 pub const LOCALES: &[&str] = &["en", "zh", "ru"];
 
 /// Primary Windows UI language id (`langid & 0x03FF`) → locale. Only the
@@ -26,24 +29,36 @@ const ENV_PREFIXES: &[(&str, &str)] = &[("zh", "zh"), ("ru", "ru")];
 
 /// `include_str!` needs a literal path per file, so this is the one place
 /// that lists them; `LOCALES` above stays the only list of which locales
-/// exist. Unknown locale → the English file.
-fn locale_source(locale: &str) -> &'static str {
-    match locale {
+/// exist. Deliberately no catch-all: a `LOCALES` entry with no arm here
+/// returns `None` rather than silently reading the English file, so an
+/// omitted arm is a loud test failure (`every_locale_file_parses`) instead
+/// of that locale quietly always showing English. `dict()` below is the one
+/// place that decides what an unmatched locale falls back to at runtime.
+fn locale_source(locale: &str) -> Option<&'static str> {
+    Some(match locale {
+        "en" => include_str!("../../../src/locales/en.json"),
         "zh" => include_str!("../../../src/locales/zh.json"),
         "ru" => include_str!("../../../src/locales/ru.json"),
-        _ => include_str!("../../../src/locales/en.json"),
-    }
+        _ => return None,
+    })
 }
 
-/// Every locale's dictionary, parsed once. A file that fails to parse yields
-/// an empty map rather than panicking; `every_locale_file_parses` catches
-/// that as a normal test failure instead of aborting the whole run.
+/// Every locale's dictionary, parsed once. A `LOCALES` entry with no arm in
+/// `locale_source` parses the English file instead, so an unexpected locale
+/// still resolves at runtime as designed (the loud failure for that case is
+/// `every_locale_file_parses`, not a panic here); a file that fails to parse
+/// yields an empty map rather than panicking, which that same test also
+/// catches.
 fn dict(locale: &str) -> &'static HashMap<String, String> {
     static CACHE: OnceLock<HashMap<&'static str, HashMap<String, String>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| {
+        let en_source = locale_source("en").expect("en.json always has an arm in locale_source");
         LOCALES
             .iter()
-            .map(|&l| (l, serde_json::from_str(locale_source(l)).unwrap_or_default()))
+            .map(|&l| {
+                let raw = locale_source(l).unwrap_or(en_source);
+                (l, serde_json::from_str(raw).unwrap_or_default())
+            })
             .collect()
     });
     cache
@@ -218,6 +233,10 @@ mod tests {
     #[test]
     fn every_locale_file_parses() {
         for &locale in LOCALES {
+            assert!(
+                locale_source(locale).is_some(),
+                "{locale} has no arm in locale_source — it would fall back to English silently"
+            );
             assert!(!dict(locale).is_empty(), "{locale}.json parsed to an empty dict");
         }
     }
@@ -242,7 +261,11 @@ mod tests {
         }
         let en_keys = label_keys(dict("en"));
         for &locale in LOCALES {
-            assert_eq!(label_keys(dict(locale)), en_keys, "{locale}.json's label.* keys differ from en.json");
+            let d = dict(locale);
+            assert_eq!(label_keys(d), en_keys, "{locale}.json's label.* keys differ from en.json");
+            for &key in &en_keys {
+                assert!(non_empty(d, key).is_some(), "{locale}.json has a blank value for \"{key}\"");
+            }
         }
     }
 
@@ -266,6 +289,9 @@ mod tests {
 
     #[test]
     fn an_unknown_config_locale_falls_back_to_the_system() {
-        assert_eq!(resolved_locale(&json!({"locale": "xx"})), system_ui_locale());
+        let resolved = resolved_locale(&json!({"locale": "xx"}));
+        assert_eq!(resolved, system_ui_locale());
+        assert!(LOCALES.contains(&resolved), "{resolved} is not one of LOCALES");
+        assert_ne!(resolved, "xx");
     }
 }
