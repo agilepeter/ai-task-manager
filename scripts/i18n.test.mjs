@@ -81,3 +81,23 @@ test("language endonyms are identical across locales", () => {
     );
   }
 });
+
+// Each view that owns a key prefix gets one row here, not a copy of this
+// test. task 5+: add ["../src/inventory.ts", "inventory."] etc.
+const KEYED_SOURCES = [["../src/detail.ts", "detail."]];
+
+function escapeForRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+for (const [rel, prefix] of KEYED_SOURCES) {
+  test(`every ${prefix}* key referenced in ${rel} exists in en.json`, () => {
+    const source = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+    const regex = new RegExp(`["'](${escapeForRegex(prefix)}[a-zA-Z0-9_.]+)["']`, "g");
+    const referenced = new Set([...source.matchAll(regex)].map((m) => m[1]));
+    // plural(key, n)'s key argument is a family's base ("detail.other"), not a
+    // literal key: it's valid if the key itself exists, or its ".one" form does.
+    const missing = [...referenced].filter((k) => !(k in dicts.en) && !(`${k}.one` in dicts.en));
+    assert.deepEqual(missing, [], `${rel}: referenced ${prefix}* keys missing from en.json`);
+  });
+}

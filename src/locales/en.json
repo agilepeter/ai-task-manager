@@ -421,7 +421,7 @@
   "detail.spend.projectSingleCaption": "Projects are the folders Claude Code was started in. Everything here ran from one folder, so there is one row.",
   "detail.spend.dirUp": "up {pct}%",
   "detail.spend.dirDown": "down {pct}%",
-  "detail.spend.weekChange": "{money} in the last 7 days, <span class=\"{cls}\">{dir}</span> on the {lastMoney} before.",
+  "detail.spend.weekChange": "{money} in the last 7 days, {dir} on the {lastMoney} before.",
   "detail.spend.weekNoPrior": "{money} in the last 7 days; nothing the 7 before.",
   "detail.spend.footer": "From local logs, priced at API rates. On a flat-rate plan this is equivalent value, not a charge.",
   "detail.effort.commits.one": "{n} commit",

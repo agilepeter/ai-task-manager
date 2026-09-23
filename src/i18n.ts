@@ -72,6 +72,13 @@ export function t(key: string, vars?: Record<string, string | number>): string {
   return s;
 }
 
+// one/other is the English-shaped rule; task 8 replaces this with per-locale
+// plural forms via t(key, vars, count), and every call site below is what it
+// will migrate.
+export function plural(key: string, n: number, vars: Record<string, string | number> = {}): string {
+  return t(`${key}.${n === 1 ? "one" : "other"}`, { n, ...vars });
+}
+
 export function displayMetricLabel(label: string): string {
   const key = `label.${label}`;
   const translated = t(key);

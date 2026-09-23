@@ -8,7 +8,7 @@
 // legend with live values; line charts get a crosshair, bars a per-mark tip.
 
 import { invoke } from "@tauri-apps/api/core";
-import { displayMetricDetail, displayMetricLabel, localeTag, t } from "./i18n";
+import { displayMetricDetail, displayMetricLabel, localeTag, plural, t } from "./i18n";
 
 interface Metric {
   label: string;
@@ -208,10 +208,13 @@ function esc(s: string): string {
 
 /// Whole dollars from $10 up, cents below: a column of values then reads at
 /// one precision per magnitude instead of "$929" beside "$11.0".
+/// $ stays a symbol, but the digit grouping follows the app's language, not the OS's.
 function money(n: number): string {
-  return n >= 10 ? `$${Math.round(n).toLocaleString()}` : `$${n.toFixed(2)}`;
+  return n >= 10 ? `$${Math.round(n).toLocaleString(localeTag())}` : `$${n.toFixed(2)}`;
 }
 
+/// B/M/K stay English: format tokens, not prose, like money()'s $ and fileSize()'s
+/// MB/KB — "tokens" itself is this codebase's house loanword in every zh/ru string.
 function tokens(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
@@ -504,10 +507,7 @@ function weekSection(snap: Snapshot): string {
           })
         : t("detail.week.hardest", { day: weekdayShort(busiest.d), hour: hourLabel(busiest.h) })
       : "";
-  const fromDays =
-    profile.daysObserved === 1
-      ? t("detail.week.fromDays.one", { n: profile.daysObserved })
-      : t("detail.week.fromDays.other", { n: profile.daysObserved });
+  const fromDays = plural("detail.week.fromDays", profile.daysObserved);
   return `
     <div class="dt-controls">
       ${usable.length > 1 ? `<label>${esc(t("detail.control.limit"))} ${select("dt-burn-metric", usable.map((b): [string, string] => [b.metric, displayMetricLabel(b.metric)]), burnMetric)}</label>` : ""}
@@ -583,15 +583,9 @@ function clientSection(): string {
     unassigned && unassigned.areas.length
       ? `<p class="dt-caption">${esc(
           unassigned.areas.length > 8
-            ? unassigned.areas.length - 8 === 1
-              ? t("detail.client.unassignedHintMore.one", {
-                  areas: unassigned.areas.slice(0, 8).join(", "),
-                  n: unassigned.areas.length - 8,
-                })
-              : t("detail.client.unassignedHintMore.other", {
-                  areas: unassigned.areas.slice(0, 8).join(", "),
-                  n: unassigned.areas.length - 8,
-                })
+            ? plural("detail.client.unassignedHintMore", unassigned.areas.length - 8, {
+                areas: unassigned.areas.slice(0, 8).join(", "),
+              })
             : t("detail.client.unassignedHint", { areas: unassigned.areas.slice(0, 8).join(", ") }),
         )}</p>`
       : "";
@@ -672,6 +666,7 @@ function lastActive(s: SessionSpend): string {
   return t("detail.session.lastActive.other", { n: days });
 }
 
+/// MB/KB stay English: format tokens, not prose, same as tokens()'s B/M/K and money()'s $.
 function fileSize(bytes: number): string {
   return bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
@@ -845,10 +840,11 @@ function effortCaption(): string {
   const rows = effort.filter((e) => e.costPerCommit !== null).slice(0, 4);
   if (!rows.length) return "";
   const parts = rows.map((e) => {
-    const commits =
-      e.commits === 1 ? t("detail.effort.commits.one", { n: e.commits }) : t("detail.effort.commits.other", { n: e.commits! });
+    const commits = plural("detail.effort.commits", e.commits!);
     return t("detail.effort.row", { area: esc(e.area), money: money(e.costPerCommit!), commits });
   });
+  // Not esc()-wrapped: each part already went through t()+esc(area) above, and
+  // "&middot;" is a deliberate HTML entity — escaping again would show it literally.
   return `<p class="dt-caption">${t("detail.effort.caption", { parts: parts.join(" &middot; ") })}</p>`;
 }
 
@@ -865,7 +861,12 @@ function weekLine(week: WeekDelta | null | undefined): string {
   const cls = pct >= 0 ? "dt-week-up" : "dt-week-down";
   const dir =
     pct >= 0 ? t("detail.spend.dirUp", { pct: Math.abs(pct).toFixed(0) }) : t("detail.spend.dirDown", { pct: Math.abs(pct).toFixed(0) });
-  return `<p class="dt-caption">${t("detail.spend.weekChange", { money: esc(money(week.thisWeek)), cls, dir: esc(dir), lastMoney: esc(money(week.lastWeek)) })}</p>`;
+  // The coloured span is built here, not in the JSON, so the three locale
+  // values stay plain text with {money}/{dir}/{lastMoney} and never carry markup.
+  const dirHtml = `<span class="${cls}">${esc(dir)}</span>`;
+  // Not esc()-wrapped: money/lastMoney are already esc()'d above and dirHtml is
+  // deliberate markup, not text — escaping the t() result would turn its <span> literal.
+  return `<p class="dt-caption">${t("detail.spend.weekChange", { money: esc(money(week.thisWeek)), dir: dirHtml, lastMoney: esc(money(week.lastWeek)) })}</p>`;
 }
 
 function spendSection(sp: ProviderSpend | undefined): string {
@@ -918,11 +919,8 @@ function spendSection(sp: ProviderSpend | undefined): string {
     const rest = all.slice(MAX_BAR_ROWS);
     if (rest.length) {
       top.push({
-        label: rest.length === 1 ? t("detail.other.one", { n: rest.length }) : t("detail.other.other", { n: rest.length }),
-        tip:
-          rest.length === 1
-            ? t("detail.spend.smallerAreas.one", { n: rest.length })
-            : t("detail.spend.smallerAreas.other", { n: rest.length }),
+        label: plural("detail.other", rest.length),
+        tip: plural("detail.spend.smallerAreas", rest.length),
         cost: rest.reduce((n, r) => n + r.cost, 0),
         tokens: rest.reduce((n, r) => n + r.tokens, 0),
       });
@@ -1048,7 +1046,7 @@ function modelSplit(sp: ProviderSpend | undefined): string {
   const rest = all.slice(MINI_MODELS);
   if (rest.length) {
     shown.push({
-      model: rest.length === 1 ? t("detail.other.one", { n: rest.length }) : t("detail.other.other", { n: rest.length }),
+      model: plural("detail.other", rest.length),
       cost: rest.reduce((n, m) => n + m.cost, 0),
       tokens: rest.reduce((n, m) => n + m.tokens, 0),
     });
