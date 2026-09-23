@@ -12,6 +12,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+use crate::i18n::{self, Msg};
+
 /// Config files are small; anything past this is not one we should parse.
 const MAX_CONFIG_BYTES: u64 = 4 * 1024 * 1024;
 /// Agent / skill definition files: only the frontmatter is read.
@@ -108,11 +110,31 @@ pub struct Opportunity {
     pub id: String,
     /// "tighten" (a concrete gap) | "learn" (a capability not in use yet)
     pub kind: String,
+    /// English, produced by `render("en", &title_msg)` of the same Msg --
+    /// never a second literal, so the two can never disagree.
     pub title: String,
     pub detail: String,
+    /// The key + vars the popover paints in the active locale.
+    pub title_msg: Msg,
+    /// `None` only when `detail` is empty; every finding here has a real one.
+    pub detail_msg: Option<Msg>,
     /// Where to read more. Opened in the browser only when clicked.
     pub learn_url: Option<String>,
 }
+
+/// Every finding id this module can emit, so a test can walk the JSON files
+/// and confirm each one has the keys it needs, and that nothing in the JSON
+/// claims to be a finding this module never produces.
+pub const FINDING_IDS: &[&str] = &[
+    "mcp-unpinned",
+    "mcp-env-secrets",
+    "mcp-remote",
+    "perm-none",
+    "perm-deny-only",
+    "agents-none",
+    "agents-model-unset",
+    "hooks-none",
+];
 
 // ---------------------------------------------------------------------------
 // Pure parsers (unit-tested; no filesystem)
@@ -308,16 +330,6 @@ fn names(list: &[&McpServer]) -> String {
     n.join(", ")
 }
 
-/// "1 MCP server" / "3 MCP servers".
-fn count_of(n: usize, singular: &str) -> String {
-    format!("{n} {singular}{}", if n == 1 { "" } else { "s" })
-}
-
-/// Verb agreement for a sentence whose subject is a list of `n` names.
-fn verb(n: usize, singular: &'static str, plural: &'static str) -> &'static str {
-    if n == 1 { singular } else { plural }
-}
-
 /// True when a package spec carries an explicit version (`pkg@1`, `@s/p@^2`).
 fn is_pinned(package: &str) -> bool {
     package.trim_start_matches('@').contains('@')
@@ -328,12 +340,17 @@ fn is_pinned(package: &str) -> bool {
 /// capabilities not in use yet.
 pub fn opportunities_for(inv: &Inventory) -> Vec<Opportunity> {
     let mut out = Vec::new();
-    let mut push = |id: &str, kind: &str, title: String, detail: String, url: Option<&str>| {
+    // English is produced, never duplicated: title and detail are always
+    // render("en", …) of the very Msg the popover gets, so the two can never
+    // disagree with each other.
+    let mut push = |id: &str, kind: &str, title_msg: Msg, detail_msg: Msg, url: Option<&str>| {
         out.push(Opportunity {
             id: id.into(),
             kind: kind.into(),
-            title,
-            detail,
+            title: i18n::render("en", &title_msg),
+            detail: i18n::render("en", &detail_msg),
+            title_msg,
+            detail_msg: Some(detail_msg),
             learn_url: url.map(str::to_string),
         });
     };
@@ -344,53 +361,36 @@ pub fn opportunities_for(inv: &Inventory) -> Vec<Opportunity> {
         .filter(|s| s.package.as_deref().is_some_and(|p| !is_pinned(p)))
         .collect();
     if !unpinned.is_empty() {
+        let n = unpinned.len() as i64;
         push(
             "mcp-unpinned",
             "tighten",
-            format!(
-                "{} {} an unpinned package",
-                count_of(unpinned.len(), "MCP server"),
-                verb(unpinned.len(), "runs", "run")
-            ),
-            format!(
-                "{} {} whatever version is newest each launch, so a bad or hijacked release runs with your tools' access the moment it ships. Pin at least the major version.",
-                names(&unpinned),
-                verb(unpinned.len(), "fetches", "fetch")
-            ),
+            Msg::new("finding.mcp-unpinned.title").count(n),
+            Msg::new("finding.mcp-unpinned.detail").var("names", names(&unpinned)).count(n),
             Some(MCP_TRUST_INDEX),
         );
     }
 
     let with_env: Vec<&McpServer> = inv.mcp_servers.iter().filter(|s| s.env_count > 0).collect();
     if !with_env.is_empty() {
+        let n = with_env.len() as i64;
         push(
             "mcp-env-secrets",
             "tighten",
-            format!(
-                "{} {} handed credentials",
-                count_of(with_env.len(), "MCP server"),
-                verb(with_env.len(), "is", "are")
-            ),
-            format!(
-                "{} {} environment variables, usually API keys, stored in plain text in your Claude config. Know which servers hold which keys, and scope those keys as narrowly as the vendor allows.",
-                names(&with_env),
-                verb(with_env.len(), "receives", "receive")
-            ),
+            Msg::new("finding.mcp-env-secrets.title").count(n),
+            Msg::new("finding.mcp-env-secrets.detail").var("names", names(&with_env)).count(n),
             Some(MCP_TRUST_INDEX),
         );
     }
 
     let remote: Vec<&McpServer> = inv.mcp_servers.iter().filter(|s| s.transport != "stdio").collect();
     if !remote.is_empty() {
+        let n = remote.len() as i64;
         push(
             "mcp-remote",
             "learn",
-            count_of(remote.len(), "remote MCP server"),
-            format!(
-                "{} {} on someone else's machine: what you send there leaves this computer. Worth checking the trust rating before pointing it at client work.",
-                names(&remote),
-                verb(remote.len(), "runs", "run")
-            ),
+            Msg::new("finding.mcp-remote.title").count(n),
+            Msg::new("finding.mcp-remote.detail").var("names", names(&remote)).count(n),
             Some(MCP_TRUST_INDEX),
         );
     }
@@ -400,16 +400,20 @@ pub fn opportunities_for(inv: &Inventory) -> Vec<Opportunity> {
         push(
             "perm-none",
             "tighten",
-            "No permission rules set".into(),
-            "Claude Code is running on its defaults. A short deny list (secrets, force-push, destructive deletes) is the cheapest guardrail there is.".into(),
+            Msg::new("finding.perm-none.title"),
+            Msg::new("finding.perm-none.detail"),
             Some(CLASSROOM),
         );
     } else if p.deny > 0 && p.allow == 0 {
         push(
             "perm-deny-only",
             "learn",
-            format!("{} deny rules, no allow rules", p.deny),
-            "You have a safety floor but approve routine commands by hand. Allow-listing the read-only commands you approve every day removes most prompts without widening risk.".into(),
+            // Not a plural family: today's sentence always says "rules"
+            // (plural) whatever the count, so this is a plain var, not a
+            // Msg::count() -- deliberately, to keep the shipped English
+            // exactly as it reads today.
+            Msg::new("finding.perm-deny-only.title").var("count", p.deny),
+            Msg::new("finding.perm-deny-only.detail"),
             Some(CLASSROOM),
         );
     }
@@ -418,8 +422,8 @@ pub fn opportunities_for(inv: &Inventory) -> Vec<Opportunity> {
         push(
             "agents-none",
             "learn",
-            "No custom agents defined".into(),
-            "Agents are saved specialists (a reviewer, a researcher) with their own instructions, tools and model. They keep long tasks out of your main context and let cheap models do cheap work.".into(),
+            Msg::new("finding.agents-none.title"),
+            Msg::new("finding.agents-none.detail"),
             Some(CLASSROOM),
         );
     } else {
@@ -428,12 +432,8 @@ pub fn opportunities_for(inv: &Inventory) -> Vec<Opportunity> {
             push(
                 "agents-model-unset",
                 "learn",
-                format!(
-                    "{} {} the session model",
-                    count_of(unset, "agent"),
-                    verb(unset, "inherits", "inherit")
-                ),
-                "An agent with no model runs on whatever you are using, often the most expensive one. Naming a lighter model for search and summarising agents cuts spend with no quality loss.".into(),
+                Msg::new("finding.agents-model-unset.title").count(unset as i64),
+                Msg::new("finding.agents-model-unset.detail"),
                 Some(CLASSROOM),
             );
         }
@@ -443,8 +443,8 @@ pub fn opportunities_for(inv: &Inventory) -> Vec<Opportunity> {
         push(
             "hooks-none",
             "learn",
-            "No hooks configured".into(),
-            "Hooks run your own script on events like session end or before a tool call. They are how a rule becomes automatic instead of something you hope the model remembers.".into(),
+            Msg::new("finding.hooks-none.title"),
+            Msg::new("finding.hooks-none.detail"),
             Some(CLASSROOM),
         );
     }
@@ -958,6 +958,34 @@ mod tests {
         let unpinned = &opportunities_for(&loose)[0];
         assert!(unpinned.detail.contains("floaty"), "names the server: {}", unpinned.detail);
         assert!(!unpinned.detail.contains("cloud"));
+    }
+
+    /// A missing translation key renders as its own literal key text instead
+    /// of failing -- that is the silent failure mode `render()` is built to
+    /// have, so it takes a real fixture run to catch it. `loose` above
+    /// already covers six of the eight finding ids; the other two
+    /// (perm-deny-only, agents-model-unset) need their own inventory since
+    /// each is mutually exclusive with the finding `loose` triggers in the
+    /// same slot.
+    #[test]
+    fn opportunities_never_render_a_raw_key() {
+        let loose = Inventory {
+            mcp_servers: vec![server("floaty", Some("some-mcp"), "stdio", 2), server("cloud", None, "http", 0)],
+            ..Inventory::default()
+        };
+        let other = Inventory {
+            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 3 },
+            agents: vec![Definition { name: "r".into(), scope: "user".into(), project: None, model: None }],
+            hooks: vec![HookEvent { event: "SessionEnd".into(), count: 1 }],
+            ..Inventory::default()
+        };
+        assert_eq!(ids(&other), ["perm-deny-only", "agents-model-unset"]);
+        for inv in [&loose, &other] {
+            for o in opportunities_for(inv) {
+                assert!(!o.title.starts_with("finding."), "{}: raw key in title: {}", o.id, o.title);
+                assert!(!o.detail.starts_with("finding."), "{}: raw key in detail: {}", o.id, o.detail);
+            }
+        }
     }
 
     #[test]

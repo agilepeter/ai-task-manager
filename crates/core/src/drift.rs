@@ -20,6 +20,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use crate::i18n::{self, Msg};
 use crate::inventory::Opportunity;
 use crate::pricing::{self, Price};
 
@@ -176,6 +177,21 @@ pub fn compare(samples: &[ModelCost], price_of: impl Fn(&str) -> Option<Price>) 
     rows
 }
 
+/// Every finding id this module can emit (see inventory::FINDING_IDS).
+pub const FINDING_IDS: &[&str] = &["pricing-cache-ttl", "pricing-drift"];
+
+fn opportunity(id: &str, kind: &str, title_msg: Msg, detail_msg: Msg, url: &str) -> Opportunity {
+    Opportunity {
+        id: id.into(),
+        kind: kind.into(),
+        title: i18n::render("en", &title_msg),
+        detail: i18n::render("en", &detail_msg),
+        title_msg,
+        detail_msg: Some(detail_msg),
+        learn_url: Some(url.into()),
+    }
+}
+
 /// What the comparison is worth telling the user. Agreement says nothing.
 pub fn opportunities(checks: &[Check]) -> Vec<Opportunity> {
     let off: Vec<&Check> = checks.iter().filter(|c| c.disagrees()).collect();
@@ -184,40 +200,39 @@ pub fn opportunities(checks: &[Check]) -> Vec<Opportunity> {
     }
     let worst = off.iter().max_by(|a, b| a.diff_percent.abs().total_cmp(&b.diff_percent.abs())).expect("non-empty");
     let names = off.iter().map(|c| c.model.as_str()).collect::<Vec<_>>().join(", ");
-    let direction = if worst.diff_percent > 0.0 { "more" } else { "less" };
+    // A tiny reusable Msg rather than a plain English var: "more"/"less" is
+    // meaningful prose, not a format token, so it needs to translate too.
+    let direction = Msg::new(if worst.diff_percent > 0.0 { "unit.more" } else { "unit.less" });
     // When the arithmetic lands on the 1-hour cache rate to within a cent on
     // the dollar, the cause is known and worth naming instead of hedging.
     if off.iter().all(|c| c.one_hour_cache) {
         let total_ours: f64 = off.iter().map(|c| c.ours).sum::<f64>() + 0.0;
         let total_vendor: f64 = off.iter().map(|c| c.vendor).sum::<f64>() + 0.0;
-        return vec![Opportunity {
-            id: "pricing-cache-ttl".into(),
-            kind: "tighten".into(),
-            title: format!("Spend here reads about {:.0}% low: 1-hour cache writes", (total_vendor - total_ours) / total_vendor * 100.0),
-            detail: format!(
-                "Claude Code records what it was actually charged. Over the recent sessions it billed ${total_vendor:.2} where this app's figures come to ${total_ours:.2} for the same tokens ({names}). The whole difference is the cache writes: they were made with the one-hour cache, which bills at twice the input rate, and this app prices every cache write at the five-minute rate. The logs do not record which cache a write used, so the app cannot tell them apart yet. Token counts are unaffected; read the dollar figures as a floor, not a ceiling."
-            ),
-            learn_url: Some(PRICING_LEARN.into()),
-        }];
+        return vec![opportunity(
+            "pricing-cache-ttl",
+            "tighten",
+            Msg::new("finding.pricing-cache-ttl.title")
+                .var("pct", format!("{:.0}", (total_vendor - total_ours) / total_vendor * 100.0)),
+            Msg::new("finding.pricing-cache-ttl.detail")
+                .var("totalVendor", format!("{total_vendor:.2}"))
+                .var("totalOurs", format!("{total_ours:.2}"))
+                .var("names", &names),
+            PRICING_LEARN,
+        )];
     }
-    vec![Opportunity {
-        id: "pricing-drift".into(),
-        kind: "tighten".into(),
-        title: format!(
-            "This app's prices disagree with the vendor's on {} model{}",
-            off.len(),
-            if off.len() == 1 { "" } else { "s" }
-        ),
-        detail: format!(
-            "Claude Code records what it was charged. For the same tokens, this app's rate card says ${:.2} where the vendor recorded ${:.2} on {}: {:.0}% {}. Affected: {names}. Either the rate card is out of date or the two count tokens differently, so treat every dollar figure here as approximate until it is checked. Everything else in the app measures tokens, which are facts; only the prices are in question.",
-            worst.ours,
-            worst.vendor,
-            worst.model,
-            worst.diff_percent.abs(),
-            direction,
-        ),
-        learn_url: Some(PRICING_LEARN.into()),
-    }]
+    vec![opportunity(
+        "pricing-drift",
+        "tighten",
+        Msg::new("finding.pricing-drift.title").count(off.len() as i64),
+        Msg::new("finding.pricing-drift.detail")
+            .var("ours", format!("{:.2}", worst.ours))
+            .var("vendor", format!("{:.2}", worst.vendor))
+            .var("model", &worst.model)
+            .var("pct", format!("{:.0}", worst.diff_percent.abs()))
+            .sub("direction", direction)
+            .var("names", &names),
+        PRICING_LEARN,
+    )]
 }
 
 /// Session logs, newest first, capped.
@@ -470,6 +485,43 @@ mod tests {
         let searched = LINE.replace("\"webSearchRequests\":0", "\"webSearchRequests\":2");
         let checks = compare(&parse_cost_state(&searched), |_| Some(price(1.0, 5.0, 0.0, 0.0)));
         assert!(checks.is_empty(), "per-search billing is not a token rate");
+    }
+
+    /// A missing translation key renders as its own literal key text instead
+    /// of failing -- that takes a real fixture run to catch. Covers both
+    /// finding ids: the cache-TTL explanation and a plain drift.
+    #[test]
+    fn opportunities_never_render_a_raw_key() {
+        let p = price(10.0, 50.0, 0.25, 12.5);
+        let m = ModelCost {
+            model: "claude-x".into(),
+            input: 35.0,
+            output: 11950.0,
+            cache_read: 1_086_452.0,
+            cache_write: 67_209.0,
+            web_searches: 0,
+            vendor_cost: 0.0,
+        };
+        let ours = our_cost(&p, &m);
+        let cache_ttl_vendor = ours + m.cache_write * (20.0 - 12.5) / 1_000_000.0;
+        let cache_ttl = compare(
+            &[ModelCost { vendor_cost: cache_ttl_vendor, ..m.clone() }, ModelCost { vendor_cost: cache_ttl_vendor, ..m }],
+            |_| Some(p),
+        );
+        // Same shape as a_stale_rate_is_caught_once_it_repeats_and_matters:
+        // a real vendor_cost from the fixture log line, read back at twice
+        // the correct input rate.
+        let samples: Vec<ModelCost> = parse_cost_state(&big()).into_iter().chain(parse_cost_state(&big())).collect();
+        let plain_drift = compare(&samples, |_| Some(price(2.0, 5.0, 0.0, 0.0)));
+
+        for checks in [cache_ttl, plain_drift] {
+            let found = opportunities(&checks);
+            assert!(!found.is_empty());
+            for o in found {
+                assert!(!o.title.starts_with("finding.") && !o.title.starts_with("unit."), "{}: raw key in title: {}", o.id, o.title);
+                assert!(!o.detail.starts_with("finding.") && !o.detail.contains("unit."), "{}: raw key in detail: {}", o.id, o.detail);
+            }
+        }
     }
 
     #[test]

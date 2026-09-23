@@ -258,6 +258,11 @@ mod tests {
                 kind: "tighten".into(),
                 title: "30% of spend has no work area".into(),
                 detail: "… while working in site/client-a for Client A …".into(),
+                // The seat report only ever reads the English `title` above
+                // (see `build()` below) -- these Msgs are unused placeholders,
+                // present only because the struct requires them.
+                title_msg: crate::i18n::Msg::new("finding.test.title"),
+                detail_msg: Some(crate::i18n::Msg::new("finding.test.detail")),
                 learn_url: None,
             }],
             ..Inventory::default()

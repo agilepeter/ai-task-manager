@@ -265,6 +265,7 @@ const KEYED_SOURCES = [
   ["../src/detail.ts", "detail."],
   ["../src/inventory.ts", "inventory."],
   ["../src/audit.ts", "audit."],
+  ["../src/audit.ts", "section."],
   ["../src/about.ts", "about."],
   ["../src/ledger.ts", "ledger."],
 ];
@@ -286,11 +287,19 @@ for (const [rel, prefix] of KEYED_SOURCES) {
     const qualified = new RegExp(`["'](${escapeForRegex(prefix)}[a-zA-Z0-9_.]+)["']`, "g");
     // Views newer than detail.ts alias T(k) => t(`prefix${k}`, v) for their own keys
     // (inventory.ts's top-of-file convention), so the prefix never appears in a quoted
-    // literal; reconstruct it here rather than leave this row checking nothing.
-    const aliased = /\bT\(\s*["']([a-zA-Z0-9_.]+)["']/g;
+    // literal; reconstruct it here rather than leave this row checking nothing. A file
+    // can carry a second row for a DIFFERENT, fully-qualified prefix it reads with the
+    // plain t() rather than its own T() (audit.ts's "section." row: sectionLabel() calls
+    // t(key) directly, never T()), so this only reconstructs T(...) calls when the row's
+    // own prefix is the one the file's T alias actually expands to -- otherwise every
+    // T("x") in the file would be misread as "<other prefix>x" and fail for keys nothing
+    // ever references under that prefix.
+    const aliasMatch = source.match(/const T = \([^)]*\)\s*=>\s*t\(`([a-zA-Z][a-zA-Z0-9_]*)\.\$\{k\}`/);
+    const aliasPrefix = aliasMatch ? `${aliasMatch[1]}.` : null;
+    const aliased = prefix === aliasPrefix ? [...stripped.matchAll(/\bT\(\s*["']([a-zA-Z0-9_.]+)["']/g)] : [];
     const referenced = new Set([
       ...[...stripped.matchAll(qualified)].map((m) => m[1]),
-      ...[...stripped.matchAll(aliased)].map((m) => `${prefix}${m[1]}`),
+      ...aliased.map((m) => `${prefix}${m[1]}`),
     ]);
     // plural(key, n)'s key argument is a family's base ("detail.other"), not a
     // literal key: it's valid if the key itself exists, or its ".one" form does.

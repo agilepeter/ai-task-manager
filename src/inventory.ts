@@ -4,7 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { showLedger } from "./ledger";
-import { localeTag, plural, t } from "./i18n";
+import { localeTag, plural, t, tm, type Msg } from "./i18n";
 
 const T = (k: string, v?: Record<string, string | number>) => t(`inventory.${k}`, v);
 
@@ -70,6 +70,11 @@ interface Opportunity {
   kind: "tighten" | "learn";
   title: string;
   detail: string;
+  /** The key + vars this same title/detail render from, in the active locale.
+   *  Optional/nullable: an un-regenerated demo fixture may lack it, or Rust
+   *  may have nothing to translate (see detailMsg). */
+  titleMsg?: Msg | null;
+  detailMsg?: Msg | null;
   learnUrl: string | null;
 }
 
@@ -183,8 +188,8 @@ function renderOpportunities(list: Opportunity[]): string {
     .map(
       (o) => `
       <div class="inv-opp inv-opp-${o.kind}">
-        <div class="inv-opp-title"><span class="inv-dot"></span>${esc(o.title)}</div>
-        <p class="inv-opp-detail">${esc(o.detail)}</p>
+        <div class="inv-opp-title"><span class="inv-dot"></span>${esc(o.titleMsg ? tm(o.titleMsg) : o.title)}</div>
+        <p class="inv-opp-detail">${esc(o.detailMsg ? tm(o.detailMsg) : o.detail)}</p>
         ${o.learnUrl ? `<button class="inv-learn" data-link="${esc(o.learnUrl)}">${esc(T("learnMore"))}</button>` : ""}
       </div>`,
     )

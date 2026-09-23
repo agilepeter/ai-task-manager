@@ -4,7 +4,7 @@
 // only draws it. Statuses are always a word as well as a colour.
 
 import { invoke } from "@tauri-apps/api/core";
-import { plural, t } from "./i18n";
+import { plural, t, tm, type Msg } from "./i18n";
 
 const T = (k: string, v?: Record<string, string | number>) => t(`audit.${k}`, v);
 
@@ -13,6 +13,9 @@ interface Check {
   status: "pass" | "attention" | "consider" | "info";
   title: string;
   detail: string;
+  /** See inventory.ts's Opportunity: same optional/nullable Msg pair. */
+  titleMsg?: Msg | null;
+  detailMsg?: Msg | null;
 }
 
 interface AuditReport {
@@ -20,7 +23,7 @@ interface AuditReport {
   passed: number;
   attention: number;
   score: number | null;
-  sections: { name: string; checks: Check[] }[];
+  sections: { name: string; nameKey?: string; checks: Check[] }[];
 }
 
 export interface AuditHost {
@@ -49,17 +52,27 @@ function esc(s: string): string {
   );
 }
 
-/// Rust's Section.name is a fixed, small vocabulary ("Setup" / "Guardrails" /
-/// "Usage" / "Money", crates/core/src/audit.rs). Mapped by the English name it
-/// sends today; task 9 gives Rust a name_key so this stops guessing from text.
-/// An unrecognised name (a future section not yet mapped) falls back to itself
-/// rather than showing nothing.
-function sectionLabel(name: string): string {
-  if (name === "Setup") return T("section.setup");
-  if (name === "Guardrails") return T("section.guardrails");
-  if (name === "Usage") return T("section.usage");
-  if (name === "Money") return T("section.money");
-  return name;
+/// Rust's Section carries a name_key ("section.setup" etc, fully-qualified --
+/// not under the "audit." prefix, because it is shared with any other future
+/// reader of the same sections) alongside the English name. An older,
+/// un-regenerated demo fixture has no name_key, so this falls back to
+/// guessing the same key from the fixed English vocabulary Rust has always
+/// sent ("Setup" / "Guardrails" / "Usage" / "Money", crates/core/src/audit.rs)
+/// -- both paths resolve through the same top-level keys, and an unrecognised
+/// name (a future section neither path maps) falls back to itself.
+function sectionLabel(name: string, nameKey?: string): string {
+  const key =
+    nameKey ??
+    (name === "Setup"
+      ? "section.setup"
+      : name === "Guardrails"
+        ? "section.guardrails"
+        : name === "Usage"
+          ? "section.usage"
+          : name === "Money"
+            ? "section.money"
+            : null);
+  return key ? t(key) : name;
 }
 
 /// The "Open …" link under a check that names which tab fixes it.
@@ -100,15 +113,17 @@ function render(): void {
       // What needs attention first, then what passes, then notes.
       const order = { attention: 0, consider: 1, pass: 2, info: 3 } as const;
       const checks = [...s.checks].sort((a, b) => order[a.status] - order[b.status]);
-      return `<section class="dt-section"><h3>${esc(sectionLabel(s.name))}</h3>${checks
-        .map(
-          (c) => `
+      return `<section class="dt-section"><h3>${esc(sectionLabel(s.name, s.nameKey))}</h3>${checks
+        .map((c) => {
+          const title = c.titleMsg ? tm(c.titleMsg) : c.title;
+          const detail = c.detailMsg ? tm(c.detailMsg) : c.detail;
+          return `
         <div class="au-check au-${c.status}">
-          <div class="au-check-head"><span class="au-status">${esc(WORD[c.status])}</span><span class="au-title">${esc(c.title)}</span></div>
-          ${c.detail ? `<p class="au-detail">${esc(c.detail)}</p>` : ""}
+          <div class="au-check-head"><span class="au-status">${esc(WORD[c.status])}</span><span class="au-title">${esc(title)}</span></div>
+          ${detail ? `<p class="au-detail">${esc(detail)}</p>` : ""}
           ${(c.status === "attention" || c.status === "consider") && WHERE[c.id] ? `<button class="lg-link" data-goto="${WHERE[c.id]}">${esc(gotoLabel(WHERE[c.id]))}</button>` : ""}
-        </div>`,
-        )
+        </div>`;
+        })
         .join("")}</section>`;
     })
     .join("");

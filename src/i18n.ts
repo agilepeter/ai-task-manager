@@ -70,10 +70,14 @@ export function localeTag(): string {
 
 /// The wire shape Rust's `Msg` (crates/core/src/i18n.rs) serialises to —
 /// serde's `camelCase` rename leaves these three field names unchanged, so
-/// the JSON Rust sends decodes directly into this shape. `vars` values are
-/// always strings on the wire (Rust's builder stringifies them); `t()`
-/// itself is more permissive (numbers too) for TS-side callers.
-export type Msg = { key: string; vars: Record<string, string>; count?: number | null };
+/// the JSON Rust sends decodes directly into this shape. A var is usually a
+/// plain string (Rust's `.var()` builder stringifies them), but may itself
+/// be a nested `Msg` (Rust's `.sub()` builder, `#[serde(untagged)]` on the
+/// Rust side): a sentence that carries two independent counts renders the
+/// second one as its own Msg, in the same locale, before it is spliced into
+/// the outer sentence -- see `tm()` below. `t()` itself is more permissive
+/// (numbers too, no nesting) for TS-side callers.
+export type Msg = { key: string; vars: Record<string, string | Msg>; count?: number | null };
 
 /// CLDR cardinal-plural forms for the nine languages this app plans to ship.
 /// `Locale` is `LOCALES[number]`, so this `Record<Locale, ...>` can only be
@@ -167,9 +171,15 @@ export function t(key: string, vars?: Record<string, string | number>, count?: n
 /// Renders a Msg Rust serialised over the wire. `msg.count ?? undefined`
 /// maps the wire's `null` (Rust's `Option::None`) to "no count" for t(),
 /// while a real count of 0 passes through unchanged -- `??` only catches
-/// null/undefined, never 0.
+/// null/undefined, never 0. A var that is itself a Msg (Rust's `.sub()`)
+/// renders first, in the same locale, through this same function -- so a
+/// nested count picks its own plural form independently of msg.count.
 export function tm(msg: Msg): string {
-  return t(msg.key, msg.vars, msg.count ?? undefined);
+  const vars: Record<string, string | number> = {};
+  for (const [k, v] of Object.entries(msg.vars)) {
+    vars[k] = typeof v === "string" ? v : tm(v);
+  }
+  return t(msg.key, vars, msg.count ?? undefined);
 }
 
 // Per-locale plural forms via t(key, vars, count) below; every existing call

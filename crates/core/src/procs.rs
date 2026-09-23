@@ -15,6 +15,7 @@
 
 use serde::Serialize;
 
+use crate::i18n::{self, Msg};
 use crate::inventory::{McpServer, Opportunity};
 
 /// Runners that take a package directly, after optional flags ("npx -y pkg").
@@ -366,45 +367,57 @@ fn mb(bytes: u64) -> u64 {
     bytes / 1_048_576
 }
 
+/// Every finding id this module can emit (see inventory::FINDING_IDS).
+pub const FINDING_IDS: &[&str] = &["mcp-duplicate-processes", "mcp-running-unconfigured", "mcp-memory"];
+
 /// What the running picture suggests. Same contract as the setup ones: every
 /// finding states this machine's own numbers, and a quiet machine shows none.
 pub fn opportunities(running: &[RunningServer]) -> Vec<Opportunity> {
     let mut out = Vec::new();
+    let mut push = |id: &str, kind: &str, title_msg: Msg, detail_msg: Msg| {
+        out.push(Opportunity {
+            id: id.into(),
+            kind: kind.into(),
+            title: i18n::render("en", &title_msg),
+            detail: i18n::render("en", &detail_msg),
+            title_msg,
+            detail_msg: Some(detail_msg),
+            learn_url: Some(MCP_LEARN.into()),
+        });
+    };
 
     let mut dupes: Vec<&RunningServer> = running.iter().filter(|s| s.instances >= MANY_COPIES).collect();
     dupes.sort_by(|a, b| b.rss_bytes.cmp(&a.rss_bytes));
     if let Some(worst) = dupes.first() {
         let names = dupes.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ");
         let wasted: u64 = dupes.iter().map(|s| s.rss_bytes - s.rss_bytes / s.instances as u64).sum();
-        out.push(Opportunity {
-            id: "mcp-duplicate-processes".into(),
-            kind: "tighten".into(),
-            title: format!("{} MCP {} running more than once", dupes.len(), if dupes.len() == 1 { "server is" } else { "servers are" }),
-            detail: format!(
-                "{names} each have several copies live right now; {} alone is running {} times on {} MB. Every app you have configured a server in starts its own copy and keeps it for the session, so the same tool is in memory once per client. About {} MB is duplicate. Removing a server from the clients that do not use it, or quitting an app you are not working in, gets it back.",
-                worst.name,
-                worst.instances,
-                mb(worst.rss_bytes),
-                mb(wasted),
-            ),
-            learn_url: Some(MCP_LEARN.into()),
-        });
+        push(
+            "mcp-duplicate-processes",
+            "tighten",
+            Msg::new("finding.mcp-duplicate-processes.title").count(dupes.len() as i64),
+            // The outer sentence's own grammar does not depend on dupes.len()
+            // (it always reads "{names} each have…", however many there
+            // are), so only the nested "running N times" clause carries a
+            // count -- worst.instances, independent of dupes.len().
+            Msg::new("finding.mcp-duplicate-processes.detail")
+                .var("names", &names)
+                .var("worstName", &worst.name)
+                .sub("times", Msg::new("unit.times").count(worst.instances as i64))
+                .var("mb", mb(worst.rss_bytes))
+                .var("wasted", mb(wasted)),
+        );
     }
 
     let unconfigured: Vec<&RunningServer> = running.iter().filter(|s| !s.configured).collect();
     if !unconfigured.is_empty() {
         let names = unconfigured.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ");
-        out.push(Opportunity {
-            id: "mcp-running-unconfigured".into(),
-            kind: "tighten".into(),
-            title: format!("{} MCP {} running that nothing here configures", unconfigured.len(), if unconfigured.len() == 1 { "server is" } else { "servers are" }),
-            detail: format!(
-                "{names} {} live on this computer, but {} in any config file this app can read. That is normal if an app keeps its servers somewhere private; it is worth a second look if not, because a server you cannot see in a config is one you are not reviewing.",
-                if unconfigured.len() == 1 { "is" } else { "are" },
-                if unconfigured.len() == 1 { "it is not" } else { "they are not" },
-            ),
-            learn_url: Some(MCP_LEARN.into()),
-        });
+        let n = unconfigured.len() as i64;
+        push(
+            "mcp-running-unconfigured",
+            "tighten",
+            Msg::new("finding.mcp-running-unconfigured.title").count(n),
+            Msg::new("finding.mcp-running-unconfigured.detail").var("names", &names).count(n),
+        );
     }
 
     let total: u64 = running.iter().map(|s| s.rss_bytes).sum();
@@ -412,23 +425,20 @@ pub fn opportunities(running: &[RunningServer]) -> Vec<Opportunity> {
         let mut by_size: Vec<&RunningServer> = running.iter().collect();
         by_size.sort_by(|a, b| b.rss_bytes.cmp(&a.rss_bytes));
         let top = by_size.first().expect("non-empty: total is above the floor");
-        out.push(Opportunity {
-            id: "mcp-memory".into(),
-            kind: "learn".into(),
-            title: format!("MCP servers are holding {} MB of memory", mb(total)),
-            detail: format!(
-                "{} {} live across {} {}, the largest being {} at {} MB. They start when a client asks for them \
-                 and stay for the session, so this is the resting cost of the tools you have wired up rather \
-                 than anything running away.",
-                running.len(),
-                if running.len() == 1 { "server is" } else { "servers are" },
-                running.iter().map(|s| s.pids.len()).sum::<usize>(),
-                if running.iter().map(|s| s.pids.len()).sum::<usize>() == 1 { "process" } else { "processes" },
-                top.name,
-                mb(top.rss_bytes),
-            ),
-            learn_url: Some(MCP_LEARN.into()),
-        });
+        let process_total = running.iter().map(|s| s.pids.len()).sum::<usize>() as i64;
+        push(
+            "mcp-memory",
+            "learn",
+            // The title never inflects on the server count ("MCP servers"
+            // stays plural however many there are); only the detail's
+            // leading clause agrees with it.
+            Msg::new("finding.mcp-memory.title").var("totalMb", mb(total)),
+            Msg::new("finding.mcp-memory.detail")
+                .sub("processes", Msg::new("unit.process").count(process_total))
+                .var("topName", &top.name)
+                .var("topMb", mb(top.rss_bytes))
+                .count(running.len() as i64),
+        );
     }
     out
 }
@@ -652,6 +662,24 @@ mod tests {
         // No inventory, so the snapshot cannot contain it whatever is live.
         let err = end_task("definitely-not-running-xyz", &[]).expect_err("must refuse");
         assert!(err.contains("not running"), "{err}");
+    }
+
+    /// A missing translation key renders as its own literal key text instead
+    /// of failing -- that takes a real fixture run to catch. One fixture
+    /// clears all three findings' thresholds at once, exercising the nested
+    /// unit.times (5 copies) and unit.process Msgs alongside their outer
+    /// sentences.
+    #[test]
+    fn opportunities_never_render_a_raw_key() {
+        let found = opportunities(&[running("chrome-devtools", 5, 1275, true), running("mystery-mcp", 1, 40, false)]);
+        assert_eq!(
+            found.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+            ["mcp-duplicate-processes", "mcp-running-unconfigured", "mcp-memory"]
+        );
+        for o in found {
+            assert!(!o.title.starts_with("finding.") && !o.title.starts_with("unit."), "{}: raw key in title: {}", o.id, o.title);
+            assert!(!o.detail.starts_with("finding.") && !o.detail.contains("unit."), "{}: raw key in detail: {}", o.id, o.detail);
+        }
     }
 
     #[test]

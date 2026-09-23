@@ -186,17 +186,29 @@ pub fn system_ui_locale() -> &'static str {
     locale_for_env_tag(&tag)
 }
 
+/// A `Msg` var: ordinarily literal text, but a var may itself be another
+/// `Msg` (a nested sentence rendered in the same locale before it is spliced
+/// in). `#[serde(untagged)]` tries `Text` first, so a `Text` var still
+/// serialises as a bare JSON string -- the wire shape for every existing,
+/// non-nested var is unchanged; only a `.sub()` var gains the extra
+/// `{key,vars,count}` shape on the wire.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+pub enum Var {
+    Text(String),
+    Msg(Box<Msg>),
+}
+
 /// The wire shape the popover's `tm()` (`src/i18n.ts`) decodes: a message
 /// key plus its substitution vars and an optional plural count. Rust hands
 /// over structured data instead of an already-formatted sentence, so the
 /// popover can pick the active locale's own word order and plural form at
-/// paint time -- this is the type tasks 9-10 build tray/toast sentences
-/// from; nothing constructs one yet.
+/// paint time.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Msg {
     pub key: &'static str,
-    pub vars: BTreeMap<&'static str, String>,
+    pub vars: BTreeMap<&'static str, Var>,
     pub count: Option<i64>,
 }
 
@@ -207,7 +219,18 @@ impl Msg {
 
     /// Builder: `Msg::new("a.b").var("x", 1).var("y", "z")`.
     pub fn var(mut self, k: &'static str, v: impl std::fmt::Display) -> Self {
-        self.vars.insert(k, v.to_string());
+        self.vars.insert(k, Var::Text(v.to_string()));
+        self
+    }
+
+    /// A var whose value is itself another `Msg`, rendered in the same
+    /// locale before substitution. For a sentence that carries two
+    /// independent counts (a server count and, inside it, a process count,
+    /// say): the outer `Msg`'s own `count` can only select one plural form,
+    /// so the second count travels as a nested `Msg` under its own key
+    /// (typically a shared `unit.*` one) and picks its own form.
+    pub fn sub(mut self, k: &'static str, v: Msg) -> Self {
+        self.vars.insert(k, Var::Msg(Box::new(v)));
         self
     }
 
@@ -258,7 +281,13 @@ fn plural_form(locale: &str, n: i64) -> &'static str {
 /// real `dict()` cache, tests inject a scratch table. Falls back to the
 /// literal key when nothing resolves anywhere, then substitutes {vars} and
 /// {count}.
-fn render_core(lookup_in: impl Fn(&str, &str) -> Option<String>, locale: &str, msg: &Msg) -> String {
+/// `lookup_in` is a trait object, not `impl Fn`: a nested `Var::Msg` recurses
+/// into this same function (see the `Var::Msg(m)` arm below), and a generic
+/// `impl Fn` recursing into itself makes the compiler try to monomorphize a
+/// new `&`-wrapped closure type at every call depth -- an infinite family of
+/// types from the type checker's point of view, even though the actual data
+/// only ever nests one level deep. A fixed `&dyn Fn` sidesteps that.
+fn render_core(lookup_in: &dyn Fn(&str, &str) -> Option<String>, locale: &str, msg: &Msg) -> String {
     let candidates: Vec<String> = match msg.count {
         Some(n) => {
             let form = plural_form(locale, n);
@@ -272,24 +301,39 @@ fn render_core(lookup_in: impl Fn(&str, &str) -> Option<String>, locale: &str, m
         .find_map(|cand| lookup_in(locale, cand).or_else(|| lookup_in("en", cand)))
         .unwrap_or_else(|| msg.key.to_string());
 
+    // Resolve every var to an owned string before substituting: a Text var
+    // is used as-is, a Msg var renders itself first -- in the same locale,
+    // through the same lookup_in this call is already using, recursively --
+    // so a nested Msg picks its own plural form independently of the outer
+    // one (see Msg::sub).
+    let mut pairs: Vec<(&str, String)> = msg
+        .vars
+        .iter()
+        .map(|(&k, v)| {
+            let s = match v {
+                Var::Text(s) => s.clone(),
+                Var::Msg(m) => render_core(lookup_in, locale, m),
+            };
+            (k, s)
+        })
+        .collect();
     // An explicit vars["count"] (rare) wins over the derived count below:
     // vars are listed first and substitute() fully replaces each {name}
     // before moving to the next pair, so the vars entry consumes every
     // {count} occurrence and the later derived one is a no-op. TS's t()
     // must agree on this precedence -- it does, by a different mechanism
     // (see the comment there).
-    let mut pairs: Vec<(&str, &str)> = msg.vars.iter().map(|(&k, v)| (k, v.as_str())).collect();
-    let count_str = msg.count.map(|n| n.to_string());
-    if let Some(c) = &count_str {
-        pairs.push(("count", c.as_str()));
+    if let Some(n) = msg.count {
+        pairs.push(("count", n.to_string()));
     }
-    substitute(template, &pairs)
+    let refs: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    substitute(template, &refs)
 }
 
 /// `key.<plural_form(locale, count)>` -> `key.other` -> `key`; substitutes
 /// {vars} and {count}; each candidate falls back en -> key like `lookup`.
 pub fn render(locale: &str, msg: &Msg) -> String {
-    render_core(|loc, key| non_empty(dict(loc), key).map(str::to_string), locale, msg)
+    render_core(&|loc, key| non_empty(dict(loc), key).map(str::to_string), locale, msg)
 }
 
 /// `render`, but against an explicit locale -> key -> value table instead of
@@ -299,7 +343,7 @@ pub fn render(locale: &str, msg: &Msg) -> String {
 #[cfg(test)]
 fn render_with(dicts: &HashMap<&str, HashMap<&str, &str>>, locale: &str, msg: &Msg) -> String {
     render_core(
-        |loc, key| dicts.get(loc).and_then(|d| d.get(key)).copied().filter(|s| !s.is_empty()).map(str::to_string),
+        &|loc, key| dicts.get(loc).and_then(|d| d.get(key)).copied().filter(|s| !s.is_empty()).map(str::to_string),
         locale,
         msg,
     )
@@ -466,6 +510,105 @@ mod tests {
         assert_eq!(render_with(&dicts, "ja", &msg(2)), "2 個");
         assert_eq!(render_with(&dicts, "en", &msg(1)), "1 thing");
         assert_eq!(render_with(&dicts, "en", &msg(2)), "2 things");
+    }
+
+    #[test]
+    fn render_substitutes_a_nested_message_in_the_same_locale() {
+        // A `.sub()` var renders its own Msg first, in the SAME locale as
+        // the outer one, through the same fallback rules -- so the nested
+        // Msg picks its own plural form independently of whatever count (if
+        // any) the outer Msg carries. Needed because one sentence can carry
+        // two independent counts -- a running-servers count and, inside it,
+        // a processes count, say -- and a Msg's own `count` field can only
+        // ever select one plural form.
+        let dicts: HashMap<&str, HashMap<&str, &str>> = HashMap::from([
+            (
+                "en",
+                HashMap::from([
+                    ("outer", "see {inner}"),
+                    ("proc.one", "{count} process"),
+                    ("proc.other", "{count} processes"),
+                ]),
+            ),
+            (
+                "ru",
+                HashMap::from([
+                    ("outer", "видно {inner}"),
+                    ("proc.one", "{count} процесс"),
+                    ("proc.few", "{count} процесса"),
+                    ("proc.many", "{count} процессов"),
+                ]),
+            ),
+        ]);
+        let five = Msg::new("outer").sub("inner", Msg::new("proc").count(5));
+        assert_eq!(render_with(&dicts, "ru", &five), "видно 5 процессов");
+        let one = Msg::new("outer").sub("inner", Msg::new("proc").count(1));
+        assert_eq!(render_with(&dicts, "en", &one), "see 1 process");
+    }
+
+    /// Every finding id each emitting module registers, and every check
+    /// prefix `audit.rs` registers: `en.json` has a `.title` (bare, or the
+    /// full plural-form set) and a `.detail` (same) for each -- unless the
+    /// id is in `NO_DETAIL`, where the detail is deliberately not a Msg at
+    /// all (pure data, or an empty pass detail; see audit.rs's check_data).
+    /// This is the loud half of the pair with `no_orphan_finding_or_check_keys`
+    /// below: this one catches a registered id nobody wrote a key for.
+    #[test]
+    fn every_finding_and_check_id_has_title_and_detail_keys() {
+        const NO_DETAIL: &[&str] = &["check.tools.info", "check.mcp.configured", "check.perm-none.pass"];
+        let en = dict("en");
+        let has_key_or_forms = |base: &str| -> bool {
+            non_empty(en, base).is_some() || ["one", "other"].iter().all(|f| non_empty(en, &format!("{base}.{f}")).is_some())
+        };
+        let mut prefixes: Vec<String> = crate::inventory::FINDING_IDS
+            .iter()
+            .chain(crate::coaching::FINDING_IDS)
+            .chain(crate::procs::FINDING_IDS)
+            .chain(crate::drift::FINDING_IDS)
+            .map(|id| format!("finding.{id}"))
+            .collect();
+        prefixes.extend(crate::audit::CHECK_KEYS.iter().map(|k| k.to_string()));
+
+        for prefix in &prefixes {
+            assert!(has_key_or_forms(&format!("{prefix}.title")), "{prefix}.title is missing from en.json");
+            if !NO_DETAIL.contains(&prefix.as_str()) {
+                assert!(has_key_or_forms(&format!("{prefix}.detail")), "{prefix}.detail is missing from en.json");
+            }
+        }
+    }
+
+    /// The reverse of the test above: every `finding.*` / `check.*` /
+    /// `section.*` / `unit.*` key actually sitting in `en.json` maps back to
+    /// something a module registered. Catches a typo'd or orphaned key --
+    /// one nothing ever asks `render()` for, which `t()`'s fallback-to-the-
+    /// key behaviour would otherwise hide (it would just never be reached,
+    /// not fail).
+    #[test]
+    fn no_orphan_finding_or_check_keys() {
+        const UNIT_KEYS: &[&str] = &["unit.times", "unit.process", "unit.more", "unit.less"];
+        let finding_prefixes: Vec<String> = crate::inventory::FINDING_IDS
+            .iter()
+            .chain(crate::coaching::FINDING_IDS)
+            .chain(crate::procs::FINDING_IDS)
+            .chain(crate::drift::FINDING_IDS)
+            .map(|id| format!("finding.{id}."))
+            .collect();
+        let check_prefixes: Vec<String> = crate::audit::CHECK_KEYS.iter().map(|k| format!("{k}.")).collect();
+
+        for key in dict("en").keys() {
+            if key.starts_with("finding.") {
+                assert!(finding_prefixes.iter().any(|p| key.starts_with(p.as_str())), "orphan finding key: {key}");
+            } else if key.starts_with("check.") {
+                assert!(check_prefixes.iter().any(|p| key.starts_with(p.as_str())), "orphan check key: {key}");
+            } else if key.starts_with("section.") {
+                assert!(crate::audit::SECTION_KEYS.contains(&key.as_str()), "orphan section key: {key}");
+            } else if key.starts_with("unit.") {
+                assert!(
+                    UNIT_KEYS.iter().any(|&u| key == u || key.starts_with(&format!("{u}."))),
+                    "orphan unit key: {key}"
+                );
+            }
+        }
     }
 
     #[test]

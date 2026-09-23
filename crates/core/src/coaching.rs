@@ -6,10 +6,14 @@
 //! when there is nothing to say. Thresholds are constants so they are easy
 //! to argue with.
 
+use crate::i18n::{self, Msg};
 use crate::inventory::Opportunity;
 use crate::spend::{area_top, ProviderSpend, SessionSpend};
 
 const CLASSROOM: &str = "https://staas.fund/classroom/";
+
+/// Every finding id this module can emit (see inventory::FINDING_IDS).
+pub const FINDING_IDS: &[&str] = &["mix-top-heavy", "areas-unsorted", "session-long-lived"];
 
 /// Below this much 30-day spend the mix is noise, not a pattern.
 const MIN_SPEND_FOR_MIX: f64 = 50.0;
@@ -81,12 +85,14 @@ pub fn sessions_to_nudge(
 
 pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend]) -> Vec<Opportunity> {
     let mut out = Vec::new();
-    let mut push = |id: &str, kind: &str, title: String, detail: String| {
+    let mut push = |id: &str, kind: &str, title_msg: Msg, detail_msg: Msg| {
         out.push(Opportunity {
             id: id.into(),
             kind: kind.into(),
-            title,
-            detail,
+            title: i18n::render("en", &title_msg),
+            detail: i18n::render("en", &detail_msg),
+            title_msg,
+            detail_msg: Some(detail_msg),
             learn_url: Some(CLASSROOM.into()),
         });
     };
@@ -101,12 +107,9 @@ pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend]) 
             push(
                 "mix-top-heavy",
                 "learn",
-                format!("{:.0}% of spend is on the largest models", 100.0 * top / known),
-                format!(
-                    "{} of {} in 30 days went to the top tier. Searching files, reading logs and summarising do as well a tier down; giving those jobs to subagents on a lighter model is the usual way to cut this without touching the hard work.",
-                    money(top),
-                    money(known)
-                ),
+                // A percentage, not a count: {pct} is a var, never Msg::count().
+                Msg::new("finding.mix-top-heavy.title").var("pct", format!("{:.0}", 100.0 * top / known)),
+                Msg::new("finding.mix-top-heavy.detail").var("top", money(top)).var("known", money(known)),
             );
         }
 
@@ -122,11 +125,8 @@ pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend]) 
             push(
                 "areas-unsorted",
                 "tighten",
-                format!("{:.0}% of spend has no work area", 100.0 * unsorted / all),
-                format!(
-                    "{} in 30 days came from sessions that started at the top of a workspace and never moved. Starting Claude Code inside the folder you are working on makes the split by area, and by client, exact.",
-                    money(unsorted)
-                ),
+                Msg::new("finding.areas-unsorted.title").var("pct", format!("{:.0}", 100.0 * unsorted / all)),
+                Msg::new("finding.areas-unsorted.detail").var("unsorted", money(unsorted)),
             );
         }
     }
@@ -141,19 +141,21 @@ pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend]) 
         .collect();
     if let Some((worst, days)) = long.iter().max_by(|a, b| a.0.cost.total_cmp(&b.0.cost)) {
         let others = long.len() - 1;
+        // `others` drives an optional trailing clause, not the whole
+        // sentence's grammar, so it is only ever attached as a count when
+        // there is a clause to pick a form for: at 0 the plain, unsuffixed
+        // "finding.session-long-lived.detail" key is looked up directly
+        // (render_core tries the bare key whenever a Msg carries no count
+        // at all), and it is the one form with no trailing clause.
+        let mut detail_msg = Msg::new("finding.session-long-lived.detail").var("cost", money(worst.cost));
+        if others > 0 {
+            detail_msg = detail_msg.count(others as i64);
+        }
         push(
             "session-long-lived",
             "learn",
-            format!("One session has been open {:.0} days", days),
-            format!(
-                "It cost {} in the last 30 days{}. A session re-sends its growing history on every turn, so an old one pays more for each answer and gets slower to steer. Starting fresh for new work, and keeping what matters in project memory, is cheaper.",
-                money(worst.cost),
-                match others {
-                    0 => String::new(),
-                    1 => ", and one other session is past a week too".to_string(),
-                    n => format!(", and {n} other sessions are past a week too"),
-                }
-            ),
+            Msg::new("finding.session-long-lived.title").var("days", format!("{:.0}", days)),
+            detail_msg,
         );
     }
     out
@@ -304,6 +306,34 @@ mod tests {
         assert_eq!(sessions_to_nudge(&sessions, now, 7, "2026-W40", &mut marks).len(), 2, "and again next week");
         assert!(sessions_to_nudge(&sessions, now, 0, "2026-W41", &mut Vec::new()).is_empty(), "0 is off");
         assert_eq!(sessions_to_nudge(&sessions, now, 30, "2026-W41", &mut Vec::new()).len(), 1, "a longer threshold");
+    }
+
+    /// A missing translation key renders as its own literal key text instead
+    /// of failing -- that takes a real fixture run to catch. Exercises all
+    /// three finding ids, including session-long-lived's "others" clause at
+    /// count=1 (the .one plural form) and count=2 (.other).
+    #[test]
+    fn opportunities_never_render_a_raw_key() {
+        let mix = claude(
+            &[("claude-fable-5-1", 800.0), ("claude-opus-5", 100.0), ("claude-sonnet-5", 100.0)],
+            &[("acme", 1000.0)],
+        );
+        let unsorted = claude(&[("claude-sonnet-5", 100.0)], &[("(unsorted)", 30.0), ("acme/web", 70.0)]);
+        let one_other = [session(56.0, 419.0), session(9.0, 60.0)];
+        let two_others = [session(56.0, 419.0), session(9.0, 60.0), session(30.0, 500.0)];
+        let fixtures: [Vec<Opportunity>; 4] = [
+            opportunities(Some(&mix), &[]),
+            opportunities(Some(&unsorted), &[]),
+            opportunities(None, &one_other),
+            opportunities(None, &two_others),
+        ];
+        for found in fixtures {
+            assert!(!found.is_empty());
+            for o in found {
+                assert!(!o.title.starts_with("finding."), "{}: raw key in title: {}", o.id, o.title);
+                assert!(!o.detail.starts_with("finding."), "{}: raw key in detail: {}", o.id, o.detail);
+            }
+        }
     }
 
     #[test]
