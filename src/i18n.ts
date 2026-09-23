@@ -48,7 +48,10 @@ export function normalizeLocalePref(raw: unknown): LocalePref {
 }
 
 /// Same idea as normalizeLocalePref, but for callers (setSystemLocale) that need a
-/// bare Locale and cannot take "auto".
+/// bare Locale and cannot take "auto" — normalizeLocalePref's fallback is "auto",
+/// this one's is "en", so neither is expressed in terms of the other. A future
+/// LOCALES entry alone is enough for every caller that goes through here; main.ts
+/// never hardcodes a locale list.
 export function asLocale(raw: unknown): Locale {
   return typeof raw === "string" && (LOCALES as readonly string[]).includes(raw) ? (raw as Locale) : "en";
 }

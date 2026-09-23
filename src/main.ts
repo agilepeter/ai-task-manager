@@ -4419,12 +4419,18 @@ function applyLocale(): void {
       status.textContent = t("footer.starting");
     }
   }
-  if (lastSnapshots.length) renderIfVisible();
+  // Each of these guards its own visibility and no-ops while that view/panel isn't
+  // showing; renderAll() (via renderIfVisible() below) only redraws the Usage cards, so
+  // none of the five would otherwise pick up the new locale. Runs BEFORE
+  // renderIfVisible() on purpose: in wide mode with no provider open yet, renderAll()'s
+  // refreshDetail() opens the first provider and renders it itself, so rerenderDetail()
+  // running after that would render the same page a second time.
   rerenderDetail();
   rerenderInventory();
   rerenderAudit();
   rerenderAbout();
   rerenderLedger();
+  if (lastSnapshots.length) renderIfVisible();
   populatePinnedOptions();
   renderBuildInfo();
 }

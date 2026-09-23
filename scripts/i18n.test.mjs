@@ -82,6 +82,19 @@ test("language endonyms are identical across locales", () => {
   }
 });
 
+// index.html has no t()/T() calls, so it is not in KEYED_SOURCES below and none of
+// those checks see it; its data-i18n* attributes are the only reference to a key. t()
+// falls back to the raw key string on any miss, so a typo'd attribute (e.g.
+// data-i18n="usge.tab") would silently paint "usge.tab" on the tab with nothing failing.
+test("every data-i18n* key referenced in index.html exists in en.json", () => {
+  const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+  const attrs = ["data-i18n", "data-i18n-html", "data-i18n-title", "data-i18n-placeholder", "data-i18n-aria"];
+  const pattern = new RegExp(`(?:${attrs.join("|")})="([a-zA-Z0-9_.]+)"`, "g");
+  const referenced = new Set([...html.matchAll(pattern)].map((m) => m[1]));
+  const missing = [...referenced].filter((k) => !(k in dicts.en));
+  assert.deepEqual(missing, [], "index.html: referenced data-i18n* keys missing from en.json");
+});
+
 // Each view that owns a key prefix gets one row here, not a copy of this
 // test. task 5+: add ["../src/inventory.ts", "inventory."] etc.
 const KEYED_SOURCES = [
