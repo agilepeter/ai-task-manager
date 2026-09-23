@@ -115,10 +115,26 @@ test("strip tooltip includes valid restriction status separately from percentage
   assert.deepEqual(sub2ApiStatusDetails([metric("Balance")]), []);
 });
 
-test("combined wallet status translates every known restriction", async () => {
+// i18n.ts now imports its three dictionaries from src/locales/*.json.
+// ts.transpileModule only transpiles this one file — it doesn't bundle those
+// imports — and Node's native ESM loader can neither resolve a relative
+// specifier against a data: URL nor take a bare JSON import without an
+// attribute (which Vite's bundler build doesn't need). Inline the three
+// dictionaries as plain object literals before transpiling so the module is
+// self-contained again, the same way it was before they moved out.
+async function loadI18nModule() {
   const source = await readFile(new URL("../src/i18n.ts", import.meta.url), "utf8");
-  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
-  const { setActiveLocale, displayMetricDetail } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+  let inlined = source;
+  for (const name of ["en", "zh", "ru"]) {
+    const json = await readFile(new URL(`../src/locales/${name}.json`, import.meta.url), "utf8");
+    inlined = inlined.replace(`import ${name} from "./locales/${name}.json";`, `const ${name} = ${json};`);
+  }
+  const code = ts.transpileModule(inlined, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+  return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+}
+
+test("combined wallet status translates every known restriction", async () => {
+  const { setActiveLocale, displayMetricDetail } = await loadI18nModule();
   setActiveLocale("zh");
   assert.equal(displayMetricDetail("Expired · Overdue"), "已过期 · 欠费");
   assert.equal(displayMetricDetail("Disabled · Overdue"), "已禁用 · 欠费");
@@ -126,9 +142,7 @@ test("combined wallet status translates every known restriction", async () => {
 });
 
 test("partial quota card text retains and localizes its explicit reset time", async () => {
-  const source = await readFile(new URL("../src/i18n.ts", import.meta.url), "utf8");
-  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
-  const { setActiveLocale, displayMetricDetail } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+  const { setActiveLocale, displayMetricDetail } = await loadI18nModule();
   const text = "Unknown of $10.00 · Resets 2030-01-01 00:00 UTC";
   setActiveLocale("zh");
   assert.equal(displayMetricDetail(text), "Unknown of $10.00 · 2030-01-01 00:00 UTC 重置");
