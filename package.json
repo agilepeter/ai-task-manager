@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "node --test scripts/*.test.mjs",
+    "test": "node --test scripts/*.test.mjs scripts/check-demo-fixture.mjs",
     "build:demo": "python3 scripts/make-demo-html.py && tsc && vite build --mode demo",
     "fixture:demo": "python3 scripts/make-demo-fixture.py",
     "preview": "vite preview",

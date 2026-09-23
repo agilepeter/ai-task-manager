@@ -134,6 +134,18 @@
     "kind": "tighten",
     "title": "3 MCP servers run an unpinned package",
     "detail": "playwright, postgres, notes (Claude Desktop) fetch whatever version is newest each launch, so a bad or hijacked release runs with your tools' access the moment it ships. Pin at least the major version.",
+    "titleMsg": {
+     "key": "finding.mcp-unpinned.title",
+     "vars": {},
+     "count": 3
+    },
+    "detailMsg": {
+     "key": "finding.mcp-unpinned.detail",
+     "vars": {
+      "names": "playwright, postgres, notes (Claude Desktop)"
+     },
+     "count": 3
+    },
     "learnUrl": "https://staas.fund/mcp/"
    },
    {
@@ -141,6 +153,18 @@
     "kind": "tighten",
     "title": "2 MCP servers are handed credentials",
     "detail": "postgres, figma receive environment variables, usually API keys, stored in plain text in your Claude config. Know which servers hold which keys, and scope those keys as narrowly as the vendor allows.",
+    "titleMsg": {
+     "key": "finding.mcp-env-secrets.title",
+     "vars": {},
+     "count": 2
+    },
+    "detailMsg": {
+     "key": "finding.mcp-env-secrets.detail",
+     "vars": {
+      "names": "postgres, figma"
+     },
+     "count": 2
+    },
     "learnUrl": "https://staas.fund/mcp/"
    },
    {
@@ -148,6 +172,18 @@
     "kind": "learn",
     "title": "1 remote MCP server",
     "detail": "github runs on someone else's machine: what you send there leaves this computer. Worth checking the trust rating before pointing it at client work.",
+    "titleMsg": {
+     "key": "finding.mcp-remote.title",
+     "vars": {},
+     "count": 1
+    },
+    "detailMsg": {
+     "key": "finding.mcp-remote.detail",
+     "vars": {
+      "names": "github"
+     },
+     "count": 1
+    },
     "learnUrl": "https://staas.fund/mcp/"
    },
    {
@@ -155,6 +191,16 @@
     "kind": "learn",
     "title": "1 agent inherits the session model",
     "detail": "An agent with no model runs on whatever you are using, often the most expensive one. Naming a lighter model for search and summarising agents cuts spend with no quality loss.",
+    "titleMsg": {
+     "key": "finding.agents-model-unset.title",
+     "vars": {},
+     "count": 1
+    },
+    "detailMsg": {
+     "key": "finding.agents-model-unset.detail",
+     "vars": {},
+     "count": null
+    },
     "learnUrl": "https://staas.fund/classroom/"
    }
   ]
@@ -164,248 +210,268 @@
    "id": "claude",
    "name": "Claude",
    "today": {
-    "cost": 8.1257,
-    "tokens": 1156212.0,
+    "cost": 94.4728,
+    "tokens": 8600435.0,
     "models": [
      {
       "model": "claude-opus-5",
-      "cost": 7.223599999999999,
-      "tokens": 907866.0
+      "cost": 73.8301,
+      "tokens": 4418810.0
      },
      {
       "model": "claude-sonnet-5",
-      "cost": 0.8315,
-      "tokens": 199322.0
+      "cost": 20.1388,
+      "tokens": 3631411.0
      },
      {
       "model": "Other",
-      "cost": 0.0706,
-      "tokens": 49024.0
+      "cost": 0.5039,
+      "tokens": 550214.0
      }
     ]
    },
    "yesterday": {
-    "cost": 5.9535,
-    "tokens": 1154700.0,
+    "cost": 14.261300000000002,
+    "tokens": 1985806.0,
     "models": [
      {
       "model": "claude-opus-5",
-      "cost": 5.9535,
-      "tokens": 1154700.0
+      "cost": 11.916,
+      "tokens": 1441840.0
+     },
+     {
+      "model": "claude-sonnet-5",
+      "cost": 2.2237,
+      "tokens": 350051.0
+     },
+     {
+      "model": "Other",
+      "cost": 0.1216,
+      "tokens": 193915.0
      }
     ]
    },
    "last30": {
-    "cost": 1396.5453000000002,
-    "tokens": 143353263.0,
+    "cost": 1335.6018000000004,
+    "tokens": 138860703.0,
     "models": [
      {
       "model": "claude-opus-5",
-      "cost": 1136.3985999999998,
-      "tokens": 74238093.0
+      "cost": 1063.1852000000001,
+      "tokens": 70435199.0
      },
      {
       "model": "claude-sonnet-5",
-      "cost": 252.90999999999997,
-      "tokens": 55326278.0
+      "cost": 265.38410000000005,
+      "tokens": 56352361.0
      },
      {
       "model": "Other",
-      "cost": 7.2367,
-      "tokens": 13788892.0
+      "cost": 7.032499999999999,
+      "tokens": 12073143.0
      }
     ]
    },
    "trend": [
-    834551.0,
-    3760188.0,
-    11198688.0,
-    5930839.0,
-    11571947.0,
-    2703057.0,
+    4624061.0,
+    3238217.0,
+    2076934.0,
+    1945972.0,
+    1540599.0,
     0.0,
-    0.0,
-    7752456.0,
-    2107649.0,
-    1069526.0,
-    5386765.0,
-    9996628.0,
-    1154700.0,
+    7473179.0,
+    5686860.0,
+    6176803.0,
+    920668.0,
+    4237958.0,
     769800.0,
-    1838719.0,
-    5716453.0,
-    9274104.0,
-    10632295.0,
+    769800.0,
+    7970209.0,
+    7951769.0,
+    6475613.0,
+    5449893.0,
+    9444428.0,
+    2727758.0,
+    384900.0,
+    11808579.0,
     10324296.0,
-    769800.0,
-    1154700.0,
-    2804622.0,
-    6348229.0,
-    7659932.0,
-    13599736.0,
-    3886632.0,
-    2796039.0,
-    1154700.0,
-    1156212.0
+    1483563.0,
+    4499750.0,
+    2533591.0,
+    1539600.0,
+    6837234.0,
+    9382428.0,
+    1985806.0,
+    8600435.0
    ],
    "unpriced": 0,
    "unpriced_models": [],
    "daily_cost": [
-    4.7538,
-    39.6032,
-    107.7015,
-    65.14979999999998,
-    118.6385,
-    21.6894,
+    41.921400000000006,
+    36.5124,
+    19.6414,
+    20.0332,
+    17.5683,
     0.0,
-    0.0,
-    76.9291,
-    19.5694,
-    12.0426,
-    42.927,
-    97.5097,
-    4.6518999999999995,
-    4.846500000000001,
-    18.352999999999998,
-    55.225300000000004,
-    92.83959999999999,
-    112.93329999999999,
-    103.90790000000001,
-    5.5873,
-    6.0752999999999995,
-    33.907599999999995,
-    63.4223,
-    74.73790000000001,
-    120.5804,
-    44.8579,
-    34.0259,
-    5.9535,
-    8.1257
+    68.85289999999999,
+    57.433099999999996,
+    45.5928,
+    9.972399999999999,
+    39.8209,
+    3.0232,
+    4.6357,
+    88.492,
+    74.96039999999999,
+    52.9505,
+    58.329600000000006,
+    73.3681,
+    24.888199999999998,
+    2.8104,
+    132.21169999999998,
+    103.8948,
+    11.7245,
+    45.8718,
+    27.9961,
+    10.200199999999999,
+    66.8119,
+    87.34979999999999,
+    14.261300000000002,
+    94.4728
    ],
    "projects": [
     {
      "project": "/Users/dana/work",
      "today": {
-      "cost": 8.125699999999998,
-      "tokens": 1156212.0,
+      "cost": 94.4728,
+      "tokens": 8600435.0,
       "models": []
      },
      "yesterday": {
-      "cost": 5.9535,
-      "tokens": 1154700.0,
+      "cost": 14.2613,
+      "tokens": 1985806.0,
       "models": []
      },
      "last30": {
-      "cost": 1396.5453000000002,
-      "tokens": 143353263.0,
+      "cost": 1335.6018000000001,
+      "tokens": 138860703.0,
       "models": []
      },
      "areas": [
       {
-       "area": "acme-portal/web",
-       "today": {
-        "cost": 0.0,
-        "tokens": 0.0,
-        "models": []
-       },
-       "yesterday": {
-        "cost": 0.0,
-        "tokens": 0.0,
-        "models": []
-       },
-       "last30": {
-        "cost": 507.6715,
-        "tokens": 50898105.0,
-        "models": []
-       },
-       "daily_cost": [
-        1.6414,
-        0.0,
-        97.31920000000001,
-        23.101599999999998,
-        17.616000000000003,
-        16.6145,
-        0.0,
-        0.0,
-        17.9339,
-        0.0,
-        0.0,
-        21.978,
-        71.5758,
-        0.0,
-        0.0,
-        14.928499999999998,
-        3.7964999999999995,
-        70.969,
-        26.047199999999993,
-        23.369600000000002,
-        0.0,
-        0.0,
-        0.0,
-        16.923000000000002,
-        28.148399999999995,
-        44.3565,
-        0.0,
-        11.3524,
-        0.0,
-        0.0
-       ]
-      },
-      {
        "area": "northwind-api",
        "today": {
-        "cost": 4.116,
-        "tokens": 769800.0,
+        "cost": 42.04409999999999,
+        "tokens": 4197369.0,
         "models": []
        },
        "yesterday": {
-        "cost": 5.9535,
+        "cost": 5.74,
         "tokens": 1154700.0,
         "models": []
        },
        "last30": {
-        "cost": 406.0624000000001,
-        "tokens": 45081373.0,
+        "cost": 412.4003,
+        "tokens": 46243595.0,
         "models": []
        },
        "daily_cost": [
         0.0,
+        0.4906,
+        2.6443,
         0.0,
         0.0,
-        22.7241,
-        21.9038,
-        4.9186000000000005,
+        0.0,
+        19.7286,
+        8.7065,
+        24.488,
+        0.0,
+        22.831300000000002,
+        1.9833,
+        4.6357,
+        52.1819,
+        17.154899999999998,
+        5.5904,
+        20.5688,
+        12.143699999999999,
+        6.9528,
+        2.8104,
+        71.14989999999999,
+        29.7142,
+        5.5543000000000005,
+        3.0488,
+        10.069700000000001,
+        10.200199999999999,
+        5.4887999999999995,
+        26.479100000000003,
+        5.74,
+        42.04409999999999
+       ],
+       "week": {
+        "thisWeek": 103.07069999999999,
+        "lastWeek": 148.8941,
+        "changePercent": -30.775833293595927
+       }
+      },
+      {
+       "area": "acme-portal/web",
+       "today": {
+        "cost": 12.363499999999998,
+        "tokens": 1214286.0,
+        "models": []
+       },
+       "yesterday": {
+        "cost": 0.0,
+        "tokens": 0.0,
+        "models": []
+       },
+       "last30": {
+        "cost": 391.05269999999996,
+        "tokens": 41347462.0,
+        "models": []
+       },
+       "daily_cost": [
+        22.290300000000002,
+        15.859200000000001,
+        0.4516,
+        8.0711,
         0.0,
         0.0,
-        46.912400000000005,
-        17.6014,
+        47.171899999999994,
         0.0,
-        10.8154,
-        3.8322,
-        4.6518999999999995,
-        4.846500000000001,
-        2.8611,
-        16.9142,
-        5.8346,
-        41.7424,
-        29.7273,
-        5.5873,
-        6.0752999999999995,
-        6.3176,
-        29.982100000000003,
-        29.312000000000005,
-        32.2567,
-        30.352399999999996,
-        20.8236,
-        5.9535,
-        4.116
-       ]
+        12.920900000000001,
+        9.8034,
+        14.206,
+        0.0,
+        0.0,
+        29.985599999999998,
+        35.0844,
+        17.360300000000002,
+        4.7094000000000005,
+        45.74000000000001,
+        0.0,
+        0.0,
+        18.330399999999997,
+        23.369600000000002,
+        5.861800000000001,
+        15.7894,
+        11.1309,
+        0.0,
+        29.456199999999995,
+        11.096800000000002,
+        0.0,
+        12.363499999999998
+       ],
+       "week": {
+        "thisWeek": 79.8368,
+        "lastWeek": 98.01120000000002,
+        "changePercent": -18.543186901088873
+       }
       },
       {
        "area": "acme-portal/api",
        "today": {
-        "cost": 0.0,
-        "tokens": 0.0,
+        "cost": 31.247500000000006,
+        "tokens": 2893228.0,
         "models": []
        },
        "yesterday": {
@@ -414,142 +480,157 @@
         "models": []
        },
        "last30": {
-        "cost": 184.77090000000004,
-        "tokens": 16554998.0,
+        "cost": 208.85649999999998,
+        "tokens": 19155045.0,
         "models": []
        },
        "daily_cost": [
         0.0,
-        27.836000000000002,
-        5.0387,
-        1.1501000000000001,
-        39.9924,
-        0.0,
-        0.0,
-        0.0,
-        9.9392,
-        1.7184,
-        11.779500000000002,
-        6.3013,
+        19.6119,
+        9.9047,
         0.0,
         0.0,
         0.0,
         0.0,
-        4.785100000000001,
-        3.1578,
+        17.5152,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.7229,
+        17.136499999999998,
+        22.638400000000004,
+        0.0,
+        0.0,
+        14.900399999999998,
+        0.0,
         3.0705,
         8.546399999999998,
         0.0,
-        0.0,
-        25.2671,
+        24.8285,
         3.8,
-        10.239500000000001,
-        12.313699999999999,
-        9.8352,
         0.0,
+        7.518899999999999,
+        26.414700000000003,
         0.0,
-        0.0
-       ]
+        31.247500000000006
+       ],
+       "week": {
+        "thisWeek": 93.8096,
+        "lastWeek": 26.517299999999995,
+        "changePercent": 253.7675404358665
+       }
       },
       {
        "area": "internal-tools",
        "today": {
-        "cost": 3.775,
-        "tokens": 330883.0,
-        "models": []
-       },
-       "yesterday": {
         "cost": 0.0,
         "tokens": 0.0,
         "models": []
        },
+       "yesterday": {
+        "cost": 5.5075,
+        "tokens": 689752.0,
+        "models": []
+       },
        "last30": {
-        "cost": 181.10580000000002,
-        "tokens": 18951801.0,
+        "cost": 148.93959999999998,
+        "tokens": 16542015.0,
         "models": []
        },
        "daily_cost": [
-        1.8045,
-        10.678299999999998,
-        0.0,
-        11.980500000000001,
-        31.1642,
+        16.848299999999995,
         0.0,
         0.0,
-        0.0,
-        1.4344000000000001,
-        0.0,
+        11.075,
         0.0,
         0.0,
-        19.189199999999996,
+        0.8136,
+        15.2842,
+        5.1613,
         0.0,
         0.0,
         0.0,
-        24.619099999999996,
-        8.576099999999999,
-        10.7012,
+        0.0,
+        0.0,
+        0.0,
+        4.3002,
+        32.207100000000004,
+        3.8587,
+        0.0,
+        0.0,
+        8.0027,
         26.6082,
         0.0,
         0.0,
         0.0,
-        11.5814,
-        6.04,
-        12.9537,
         0.0,
-        0.0,
-        0.0,
-        3.775
-       ]
+        6.452500000000001,
+        12.8203,
+        5.5075,
+        0.0
+       ],
+       "week": {
+        "thisWeek": 24.7803,
+        "lastWeek": 70.6767,
+        "changePercent": -64.9385158050673
+       }
       },
       {
        "area": "(unsorted)",
        "today": {
-        "cost": 0.2347,
-        "tokens": 55529.0,
+        "cost": 8.817699999999999,
+        "tokens": 295552.0,
         "models": []
        },
        "yesterday": {
-        "cost": 0.0,
-        "tokens": 0.0,
+        "cost": 3.0138,
+        "tokens": 141354.0,
         "models": []
        },
        "last30": {
-        "cost": 102.82730000000001,
-        "tokens": 10543929.0,
+        "cost": 135.1921,
+        "tokens": 11565622.0,
         "models": []
        },
        "daily_cost": [
-        1.3079,
-        1.0889,
-        5.3436,
-        6.0832,
-        7.9620999999999995,
-        0.1563,
+        2.7828,
+        0.5507,
+        1.1059,
+        0.8871,
+        0.2711,
         0.0,
+        1.0285,
+        15.1759,
+        3.0225999999999997,
+        0.169,
+        2.7836,
+        1.0399,
         0.0,
-        0.7092,
-        0.2496,
-        0.2631,
-        3.8323,
-        2.9124999999999996,
+        4.6016,
+        5.5846,
+        3.0612,
+        0.8442999999999999,
+        10.155899999999999,
+        3.035,
         0.0,
+        31.658199999999997,
+        1.6593,
+        0.3084,
+        2.2051,
+        2.9955,
         0.0,
-        0.5634,
-        5.1104,
-        4.3021,
-        31.371999999999996,
-        1.6593000000000002,
-        0.0,
-        0.0,
-        2.3229,
-        1.1358000000000001,
-        0.998,
-        18.699800000000003,
-        4.670299999999999,
-        1.8499,
-        0.0,
-        0.2347
-       ]
+        17.8955,
+        10.538899999999998,
+        3.0138,
+        8.817699999999999
+       ],
+       "week": {
+        "thisWeek": 45.466499999999996,
+        "lastWeek": 47.6611,
+        "changePercent": -4.604593683318265
+       }
       },
       {
        "area": "blog",
@@ -564,15 +645,19 @@
         "models": []
        },
        "last30": {
-        "cost": 14.107399999999998,
-        "tokens": 1323057.0,
+        "cost": 39.1606,
+        "tokens": 4006964.0,
         "models": []
        },
        "daily_cost": [
         0.0,
         0.0,
+        5.5349,
+        0.0,
+        17.2972,
         0.0,
         0.11030000000000001,
+        0.7513000000000001,
         0.0,
         0.0,
         0.0,
@@ -582,9 +667,7 @@
         0.0,
         0.0,
         0.0,
-        0.0,
-        0.0,
-        0.0,
+        1.4698,
         0.0,
         0.0,
         0.0,
@@ -596,14 +679,22 @@
         0.0,
         0.0,
         0.0,
-        0.0,
-        0.0,
         0.0
-       ]
+       ],
+       "week": {
+        "thisWeek": 0.0,
+        "lastWeek": 15.466899999999997,
+        "changePercent": -100.0
+       }
       }
      ]
     }
-   ]
+   ],
+   "week": {
+    "thisWeek": 346.96389999999997,
+    "lastWeek": 407.22729999999996,
+    "changePercent": -14.798467588003062
+   }
   }
  ],
  "sessions": {
@@ -612,20 +703,71 @@
     "areas": [
      [
       "northwind-api",
-      90.79560000000001
+      85.8059
      ],
      [
       "(unsorted)",
-      3.2766
+      1.0399
      ]
     ],
-    "cost": 94.07220000000001,
+    "bytes": 18681,
+    "cost": 86.84580000000003,
     "dayCost": null,
-    "endedMs": 1790010513452,
-    "id": "8f041582-2a53-45e0-a2a6-4e17640f3f9e",
+    "endedMs": 1790164626478,
+    "id": "77fb9acf-f7e9-4c57-b176-d9138d67c024",
     "project": "/Users/dana/work",
-    "startedMs": 1788416097611,
-    "tokens": 16550700.0,
+    "startedMs": 1788591755151,
+    "tokens": 15780900.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      29.42129999999999
+     ],
+     [
+      "acme-portal/web",
+      18.330399999999997
+     ],
+     [
+      "(unsorted)",
+      0.3806
+     ]
+    ],
+    "bytes": 18332,
+    "cost": 48.132299999999994,
+    "dayCost": null,
+    "endedMs": 1789413121003,
+    "id": "4503930e-672c-499f-a778-921de28d059a",
+    "project": "/Users/dana/work",
+    "startedMs": 1789400128704,
+    "tokens": 3703806.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      35.98649999999999
+     ],
+     [
+      "acme-portal/web",
+      4.6331999999999995
+     ],
+     [
+      "(unsorted)",
+      1.3283
+     ]
+    ],
+    "bytes": 18285,
+    "cost": 41.94800000000001,
+    "dayCost": null,
+    "endedMs": 1790199840951,
+    "id": "f24dd66c-2ac6-4a81-89aa-47506ff1a800",
+    "project": "/Users/dana/work",
+    "startedMs": 1790187984915,
+    "tokens": 3543999.0,
     "topModel": "claude-opus-5"
    },
    {
@@ -651,85 +793,101 @@
       0.9625
      ]
     ],
+    "bytes": 18214,
     "cost": 40.2442,
     "dayCost": null,
-    "endedMs": 1789153505282,
-    "id": "c5011887-3795-4a52-b8c0-518334369786",
+    "endedMs": 1789499121282,
+    "id": "059a45cc-f204-470b-90c0-384f358ad296",
     "project": "/Users/dana/work",
-    "startedMs": 1789142335591,
+    "startedMs": 1789487951591,
     "tokens": 3333508.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
+      "acme-portal/api",
+      17.136499999999998
+     ],
+     [
       "northwind-api",
-      37.3389
+      12.3001
+     ],
+     [
+      "acme-portal/web",
+      8.276499999999999
      ],
      [
       "(unsorted)",
-      0.0725
+      0.6179
      ]
     ],
-    "cost": 37.4114,
+    "bytes": 16983,
+    "cost": 38.331,
     "dayCost": null,
-    "endedMs": 1788198353061,
-    "id": "4bfcdebb-e9fd-4196-9072-ad2fde7e211b",
+    "endedMs": 1788899566204,
+    "id": "439e06a3-da99-4298-90a0-18094348a5f3",
     "project": "/Users/dana/work",
-    "startedMs": 1788188749828,
-    "tokens": 3194753.0,
+    "startedMs": 1788888991551,
+    "tokens": 3916315.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
-      "northwind-api",
-      25.392000000000003
+      "acme-portal/api",
+      19.6119
      ],
      [
-      "acme-portal/api",
-      10.2395
+      "acme-portal/web",
+      15.8592
      ],
      [
       "(unsorted)",
-      0.7217
+      0.5507
+     ],
+     [
+      "northwind-api",
+      0.4906
      ]
     ],
-    "cost": 36.35320000000001,
+    "bytes": 13758,
+    "cost": 36.5124,
     "dayCost": null,
-    "endedMs": 1789583323868,
-    "id": "1d2bf588-74be-409a-8a95-bce97b8ba0c3",
+    "endedMs": 1787789244756,
+    "id": "9b25865d-713d-4390-8e61-2cd408c07d37",
     "project": "/Users/dana/work",
-    "startedMs": 1789573735288,
-    "tokens": 3668912.0,
+    "startedMs": 1787781044001,
+    "tokens": 3238217.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "acme-portal/web",
-      17.9339
-     ],
-     [
-      "acme-portal/api",
-      9.9392
+      19.353499999999997
      ],
      [
       "northwind-api",
-      5.5022
+      15.0386
      ],
      [
       "(unsorted)",
-      0.5129
+      0.564
+     ],
+     [
+      "blog",
+      0.1103
      ]
     ],
-    "cost": 33.888200000000005,
+    "bytes": 16024,
+    "cost": 35.0664,
     "dayCost": null,
-    "endedMs": 1788218322460,
-    "id": "7a97499f-d3ed-43a8-9456-55aa279f0e55",
+    "endedMs": 1788203435022,
+    "id": "48406bf4-fbdf-4fe3-9808-d325abcffdb1",
     "project": "/Users/dana/work",
-    "startedMs": 1788206581502,
-    "tokens": 3748286.0,
+    "startedMs": 1788192526845,
+    "tokens": 3406419.0,
     "topModel": "claude-opus-5"
    },
    {
@@ -747,169 +905,68 @@
       2.7884
      ]
     ],
+    "bytes": 12331,
     "cost": 33.201699999999995,
     "dayCost": null,
-    "endedMs": 1789079524914,
-    "id": "95d57a76-d325-496d-9a51-7b01866ee030",
+    "endedMs": 1789425140914,
+    "id": "0e2eb196-527f-4e7c-b596-bf0dfe601f53",
     "project": "/Users/dana/work",
-    "startedMs": 1789071701131,
+    "startedMs": 1789417317131,
     "tokens": 2847218.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
-      "internal-tools",
-      15.88
+      "northwind-api",
+      19.6886
      ],
      [
-      "northwind-api",
-      13.0987
+      "acme-portal/web",
+      8.321900000000001
      ],
      [
       "(unsorted)",
-      2.4501
+      2.036
      ]
     ],
-    "cost": 31.4288,
+    "bytes": 13267,
+    "cost": 30.046500000000005,
     "dayCost": null,
-    "endedMs": 1787870576885,
-    "id": "c9a60faa-f8e2-4bd6-b8e8-162f8322bb89",
+    "endedMs": 1788567188181,
+    "id": "aca60838-09e9-4bab-a855-baaa2659c4e5",
     "project": "/Users/dana/work",
-    "startedMs": 1787859716378,
-    "tokens": 3138189.0,
+    "startedMs": 1788558663782,
+    "tokens": 3175332.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "acme-portal/web",
-      21.3969
-     ],
-     [
-      "internal-tools",
-      8.576099999999999
-     ],
-     [
-      "(unsorted)",
-      0.901
+      14.4436
      ],
      [
       "northwind-api",
-      0.1906
-     ]
-    ],
-    "cost": 31.0646,
-    "dayCost": null,
-    "endedMs": 1788974707388,
-    "id": "14f0e11e-7675-4edf-aeb0-e2c31d1b3461",
-    "project": "/Users/dana/work",
-    "startedMs": 1788964494323,
-    "tokens": 3303237.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      12.2951
-     ],
-     [
-      "northwind-api",
-      9.737
+      11.6977
      ],
      [
       "acme-portal/api",
-      6.872599999999999
+      1.7229
      ],
      [
       "(unsorted)",
-      0.6275
+      1.374
      ]
     ],
-    "cost": 29.5322,
+    "bytes": 11944,
+    "cost": 29.2382,
     "dayCost": null,
-    "endedMs": 1789669040633,
-    "id": "65c1a733-52df-42cd-875c-e395e99bb192",
+    "endedMs": 1788810721417,
+    "id": "19cdc7a1-7f65-4c42-9692-c59603cc58d3",
     "project": "/Users/dana/work",
-    "startedMs": 1789658924826,
-    "tokens": 3542291.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "northwind-api",
-      26.980499999999996
-     ],
-     [
-      "(unsorted)",
-      2.413
-     ]
-    ],
-    "cost": 29.3935,
-    "dayCost": null,
-    "endedMs": 1789749366702,
-    "id": "d58aa6da-1951-4e87-9da2-2af4c90576e1",
-    "project": "/Users/dana/work",
-    "startedMs": 1789740692769,
-    "tokens": 2670610.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "northwind-api",
-      15.9161
-     ],
-     [
-      "acme-portal/web",
-      11.3524
-     ],
-     [
-      "(unsorted)",
-      1.8499
-     ]
-    ],
-    "cost": 29.118399999999998,
-    "dayCost": null,
-    "endedMs": 1789853463660,
-    "id": "fd4b0b58-fbbc-4db7-b893-5a793c00f1c7",
-    "project": "/Users/dana/work",
-    "startedMs": 1789846174566,
-    "tokens": 2026239.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      23.1016
-     ],
-     [
-      "northwind-api",
-      3.1726
-     ],
-     [
-      "(unsorted)",
-      1.4827
-     ],
-     [
-      "acme-portal/api",
-      1.1501
-     ],
-     [
-      "blog",
-      0.1103
-     ]
-    ],
-    "cost": 29.0173,
-    "dayCost": null,
-    "endedMs": 1787789506849,
-    "id": "7490dd34-bed7-4833-9fe3-0c5e0b674b49",
-    "project": "/Users/dana/work",
-    "startedMs": 1787780443538,
-    "tokens": 2684925.0,
+    "startedMs": 1788803728464,
+    "tokens": 2258050.0,
     "topModel": "claude-opus-5"
    },
    {
@@ -927,185 +984,176 @@
       0.0173
      ]
     ],
-    "cost": 28.6667,
+    "bytes": 13737,
+    "cost": 28.666700000000002,
     "dayCost": null,
-    "endedMs": 1789171262870,
-    "id": "f5862f39-ab2f-40aa-a247-8ac944d7dd82",
+    "endedMs": 1789516878870,
+    "id": "ad29091f-cb0c-4f37-a726-13f8b279b8c2",
     "project": "/Users/dana/work",
-    "startedMs": 1789162432025,
+    "startedMs": 1789508048025,
     "tokens": 2171222.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
-      "acme-portal/web",
-      13.789100000000005
+      "northwind-api",
+      20.4749
      ],
      [
-      "northwind-api",
-      8.8051
+      "acme-portal/web",
+      7.641299999999999
      ],
      [
       "(unsorted)",
-      3.951
+      0.1765
      ]
     ],
-    "cost": 26.545199999999994,
+    "bytes": 15112,
+    "cost": 28.2927,
     "dayCost": null,
-    "endedMs": 1787859364754,
-    "id": "90441a4e-4f1d-482f-b0d3-30b0a39ee509",
+    "endedMs": 1788805294825,
+    "id": "26fa4e30-3011-450f-bb7c-d8e8abd60a05",
     "project": "/Users/dana/work",
-    "startedMs": 1787853070519,
-    "tokens": 2389197.0,
+    "startedMs": 1788795467340,
+    "tokens": 3104250.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "internal-tools",
-      12.9537
+      12.8203
      ],
      [
       "northwind-api",
-      7.1403
+      8.3964
+     ],
+     [
+      "acme-portal/web",
+      6.8719
+     ],
+     [
+      "(unsorted)",
+      0.201
+     ]
+    ],
+    "bytes": 14657,
+    "cost": 28.2896,
+    "dayCost": null,
+    "endedMs": 1790019415558,
+    "id": "65bd377d-fd4c-47f2-86b7-7a67d09904a0",
+    "project": "/Users/dana/work",
+    "startedMs": 1790010851684,
+    "tokens": 3401030.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/api",
+      16.839400000000005
+     ],
+     [
+      "northwind-api",
+      5.0248
+     ],
+     [
+      "(unsorted)",
+      3.0159
+     ]
+    ],
+    "bytes": 11914,
+    "cost": 24.880100000000002,
+    "dayCost": null,
+    "endedMs": 1790189793153,
+    "id": "4f6c5627-1637-4729-b953-5cce02f9b95c",
+    "project": "/Users/dana/work",
+    "startedMs": 1790182686143,
+    "tokens": 2302176.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/web",
+      11.1309
+     ],
+     [
+      "northwind-api",
+      5.8952
      ],
      [
       "acme-portal/api",
-      5.4411
+      3.8
      ],
      [
       "(unsorted)",
-      0.8271
+      2.9955
      ]
     ],
-    "cost": 26.3622,
+    "bytes": 8239,
+    "cost": 23.8216,
     "dayCost": null,
-    "endedMs": 1789681534457,
-    "id": "330d9987-0ce1-48e0-af35-de98606c0699",
+    "endedMs": 1789763737098,
+    "id": "ee093d15-8dbd-4f87-a06d-a24319ed5c0f",
     "project": "/Users/dana/work",
-    "startedMs": 1789672861302,
-    "tokens": 3532723.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "northwind-api",
-      24.553500000000003
-     ],
-     [
-      "internal-tools",
-      0.5147
-     ],
-     [
-      "(unsorted)",
-      0.0681
-     ]
-    ],
-    "cost": 25.1363,
-    "dayCost": null,
-    "endedMs": 1789493993292,
-    "id": "07ee8ad8-f05c-468b-a3c2-10e6d3cc035f",
-    "project": "/Users/dana/work",
-    "startedMs": 1789488282657,
-    "tokens": 1738989.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "(unsorted)",
-      17.164200000000005
-     ],
-     [
-      "northwind-api",
-      7.958899999999999
-     ]
-    ],
-    "cost": 25.1231,
-    "dayCost": null,
-    "endedMs": 1789669247342,
-    "id": "daba4cac-0fa5-44a6-9560-82d8bc7c5334",
-    "project": "/Users/dana/work",
-    "startedMs": 1789661471899,
-    "tokens": 2852002.0,
+    "startedMs": 1789757799283,
+    "tokens": 1763791.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "acme-portal/web",
-      21.978
+      21.2278
      ],
      [
       "(unsorted)",
-      0.4625
+      1.9932
      ],
      [
       "northwind-api",
       0.451
      ]
     ],
-    "cost": 22.8915,
+    "bytes": 11480,
+    "cost": 23.672000000000004,
     "dayCost": null,
-    "endedMs": 1788456619712,
-    "id": "4f3aecc9-4f5b-4a7f-8854-86350a54c85a",
+    "endedMs": 1788901931833,
+    "id": "f5658250-d1b7-48a9-86a2-3d2832aca8d4",
     "project": "/Users/dana/work",
-    "startedMs": 1788448245871,
-    "tokens": 2851700.0,
+    "startedMs": 1788894388961,
+    "tokens": 2673925.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
+     [
+      "northwind-api",
+      13.9263
+     ],
+     [
+      "acme-portal/web",
+      4.7094000000000005
+     ],
      [
       "internal-tools",
-      19.189199999999996
-     ],
-     [
-      "acme-portal/web",
-      3.2828999999999997
+      2.317
      ],
      [
       "(unsorted)",
-      0.3072
-     ],
-     [
-      "northwind-api",
-      0.0159
+      0.696
      ]
     ],
-    "cost": 22.7952,
+    "bytes": 10993,
+    "cost": 21.6487,
     "dayCost": null,
-    "endedMs": 1788560363253,
-    "id": "40445a3c-10ea-43bc-8909-7decb5fb5b3c",
+    "endedMs": 1789061251465,
+    "id": "09873631-4296-4b70-8529-8d4c51e4bd0f",
     "project": "/Users/dana/work",
-    "startedMs": 1788552460786,
-    "tokens": 2525880.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      16.6145
-     ],
-     [
-      "northwind-api",
-      4.9186000000000005
-     ],
-     [
-      "(unsorted)",
-      0.1563
-     ]
-    ],
-    "cost": 21.6894,
-    "dayCost": null,
-    "endedMs": 1787955935602,
-    "id": "5b85d3ec-798b-4f07-a84b-27c65e970fab",
-    "project": "/Users/dana/work",
-    "startedMs": 1787948625688,
-    "tokens": 2703057.0,
+    "startedMs": 1789054225359,
+    "tokens": 2362213.0,
     "topModel": "claude-opus-5"
    },
    {
@@ -1123,145 +1171,305 @@
       0.2069
      ]
     ],
+    "bytes": 10083,
     "cost": 20.200599999999994,
     "dayCost": null,
-    "endedMs": 1789084104174,
-    "id": "46196b9d-9051-45d9-b62a-25f098c5bb0c",
+    "endedMs": 1789429720174,
+    "id": "114460eb-bb78-4f21-91d0-e063fe432d1d",
     "project": "/Users/dana/work",
-    "startedMs": 1789077794939,
+    "startedMs": 1789423410939,
     "tokens": 1886938.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
+      "acme-portal/api",
+      9.9047
+     ],
+     [
+      "blog",
+      5.5349
+     ],
+     [
       "northwind-api",
-      17.6014
+      2.6443
+     ],
+     [
+      "(unsorted)",
+      1.1059
+     ],
+     [
+      "acme-portal/web",
+      0.4516
+     ]
+    ],
+    "bytes": 9570,
+    "cost": 19.6414,
+    "dayCost": null,
+    "endedMs": 1787846876763,
+    "id": "f59957e8-6b7f-4f57-907a-b171e761d3dd",
+    "project": "/Users/dana/work",
+    "startedMs": 1787840396110,
+    "tokens": 2076934.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/web",
+      11.8338
      ],
      [
       "acme-portal/api",
-      1.7184
+      5.7705
      ],
      [
       "(unsorted)",
-      0.2496
+      0.5174
+     ],
+     [
+      "northwind-api",
+      0.352
      ]
     ],
-    "cost": 19.569399999999998,
+    "bytes": 10562,
+    "cost": 18.4737,
     "dayCost": null,
-    "endedMs": 1788290096710,
-    "id": "9e99e3aa-9e64-4dff-8177-b42d0bd6dc3a",
+    "endedMs": 1788969712858,
+    "id": "cf68b156-8ca2-4a65-82e6-150f8b3c7a0c",
     "project": "/Users/dana/work",
-    "startedMs": 1788283943929,
-    "tokens": 2107649.0,
+    "startedMs": 1788963371329,
+    "tokens": 2128249.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "northwind-api",
-      7.9484
-     ],
-     [
-      "acme-portal/api",
-      6.3013
-     ],
-     [
-      "(unsorted)",
-      0.0932
-     ]
-    ],
-    "cost": 14.3429,
-    "dayCost": null,
-    "endedMs": 1788452709297,
-    "id": "8aa4a3e1-66bb-411b-b77b-8f4f72442008",
-    "project": "/Users/dana/work",
-    "startedMs": 1788449012309,
-    "tokens": 1380365.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "northwind-api",
-      10.1373
-     ],
-     [
-      "(unsorted)",
-      2.7549
-     ]
-    ],
-    "cost": 12.892199999999997,
-    "dayCost": null,
-    "endedMs": 1787757809493,
-    "id": "74de8491-0625-4c21-a2b8-62429db9bb58",
-    "project": "/Users/dana/work",
-    "startedMs": 1787755337272,
-    "tokens": 859813.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "northwind-api",
-      10.6347
-     ],
-     [
-      "(unsorted)",
-      0.3989
-     ]
-    ],
-    "cost": 11.0336,
-    "dayCost": null,
-    "endedMs": 1788886972276,
-    "id": "734897d2-8241-42c5-99ef-01c28f193c7b",
-    "project": "/Users/dana/work",
-    "startedMs": 1788882999686,
-    "tokens": 1341553.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "northwind-api",
-      9.4142
-     ],
-     [
-      "(unsorted)",
-      1.585
-     ]
-    ],
-    "cost": 10.999200000000002,
-    "dayCost": null,
-    "endedMs": 1787754569308,
-    "id": "f20c6ebc-6733-4ff7-8a34-d4d83fbb236f",
-    "project": "/Users/dana/work",
-    "startedMs": 1787751349482,
-    "tokens": 756890.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "northwind-api",
-      4.0713
+      11.571000000000002
      ],
      [
       "internal-tools",
-      1.4344
+      3.4339
+     ],
+     [
+      "acme-portal/web",
+      1.7842
      ],
      [
       "(unsorted)",
-      0.1238
+      1.3624
      ]
     ],
-    "cost": 5.6295,
+    "bytes": 8709,
+    "cost": 18.1515,
     "dayCost": null,
-    "endedMs": 1788202680721,
-    "id": "524dee38-051b-4214-b67c-e789f4899690",
+    "endedMs": 1788384157359,
+    "id": "e0cb74cb-8ae3-4f62-87e6-480b7b7a169b",
     "project": "/Users/dana/work",
-    "startedMs": 1788201081164,
-    "tokens": 809417.0,
+    "startedMs": 1788377762042,
+    "tokens": 1731659.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      9.0202
+     ],
+     [
+      "internal-tools",
+      3.8587
+     ],
+     [
+      "(unsorted)",
+      2.9839
+     ],
+     [
+      "blog",
+      1.4698
+     ]
+    ],
+    "bytes": 11445,
+    "cost": 17.3326,
+    "dayCost": null,
+    "endedMs": 1789159864446,
+    "id": "6387158d-3804-4ca2-8765-ef99d1dc23e6",
+    "project": "/Users/dana/work",
+    "startedMs": 1789152764789,
+    "tokens": 2777735.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      14.7528
+     ],
+     [
+      "acme-portal/web",
+      0.9127
+     ],
+     [
+      "(unsorted)",
+      0.0931
+     ]
+    ],
+    "bytes": 6405,
+    "cost": 15.758600000000001,
+    "dayCost": null,
+    "endedMs": 1790007455105,
+    "id": "2c19ea27-e208-4126-adbf-8f1b83d884d7",
+    "project": "/Users/dana/work",
+    "startedMs": 1790003921128,
+    "tokens": 1405350.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      14.987799999999998
+     ],
+     [
+      "(unsorted)",
+      0.5188
+     ]
+    ],
+    "bytes": 6774,
+    "cost": 15.5066,
+    "dayCost": null,
+    "endedMs": 1788814686480,
+    "id": "cd73af6e-01fa-4579-8596-c2b889271184",
+    "project": "/Users/dana/work",
+    "startedMs": 1788809922236,
+    "tokens": 1105507.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      12.917
+     ],
+     [
+      "(unsorted)",
+      0.6143
+     ],
+     [
+      "acme-portal/web",
+      0.509
+     ]
+    ],
+    "bytes": 11961,
+    "cost": 14.040299999999998,
+    "dayCost": null,
+    "endedMs": 1788368778694,
+    "id": "aa013838-415d-4f20-b888-62b2f6c5d6a3",
+    "project": "/Users/dana/work",
+    "startedMs": 1788361044054,
+    "tokens": 2490345.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      8.7065
+     ],
+     [
+      "(unsorted)",
+      2.027
+     ],
+     [
+      "blog",
+      0.7513000000000001
+     ]
+    ],
+    "bytes": 5471,
+    "cost": 11.484799999999998,
+    "dayCost": null,
+    "endedMs": 1788272322623,
+    "id": "5ab8ab75-e449-4cf0-8fe9-b22bce24da6e",
+    "project": "/Users/dana/work",
+    "startedMs": 1788268458810,
+    "tokens": 1145884.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/web",
+      5.884099999999999
+     ],
+     [
+      "northwind-api",
+      3.1427
+     ],
+     [
+      "(unsorted)",
+      0.7476
+     ]
+    ],
+    "bytes": 5028,
+    "cost": 9.7744,
+    "dayCost": null,
+    "endedMs": 1788560651393,
+    "id": "418017a0-1a38-4911-b887-98b7ff3187d2",
+    "project": "/Users/dana/work",
+    "startedMs": 1788557729653,
+    "tokens": 1062626.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/web",
+      5.861800000000001
+     ],
+     [
+      "northwind-api",
+      0.7305
+     ],
+     [
+      "(unsorted)",
+      0.3084
+     ]
+    ],
+    "bytes": 4110,
+    "cost": 6.9007000000000005,
+    "dayCost": null,
+    "endedMs": 1789573794357,
+    "id": "a62a8275-ac8e-4c79-8ddc-13628ab6673d",
+    "project": "/Users/dana/work",
+    "startedMs": 1789571598449,
+    "tokens": 713763.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      4.6899999999999995
+     ],
+     [
+      "internal-tools",
+      0.7551
+     ],
+     [
+      "(unsorted)",
+      0.0831
+     ]
+    ],
+    "bytes": 2740,
+    "cost": 5.5282,
+    "dayCost": null,
+    "endedMs": 1788194619052,
+    "id": "c3adcbc4-6ebb-4e06-babe-a1258bb2198f",
+    "project": "/Users/dana/work",
+    "startedMs": 1788192684627,
+    "tokens": 539784.0,
     "topModel": "claude-opus-5"
    },
    {
@@ -1279,12 +1487,13 @@
       0.0671
      ]
     ],
+    "bytes": 2752,
     "cost": 4.008800000000001,
     "dayCost": null,
-    "endedMs": 1789152185182,
-    "id": "7b257568-b485-4bba-80b8-0e24bde86051",
+    "endedMs": 1789497801182,
+    "id": "8a9b50a4-b71d-4ad0-9ae8-17b0edc210f5",
     "project": "/Users/dana/work",
-    "startedMs": 1789150740314,
+    "startedMs": 1789496356314,
     "tokens": 681034.0,
     "topModel": "claude-opus-5"
    }
@@ -1294,40 +1503,71 @@
     "areas": [
      [
       "northwind-api",
-      90.79560000000001
+      85.8059
      ],
      [
       "(unsorted)",
-      3.2766
+      1.0399
      ]
     ],
-    "cost": 94.07220000000001,
+    "bytes": 18681,
+    "cost": 86.84580000000003,
     "dayCost": null,
-    "endedMs": 1790010513452,
-    "id": "8f041582-2a53-45e0-a2a6-4e17640f3f9e",
+    "endedMs": 1790164626478,
+    "id": "77fb9acf-f7e9-4c57-b176-d9138d67c024",
     "project": "/Users/dana/work",
-    "startedMs": 1788416097611,
-    "tokens": 16550700.0,
+    "startedMs": 1788591755151,
+    "tokens": 15780900.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
+      "northwind-api",
+      29.42129999999999
+     ],
+     [
       "acme-portal/web",
-      43.8682
+      18.330399999999997
      ],
      [
       "(unsorted)",
-      1.2476
+      0.3806
      ]
     ],
-    "cost": 45.1158,
+    "bytes": 18332,
+    "cost": 48.132299999999994,
     "dayCost": null,
-    "endedMs": 1787690984350,
-    "id": "14eff410-040f-43ed-9517-7f5c6f2fe280",
+    "endedMs": 1789413121003,
+    "id": "4503930e-672c-499f-a778-921de28d059a",
     "project": "/Users/dana/work",
-    "startedMs": 1787679351115,
-    "tokens": 4133780.0,
+    "startedMs": 1789400128704,
+    "tokens": 3703806.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      35.98649999999999
+     ],
+     [
+      "acme-portal/web",
+      4.6331999999999995
+     ],
+     [
+      "(unsorted)",
+      1.3283
+     ]
+    ],
+    "bytes": 18285,
+    "cost": 41.94800000000001,
+    "dayCost": null,
+    "endedMs": 1790199840951,
+    "id": "f24dd66c-2ac6-4a81-89aa-47506ff1a800",
+    "project": "/Users/dana/work",
+    "startedMs": 1790187984915,
+    "tokens": 3543999.0,
     "topModel": "claude-opus-5"
    },
    {
@@ -1353,153 +1593,147 @@
       0.9625
      ]
     ],
+    "bytes": 18214,
     "cost": 40.2442,
     "dayCost": null,
-    "endedMs": 1789153505282,
-    "id": "c5011887-3795-4a52-b8c0-518334369786",
+    "endedMs": 1789499121282,
+    "id": "059a45cc-f204-470b-90c0-384f358ad296",
     "project": "/Users/dana/work",
-    "startedMs": 1789142335591,
+    "startedMs": 1789487951591,
     "tokens": 3333508.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
-      "acme-portal/api",
-      27.836
-     ],
-     [
-      "internal-tools",
-      10.678299999999998
+      "acme-portal/web",
+      26.300999999999995
      ],
      [
       "(unsorted)",
-      1.0889
+      13.143
      ]
     ],
-    "cost": 39.60320000000001,
+    "bytes": 14974,
+    "cost": 39.443999999999996,
     "dayCost": null,
-    "endedMs": 1787608091452,
-    "id": "5b70c436-586c-43e3-8b6f-5d9514ef92fc",
+    "endedMs": 1789935821273,
+    "id": "41b613d7-8ac9-446e-95c6-30a51682bd3f",
     "project": "/Users/dana/work",
-    "startedMs": 1787595136853,
-    "tokens": 3760188.0,
+    "startedMs": 1789926851157,
+    "tokens": 3353984.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
+      "acme-portal/api",
+      17.136499999999998
+     ],
+     [
       "northwind-api",
-      37.3389
+      12.3001
+     ],
+     [
+      "acme-portal/web",
+      8.276499999999999
      ],
      [
       "(unsorted)",
-      0.0725
+      0.6179
      ]
     ],
-    "cost": 37.4114,
+    "bytes": 16983,
+    "cost": 38.331,
     "dayCost": null,
-    "endedMs": 1788198353061,
-    "id": "4bfcdebb-e9fd-4196-9072-ad2fde7e211b",
+    "endedMs": 1788899566204,
+    "id": "439e06a3-da99-4298-90a0-18094348a5f3",
     "project": "/Users/dana/work",
-    "startedMs": 1788188749828,
-    "tokens": 3194753.0,
+    "startedMs": 1788888991551,
+    "tokens": 3916315.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
-      "northwind-api",
-      25.392000000000003
+      "acme-portal/api",
+      19.6119
      ],
      [
-      "acme-portal/api",
-      10.2395
+      "acme-portal/web",
+      15.8592
      ],
      [
       "(unsorted)",
-      0.7217
+      0.5507
+     ],
+     [
+      "northwind-api",
+      0.4906
      ]
     ],
-    "cost": 36.35320000000001,
+    "bytes": 13758,
+    "cost": 36.5124,
     "dayCost": null,
-    "endedMs": 1789583323868,
-    "id": "1d2bf588-74be-409a-8a95-bce97b8ba0c3",
+    "endedMs": 1787789244756,
+    "id": "9b25865d-713d-4390-8e61-2cd408c07d37",
     "project": "/Users/dana/work",
-    "startedMs": 1789573735288,
-    "tokens": 3668912.0,
+    "startedMs": 1787781044001,
+    "tokens": 3238217.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "acme-portal/web",
-      28.148399999999995
+      20.375100000000003
      ],
      [
       "internal-tools",
-      6.04
+      13.506099999999996
      ],
      [
       "(unsorted)",
-      0.2763
+      2.5726
      ]
     ],
-    "cost": 34.4647,
+    "bytes": 18375,
+    "cost": 36.4538,
     "dayCost": null,
-    "endedMs": 1789582938271,
-    "id": "3c3cce02-3606-4677-9012-51193d9ce1d8",
+    "endedMs": 1787682477298,
+    "id": "9f1bac95-d0b4-4851-a1f0-2da772576d29",
     "project": "/Users/dana/work",
-    "startedMs": 1789573964374,
-    "tokens": 3221220.0,
+    "startedMs": 1787669498807,
+    "tokens": 3724490.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "acme-portal/web",
-      17.9339
-     ],
-     [
-      "acme-portal/api",
-      9.9392
+      19.353499999999997
      ],
      [
       "northwind-api",
-      5.5022
+      15.0386
      ],
      [
       "(unsorted)",
-      0.5129
-     ]
-    ],
-    "cost": 33.888200000000005,
-    "dayCost": null,
-    "endedMs": 1788218322460,
-    "id": "7a97499f-d3ed-43a8-9456-55aa279f0e55",
-    "project": "/Users/dana/work",
-    "startedMs": 1788206581502,
-    "tokens": 3748286.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/api",
-      32.031600000000005
+      0.564
      ],
      [
-      "(unsorted)",
-      1.4221
+      "blog",
+      0.1103
      ]
     ],
-    "cost": 33.453700000000005,
+    "bytes": 16024,
+    "cost": 35.0664,
     "dayCost": null,
-    "endedMs": 1787872184509,
-    "id": "ca902b8d-ed8c-4946-8626-68555c31b6a1",
+    "endedMs": 1788203435022,
+    "id": "48406bf4-fbdf-4fe3-9808-d325abcffdb1",
     "project": "/Users/dana/work",
-    "startedMs": 1787861963630,
-    "tokens": 3380842.0,
+    "startedMs": 1788192526845,
+    "tokens": 3406419.0,
     "topModel": "claude-opus-5"
    },
    {
@@ -1517,273 +1751,89 @@
       2.7884
      ]
     ],
+    "bytes": 12331,
     "cost": 33.201699999999995,
     "dayCost": null,
-    "endedMs": 1789079524914,
-    "id": "95d57a76-d325-496d-9a51-7b01866ee030",
+    "endedMs": 1789425140914,
+    "id": "0e2eb196-527f-4e7c-b596-bf0dfe601f53",
     "project": "/Users/dana/work",
-    "startedMs": 1789071701131,
+    "startedMs": 1789417317131,
     "tokens": 2847218.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
+      "northwind-api",
+      19.6886
+     ],
+     [
       "acme-portal/web",
-      32.37799999999999
+      8.321900000000001
      ],
      [
       "(unsorted)",
-      0.5923
+      2.036
      ]
     ],
-    "cost": 32.9703,
+    "bytes": 13267,
+    "cost": 30.046500000000005,
     "dayCost": null,
-    "endedMs": 1788539488634,
-    "id": "f930ac1a-c511-4a12-9b7c-14dd8da558a3",
+    "endedMs": 1788567188181,
+    "id": "aca60838-09e9-4bab-a855-baaa2659c4e5",
     "project": "/Users/dana/work",
-    "startedMs": 1788530148269,
-    "tokens": 3563667.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      32.0614
-     ],
-     [
-      "(unsorted)",
-      0.081
-     ]
-    ],
-    "cost": 32.1424,
-    "dayCost": null,
-    "endedMs": 1789673102302,
-    "id": "bf68730a-5ed3-4701-8271-c5e44a76a3d3",
-    "project": "/Users/dana/work",
-    "startedMs": 1789665023562,
-    "tokens": 2518020.0,
+    "startedMs": 1788558663782,
+    "tokens": 3175332.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "internal-tools",
-      15.88
-     ],
-     [
-      "northwind-api",
-      13.0987
+      29.890100000000004
      ],
      [
       "(unsorted)",
-      2.4501
+      0.1483
      ]
     ],
-    "cost": 31.4288,
+    "bytes": 10517,
+    "cost": 30.038400000000006,
     "dayCost": null,
-    "endedMs": 1787870576885,
-    "id": "c9a60faa-f8e2-4bd6-b8e8-162f8322bb89",
+    "endedMs": 1789058227028,
+    "id": "aa4549a3-14e4-4e53-9c48-01ffa79efa46",
     "project": "/Users/dana/work",
-    "startedMs": 1787859716378,
-    "tokens": 3138189.0,
+    "startedMs": 1789052284929,
+    "tokens": 1932980.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "acme-portal/web",
-      21.3969
-     ],
-     [
-      "internal-tools",
-      8.576099999999999
-     ],
-     [
-      "(unsorted)",
-      0.901
+      14.4436
      ],
      [
       "northwind-api",
-      0.1906
-     ]
-    ],
-    "cost": 31.0646,
-    "dayCost": null,
-    "endedMs": 1788974707388,
-    "id": "14f0e11e-7675-4edf-aeb0-e2c31d1b3461",
-    "project": "/Users/dana/work",
-    "startedMs": 1788964494323,
-    "tokens": 3303237.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      29.8073
-     ],
-     [
-      "(unsorted)",
-      0.5081
-     ]
-    ],
-    "cost": 30.315399999999997,
-    "dayCost": null,
-    "endedMs": 1788555565542,
-    "id": "39ad6427-7871-417c-9482-0a6376969003",
-    "project": "/Users/dana/work",
-    "startedMs": 1788548270712,
-    "tokens": 2408369.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      12.2951
-     ],
-     [
-      "northwind-api",
-      9.737
+      11.6977
      ],
      [
       "acme-portal/api",
-      6.872599999999999
+      1.7229
      ],
      [
       "(unsorted)",
-      0.6275
+      1.374
      ]
     ],
-    "cost": 29.5322,
+    "bytes": 11944,
+    "cost": 29.2382,
     "dayCost": null,
-    "endedMs": 1789669040633,
-    "id": "65c1a733-52df-42cd-875c-e395e99bb192",
+    "endedMs": 1788810721417,
+    "id": "19cdc7a1-7f65-4c42-9692-c59603cc58d3",
     "project": "/Users/dana/work",
-    "startedMs": 1789658924826,
-    "tokens": 3542291.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      27.3534
-     ],
-     [
-      "(unsorted)",
-      2.1205
-     ]
-    ],
-    "cost": 29.473899999999997,
-    "dayCost": null,
-    "endedMs": 1788987536130,
-    "id": "2f6012bf-5d52-4937-8951-d3bcfef82473",
-    "project": "/Users/dana/work",
-    "startedMs": 1788978438286,
-    "tokens": 2887845.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "northwind-api",
-      26.980499999999996
-     ],
-     [
-      "(unsorted)",
-      2.413
-     ]
-    ],
-    "cost": 29.3935,
-    "dayCost": null,
-    "endedMs": 1789749366702,
-    "id": "d58aa6da-1951-4e87-9da2-2af4c90576e1",
-    "project": "/Users/dana/work",
-    "startedMs": 1789740692769,
-    "tokens": 2670610.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "northwind-api",
-      15.9161
-     ],
-     [
-      "acme-portal/web",
-      11.3524
-     ],
-     [
-      "(unsorted)",
-      1.8499
-     ]
-    ],
-    "cost": 29.118399999999998,
-    "dayCost": null,
-    "endedMs": 1789853463660,
-    "id": "fd4b0b58-fbbc-4db7-b893-5a793c00f1c7",
-    "project": "/Users/dana/work",
-    "startedMs": 1789846174566,
-    "tokens": 2026239.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      23.1016
-     ],
-     [
-      "northwind-api",
-      3.1726
-     ],
-     [
-      "(unsorted)",
-      1.4827
-     ],
-     [
-      "acme-portal/api",
-      1.1501
-     ],
-     [
-      "blog",
-      0.1103
-     ]
-    ],
-    "cost": 29.0173,
-    "dayCost": null,
-    "endedMs": 1787789506849,
-    "id": "7490dd34-bed7-4833-9fe3-0c5e0b674b49",
-    "project": "/Users/dana/work",
-    "startedMs": 1787780443538,
-    "tokens": 2684925.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      26.047199999999993
-     ],
-     [
-      "internal-tools",
-      2.6985
-     ],
-     [
-      "(unsorted)",
-      0.0944
-     ]
-    ],
-    "cost": 28.840099999999996,
-    "dayCost": null,
-    "endedMs": 1789069641093,
-    "id": "06776e38-34dc-44c6-a664-b48e3585e4e6",
-    "project": "/Users/dana/work",
-    "startedMs": 1789062010276,
-    "tokens": 2527522.0,
+    "startedMs": 1788803728464,
+    "tokens": 2258050.0,
     "topModel": "claude-opus-5"
    },
    {
@@ -1801,13 +1851,68 @@
       0.0173
      ]
     ],
-    "cost": 28.6667,
+    "bytes": 13737,
+    "cost": 28.666700000000002,
     "dayCost": null,
-    "endedMs": 1789171262870,
-    "id": "f5862f39-ab2f-40aa-a247-8ac944d7dd82",
+    "endedMs": 1789516878870,
+    "id": "ad29091f-cb0c-4f37-a726-13f8b279b8c2",
     "project": "/Users/dana/work",
-    "startedMs": 1789162432025,
+    "startedMs": 1789508048025,
     "tokens": 2171222.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      20.4749
+     ],
+     [
+      "acme-portal/web",
+      7.641299999999999
+     ],
+     [
+      "(unsorted)",
+      0.1765
+     ]
+    ],
+    "bytes": 15112,
+    "cost": 28.2927,
+    "dayCost": null,
+    "endedMs": 1788805294825,
+    "id": "26fa4e30-3011-450f-bb7c-d8e8abd60a05",
+    "project": "/Users/dana/work",
+    "startedMs": 1788795467340,
+    "tokens": 3104250.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "internal-tools",
+      12.8203
+     ],
+     [
+      "northwind-api",
+      8.3964
+     ],
+     [
+      "acme-portal/web",
+      6.8719
+     ],
+     [
+      "(unsorted)",
+      0.201
+     ]
+    ],
+    "bytes": 14657,
+    "cost": 28.2896,
+    "dayCost": null,
+    "endedMs": 1790019415558,
+    "id": "65bd377d-fd4c-47f2-86b7-7a67d09904a0",
+    "project": "/Users/dana/work",
+    "startedMs": 1790010851684,
+    "tokens": 3401030.0,
     "topModel": "claude-opus-5"
    },
    {
@@ -1817,161 +1922,102 @@
       28.282299999999996
      ]
     ],
+    "bytes": 12863,
     "cost": 28.2823,
     "dayCost": null,
-    "endedMs": 1789073744558,
-    "id": "bee3cae5-8afc-49f3-8c7c-b0d943548eac",
+    "endedMs": 1789419360558,
+    "id": "266b2a13-8528-4b15-93a6-ec1b37a989dc",
     "project": "/Users/dana/work",
-    "startedMs": 1789065829556,
+    "startedMs": 1789411445556,
     "tokens": 2600817.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
-      "acme-portal/api",
-      25.2671
-     ],
-     [
-      "(unsorted)",
-      2.3229
-     ]
-    ],
-    "cost": 27.59,
-    "dayCost": null,
-    "endedMs": 1789401288003,
-    "id": "4d77b631-efa6-4f61-a4eb-b0b116405e6d",
-    "project": "/Users/dana/work",
-    "startedMs": 1789394020229,
-    "tokens": 2034822.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "internal-tools",
-      15.2842
-     ],
-     [
-      "acme-portal/api",
-      7.960800000000001
-     ],
-     [
       "acme-portal/web",
-      3.8269
+      27.818399999999993
      ],
      [
       "(unsorted)",
-      0.1389
-     ]
-    ],
-    "cost": 27.2108,
-    "dayCost": null,
-    "endedMs": 1787846970871,
-    "id": "02184af6-25d7-40b7-88e9-2ee4309898a3",
-    "project": "/Users/dana/work",
-    "startedMs": 1787838470228,
-    "tokens": 2663719.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
+      0.3814
+     ],
      [
       "internal-tools",
-      24.619099999999996
-     ],
-     [
-      "(unsorted)",
-      2.5197
+      0.0585
      ]
     ],
-    "cost": 27.138799999999996,
+    "bytes": 16824,
+    "cost": 28.2583,
     "dayCost": null,
-    "endedMs": 1788900877575,
-    "id": "ad7097e5-63e5-4c08-a7c5-9537109effea",
+    "endedMs": 1788205970890,
+    "id": "2ba8385a-96b8-4e67-98f9-0c6a96341f52",
     "project": "/Users/dana/work",
-    "startedMs": 1788895203439,
-    "tokens": 1980479.0,
+    "startedMs": 1788195648651,
+    "tokens": 3526976.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "acme-portal/web",
-      11.2144
-     ],
-     [
-      "internal-tools",
-      11.0667
-     ],
-     [
-      "acme-portal/api",
-      3.8
+      26.139700000000005
      ],
      [
       "(unsorted)",
-      0.5509
+      1.9437
      ]
     ],
-    "cost": 26.632,
+    "bytes": 16091,
+    "cost": 28.083399999999997,
     "dayCost": null,
-    "endedMs": 1789502993086,
-    "id": "f513d011-ee4a-4c65-9da5-f898a23f45b4",
+    "endedMs": 1789156749227,
+    "id": "1be5b27c-a9e1-4d17-b6b3-b7776430c0f4",
     "project": "/Users/dana/work",
-    "startedMs": 1789495851491,
-    "tokens": 2575088.0,
+    "startedMs": 1789145737609,
+    "tokens": 3396143.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
-      "acme-portal/web",
-      13.789100000000005
-     ],
-     [
-      "northwind-api",
-      8.8051
+      "acme-portal/api",
+      26.414700000000003
      ],
      [
       "(unsorted)",
-      3.951
+      0.6012
      ]
     ],
-    "cost": 26.545199999999994,
+    "bytes": 12400,
+    "cost": 27.0159,
     "dayCost": null,
-    "endedMs": 1787859364754,
-    "id": "90441a4e-4f1d-482f-b0d3-30b0a39ee509",
+    "endedMs": 1790032968244,
+    "id": "eed50d40-1d56-41ad-aa76-650e88b08901",
     "project": "/Users/dana/work",
-    "startedMs": 1787853070519,
-    "tokens": 2389197.0,
+    "startedMs": 1790025320311,
+    "tokens": 2337621.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
-      "internal-tools",
-      12.9537
-     ],
-     [
-      "northwind-api",
-      7.1403
-     ],
-     [
       "acme-portal/api",
-      5.4411
+      24.8285
      ],
      [
       "(unsorted)",
-      0.8271
+      2.1828
      ]
     ],
-    "cost": 26.3622,
+    "bytes": 10535,
+    "cost": 27.011300000000002,
     "dayCost": null,
-    "endedMs": 1789681534457,
-    "id": "330d9987-0ce1-48e0-af35-de98606c0699",
+    "endedMs": 1789659325834,
+    "id": "537b36f3-1499-41a5-894b-6dd33a722650",
     "project": "/Users/dana/work",
-    "startedMs": 1789672861302,
-    "tokens": 3532723.0,
+    "startedMs": 1789653318959,
+    "tokens": 2052455.0,
     "topModel": "claude-opus-5"
    },
    {
@@ -1985,177 +2031,143 @@
       0.6124
      ]
     ],
+    "bytes": 14220,
     "cost": 26.2147,
     "dayCost": null,
-    "endedMs": 1789166764592,
-    "id": "db81ea73-4a19-43a8-a019-e04b2646950d",
+    "endedMs": 1789512380592,
+    "id": "1c92ceeb-d343-4ee5-80fa-c65c2147269c",
     "project": "/Users/dana/work",
-    "startedMs": 1789157542846,
+    "startedMs": 1789503158846,
     "tokens": 3368732.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
+      "acme-portal/api",
+      16.839400000000005
+     ],
+     [
+      "northwind-api",
+      5.0248
+     ],
+     [
+      "(unsorted)",
+      3.0159
+     ]
+    ],
+    "bytes": 11914,
+    "cost": 24.880100000000002,
+    "dayCost": null,
+    "endedMs": 1790189793153,
+    "id": "4f6c5627-1637-4729-b953-5cce02f9b95c",
+    "project": "/Users/dana/work",
+    "startedMs": 1790182686143,
+    "tokens": 2302176.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
       "acme-portal/web",
-      19.9972
+      19.6003
+     ],
+     [
+      "(unsorted)",
+      5.2283
+     ]
+    ],
+    "bytes": 13246,
+    "cost": 24.8286,
+    "dayCost": null,
+    "endedMs": 1789142987286,
+    "id": "35cc779c-c6a5-4532-b3ac-ab68b2d6e113",
+    "project": "/Users/dana/work",
+    "startedMs": 1789134950561,
+    "tokens": 2885650.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/web",
+      11.1309
+     ],
+     [
+      "northwind-api",
+      5.8952
      ],
      [
       "acme-portal/api",
-      5.0387
+      3.8
      ],
      [
       "(unsorted)",
-      0.9885
+      2.9955
      ]
     ],
-    "cost": 26.0244,
+    "bytes": 8239,
+    "cost": 23.8216,
     "dayCost": null,
-    "endedMs": 1787678335931,
-    "id": "4104c339-7a90-4b59-8237-3a370f8e184e",
+    "endedMs": 1789763737098,
+    "id": "ee093d15-8dbd-4f87-a06d-a24319ed5c0f",
     "project": "/Users/dana/work",
-    "startedMs": 1787670773299,
-    "tokens": 2099404.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "northwind-api",
-      24.553500000000003
-     ],
-     [
-      "internal-tools",
-      0.5147
-     ],
-     [
-      "(unsorted)",
-      0.0681
-     ]
-    ],
-    "cost": 25.1363,
-    "dayCost": null,
-    "endedMs": 1789493993292,
-    "id": "07ee8ad8-f05c-468b-a3c2-10e6d3cc035f",
-    "project": "/Users/dana/work",
-    "startedMs": 1789488282657,
-    "tokens": 1738989.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "(unsorted)",
-      17.164200000000005
-     ],
-     [
-      "northwind-api",
-      7.958899999999999
-     ]
-    ],
-    "cost": 25.1231,
-    "dayCost": null,
-    "endedMs": 1789669247342,
-    "id": "daba4cac-0fa5-44a6-9560-82d8bc7c5334",
-    "project": "/Users/dana/work",
-    "startedMs": 1789661471899,
-    "tokens": 2852002.0,
+    "startedMs": 1789757799283,
+    "tokens": 1763791.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "acme-portal/web",
-      21.978
+      21.2278
      ],
      [
       "(unsorted)",
-      0.4625
+      1.9932
      ],
      [
       "northwind-api",
       0.451
      ]
     ],
-    "cost": 22.8915,
+    "bytes": 11480,
+    "cost": 23.672000000000004,
     "dayCost": null,
-    "endedMs": 1788456619712,
-    "id": "4f3aecc9-4f5b-4a7f-8854-86350a54c85a",
+    "endedMs": 1788901931833,
+    "id": "f5658250-d1b7-48a9-86a2-3d2832aca8d4",
     "project": "/Users/dana/work",
-    "startedMs": 1788448245871,
-    "tokens": 2851700.0,
+    "startedMs": 1788894388961,
+    "tokens": 2673925.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
+     [
+      "northwind-api",
+      13.9263
+     ],
+     [
+      "acme-portal/web",
+      4.7094000000000005
+     ],
      [
       "internal-tools",
-      19.189199999999996
-     ],
-     [
-      "acme-portal/web",
-      3.2828999999999997
+      2.317
      ],
      [
       "(unsorted)",
-      0.3072
-     ],
-     [
-      "northwind-api",
-      0.0159
+      0.696
      ]
     ],
-    "cost": 22.7952,
+    "bytes": 10993,
+    "cost": 21.6487,
     "dayCost": null,
-    "endedMs": 1788560363253,
-    "id": "40445a3c-10ea-43bc-8909-7decb5fb5b3c",
+    "endedMs": 1789061251465,
+    "id": "09873631-4296-4b70-8529-8d4c51e4bd0f",
     "project": "/Users/dana/work",
-    "startedMs": 1788552460786,
-    "tokens": 2525880.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      16.6145
-     ],
-     [
-      "northwind-api",
-      4.9186000000000005
-     ],
-     [
-      "(unsorted)",
-      0.1563
-     ]
-    ],
-    "cost": 21.6894,
-    "dayCost": null,
-    "endedMs": 1787955935602,
-    "id": "5b85d3ec-798b-4f07-a84b-27c65e970fab",
-    "project": "/Users/dana/work",
-    "startedMs": 1787948625688,
-    "tokens": 2703057.0,
-    "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      18.894600000000004
-     ],
-     [
-      "(unsorted)",
-      2.6729
-     ]
-    ],
-    "cost": 21.567500000000003,
-    "dayCost": null,
-    "endedMs": 1787688484273,
-    "id": "c159ec73-bda1-4398-9e6a-e33d99f5f092",
-    "project": "/Users/dana/work",
-    "startedMs": 1787681211381,
-    "tokens": 2669122.0,
+    "startedMs": 1789054225359,
+    "tokens": 2362213.0,
     "topModel": "claude-opus-5"
    },
    {
@@ -2173,174 +2185,642 @@
       0.2069
      ]
     ],
+    "bytes": 10083,
     "cost": 20.200599999999994,
     "dayCost": null,
-    "endedMs": 1789084104174,
-    "id": "46196b9d-9051-45d9-b62a-25f098c5bb0c",
+    "endedMs": 1789429720174,
+    "id": "114460eb-bb78-4f21-91d0-e063fe432d1d",
     "project": "/Users/dana/work",
-    "startedMs": 1789077794939,
+    "startedMs": 1789423410939,
     "tokens": 1886938.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
+      "internal-tools",
+      11.075
+     ],
+     [
       "acme-portal/web",
-      19.162999999999997
+      8.0711
      ],
      [
       "(unsorted)",
-      0.6333
+      0.8871
      ]
     ],
-    "cost": 19.7963,
+    "bytes": 9641,
+    "cost": 20.0332,
     "dayCost": null,
-    "endedMs": 1788985519686,
-    "id": "ec35d582-2194-487c-8a2d-07760c8fe897",
+    "endedMs": 1787956985374,
+    "id": "8b9208aa-5e99-4ef2-910d-eb3be9521257",
     "project": "/Users/dana/work",
-    "startedMs": 1788980390142,
-    "tokens": 1516228.0,
+    "startedMs": 1787950833804,
+    "tokens": 1945972.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/api",
+      9.9047
+     ],
+     [
+      "blog",
+      5.5349
+     ],
+     [
+      "northwind-api",
+      2.6443
+     ],
+     [
+      "(unsorted)",
+      1.1059
+     ],
+     [
+      "acme-portal/web",
+      0.4516
+     ]
+    ],
+    "bytes": 9570,
+    "cost": 19.6414,
+    "dayCost": null,
+    "endedMs": 1787846876763,
+    "id": "f59957e8-6b7f-4f57-907a-b171e761d3dd",
+    "project": "/Users/dana/work",
+    "startedMs": 1787840396110,
+    "tokens": 2076934.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/api",
+      16.867900000000006
+     ],
+     [
+      "(unsorted)",
+      1.8871
+     ]
+    ],
+    "bytes": 9648,
+    "cost": 18.755,
+    "dayCost": null,
+    "endedMs": 1788973715039,
+    "id": "eed156b1-efcf-4ed7-bf06-496eae6a285b",
+    "project": "/Users/dana/work",
+    "startedMs": 1788968765318,
+    "tokens": 1993950.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/web",
+      11.8338
+     ],
+     [
+      "acme-portal/api",
+      5.7705
+     ],
+     [
+      "(unsorted)",
+      0.5174
+     ],
+     [
+      "northwind-api",
+      0.352
+     ]
+    ],
+    "bytes": 10562,
+    "cost": 18.4737,
+    "dayCost": null,
+    "endedMs": 1788969712858,
+    "id": "cf68b156-8ca2-4a65-82e6-150f8b3c7a0c",
+    "project": "/Users/dana/work",
+    "startedMs": 1788963371329,
+    "tokens": 2128249.0,
     "topModel": "claude-opus-5"
    },
    {
     "areas": [
      [
       "northwind-api",
-      17.6014
+      11.571000000000002
      ],
      [
-      "acme-portal/api",
-      1.7184
+      "internal-tools",
+      3.4339
+     ],
+     [
+      "acme-portal/web",
+      1.7842
      ],
      [
       "(unsorted)",
-      0.2496
+      1.3624
      ]
     ],
-    "cost": 19.569399999999998,
+    "bytes": 8709,
+    "cost": 18.1515,
     "dayCost": null,
-    "endedMs": 1788290096710,
-    "id": "9e99e3aa-9e64-4dff-8177-b42d0bd6dc3a",
+    "endedMs": 1788384157359,
+    "id": "e0cb74cb-8ae3-4f62-87e6-480b7b7a169b",
     "project": "/Users/dana/work",
-    "startedMs": 1788283943929,
-    "tokens": 2107649.0,
+    "startedMs": 1788377762042,
+    "tokens": 1731659.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/api",
+      14.900399999999998
+     ],
+     [
+      "(unsorted)",
+      3.035
+     ]
+    ],
+    "bytes": 7801,
+    "cost": 17.935399999999998,
+    "dayCost": null,
+    "endedMs": 1789228590807,
+    "id": "686103e5-9ea3-4fec-a178-86a79d5ca126",
+    "project": "/Users/dana/work",
+    "startedMs": 1789223122513,
+    "tokens": 1573058.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/api",
+      17.5152
+     ],
+     [
+      "(unsorted)",
+      0.1085
+     ]
+    ],
+    "bytes": 8732,
+    "cost": 17.623700000000003,
+    "dayCost": null,
+    "endedMs": 1788296576476,
+    "id": "18c95ca8-81bd-41f1-9c91-585c208e529e",
+    "project": "/Users/dana/work",
+    "startedMs": 1788289934095,
+    "tokens": 1964320.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "blog",
+      17.2972
+     ],
+     [
+      "(unsorted)",
+      0.2711
+     ]
+    ],
+    "bytes": 8069,
+    "cost": 17.5683,
+    "dayCost": null,
+    "endedMs": 1788024047144,
+    "id": "de6d3b0f-d0f1-40ee-8506-16e7b8e4f138",
+    "project": "/Users/dana/work",
+    "startedMs": 1788019447779,
+    "tokens": 1540599.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      9.0202
+     ],
+     [
+      "internal-tools",
+      3.8587
+     ],
+     [
+      "(unsorted)",
+      2.9839
+     ],
+     [
+      "blog",
+      1.4698
+     ]
+    ],
+    "bytes": 11445,
+    "cost": 17.3326,
+    "dayCost": null,
+    "endedMs": 1789159864446,
+    "id": "6387158d-3804-4ca2-8765-ef99d1dc23e6",
+    "project": "/Users/dana/work",
+    "startedMs": 1789152764789,
+    "tokens": 2777735.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "internal-tools",
+      15.2842
+     ],
+     [
+      "(unsorted)",
+      1.7252
+     ]
+    ],
+    "bytes": 8727,
+    "cost": 17.0094,
+    "dayCost": null,
+    "endedMs": 1788292755697,
+    "id": "b72b0b1e-0d64-4991-9124-bc7e8abaef27",
+    "project": "/Users/dana/work",
+    "startedMs": 1788287149121,
+    "tokens": 1728866.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "acme-portal/web",
+      15.7894
+     ],
+     [
+      "(unsorted)",
+      0.0223
+     ]
+    ],
+    "bytes": 8264,
+    "cost": 15.811699999999997,
+    "dayCost": null,
+    "endedMs": 1789657394636,
+    "id": "4934dac4-ffc7-4536-bed2-03e7a10fa14e",
+    "project": "/Users/dana/work",
+    "startedMs": 1789652535560,
+    "tokens": 1677495.0,
+    "topModel": "claude-opus-5"
+   },
+   {
+    "areas": [
+     [
+      "northwind-api",
+      14.7528
+     ],
+     [
+      "acme-portal/web",
+      0.9127
+     ],
+     [
+      "(unsorted)",
+      0.0931
+     ]
+    ],
+    "bytes": 6405,
+    "cost": 15.758600000000001,
+    "dayCost": null,
+    "endedMs": 1790007455105,
+    "id": "2c19ea27-e208-4126-adbf-8f1b83d884d7",
+    "project": "/Users/dana/work",
+    "startedMs": 1790003921128,
+    "tokens": 1405350.0,
     "topModel": "claude-opus-5"
    }
   ]
  },
  "audit": {
   "generatedAt": 1,
-  "passed": 5,
+  "passed": 8,
   "attention": 4,
-  "score": 56,
+  "score": 67,
   "sections": [
    {
     "name": "Setup",
+    "nameKey": "section.setup",
     "checks": [
      {
       "id": "tools",
       "status": "info",
       "title": "2 AI tools found",
-      "detail": "Claude Code, Claude Desktop"
+      "detail": "Claude Code, Claude Desktop",
+      "titleMsg": {
+       "key": "check.tools.info.title",
+       "vars": {},
+       "count": 2
+      },
+      "detailMsg": null
      },
      {
       "id": "mcp",
       "status": "info",
       "title": "6 MCP servers configured",
-      "detail": "context7, github, playwright, postgres, figma, notes"
+      "detail": "context7, github, playwright, postgres, figma, notes",
+      "titleMsg": {
+       "key": "check.mcp.configured.title",
+       "vars": {},
+       "count": 6
+      },
+      "detailMsg": null
      },
      {
       "id": "mcp-unpinned",
       "status": "attention",
       "title": "3 MCP servers run an unpinned package",
-      "detail": "playwright, postgres, notes (Claude Desktop) fetch whatever version is newest each launch, so a bad or hijacked release runs with your tools' access the moment it ships. Pin at least the major version."
+      "detail": "playwright, postgres, notes (Claude Desktop) fetch whatever version is newest each launch, so a bad or hijacked release runs with your tools' access the moment it ships. Pin at least the major version.",
+      "titleMsg": {
+       "key": "finding.mcp-unpinned.title",
+       "vars": {},
+       "count": 3
+      },
+      "detailMsg": {
+       "key": "finding.mcp-unpinned.detail",
+       "vars": {
+        "names": "playwright, postgres, notes (Claude Desktop)"
+       },
+       "count": 3
+      }
      },
      {
       "id": "mcp-env-secrets",
       "status": "attention",
       "title": "2 MCP servers are handed credentials",
-      "detail": "postgres, figma receive environment variables, usually API keys, stored in plain text in your Claude config. Know which servers hold which keys, and scope those keys as narrowly as the vendor allows."
+      "detail": "postgres, figma receive environment variables, usually API keys, stored in plain text in your Claude config. Know which servers hold which keys, and scope those keys as narrowly as the vendor allows.",
+      "titleMsg": {
+       "key": "finding.mcp-env-secrets.title",
+       "vars": {},
+       "count": 2
+      },
+      "detailMsg": {
+       "key": "finding.mcp-env-secrets.detail",
+       "vars": {
+        "names": "postgres, figma"
+       },
+       "count": 2
+      }
      },
      {
       "id": "mcp-remote",
       "status": "consider",
       "title": "1 remote MCP server",
-      "detail": "github runs on someone else's machine: what you send there leaves this computer. Worth checking the trust rating before pointing it at client work."
+      "detail": "github runs on someone else's machine: what you send there leaves this computer. Worth checking the trust rating before pointing it at client work.",
+      "titleMsg": {
+       "key": "finding.mcp-remote.title",
+       "vars": {},
+       "count": 1
+      },
+      "detailMsg": {
+       "key": "finding.mcp-remote.detail",
+       "vars": {
+        "names": "github"
+       },
+       "count": 1
+      }
+     },
+     {
+      "id": "mcp-duplicate-processes",
+      "status": "pass",
+      "title": "No MCP server is running twice",
+      "detail": "Nothing is holding a second copy of the same tool in memory.",
+      "titleMsg": {
+       "key": "check.mcp-duplicate-processes.pass.title",
+       "vars": {},
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.mcp-duplicate-processes.pass.detail",
+       "vars": {},
+       "count": null
+      }
+     },
+     {
+      "id": "mcp-running-unconfigured",
+      "status": "pass",
+      "title": "Everything running is accounted for",
+      "detail": "Every live MCP server is declared in a config this app can read.",
+      "titleMsg": {
+       "key": "check.mcp-running-unconfigured.pass.title",
+       "vars": {},
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.mcp-running-unconfigured.pass.detail",
+       "vars": {},
+       "count": null
+      }
      }
     ]
    },
    {
     "name": "Guardrails",
+    "nameKey": "section.guardrails",
     "checks": [
      {
       "id": "perm-rules",
       "status": "pass",
       "title": "Permission rules are set",
-      "detail": "2 allow, 0 ask, 3 deny."
+      "detail": "2 allow, 0 ask, 3 deny.",
+      "titleMsg": {
+       "key": "check.perm-rules.pass.title",
+       "vars": {},
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.perm-rules.pass.detail",
+       "vars": {
+        "allow": "2",
+        "ask": "0",
+        "deny": "3"
+       },
+       "count": null
+      }
      },
      {
       "id": "perm-deny",
       "status": "pass",
       "title": "3 deny rules in place",
-      "detail": "There is a floor under what an agent may do."
+      "detail": "There is a floor under what an agent may do.",
+      "titleMsg": {
+       "key": "check.perm-deny.pass.title",
+       "vars": {},
+       "count": 3
+      },
+      "detailMsg": {
+       "key": "check.perm-deny.pass.detail",
+       "vars": {},
+       "count": null
+      }
      },
      {
       "id": "hooks-none",
       "status": "pass",
       "title": "Hooks are configured",
-      "detail": "Some rules run automatically instead of relying on the model to remember them."
+      "detail": "Some rules run automatically instead of relying on the model to remember them.",
+      "titleMsg": {
+       "key": "check.hooks-none.pass.title",
+       "vars": {},
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.hooks-none.pass.detail",
+       "vars": {},
+       "count": null
+      }
      },
      {
       "id": "model",
       "status": "info",
       "title": "Default model pinned: claude-sonnet-5",
-      "detail": "Informational: a pinned default keeps sessions predictable."
+      "detail": "Informational: a pinned default keeps sessions predictable.",
+      "titleMsg": {
+       "key": "check.model.pinned.title",
+       "vars": {
+        "model": "claude-sonnet-5"
+       },
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.model.pinned.detail",
+       "vars": {},
+       "count": null
+      }
      }
     ]
    },
    {
     "name": "Usage",
+    "nameKey": "section.usage",
     "checks": [
+     {
+      "id": "pricing-cache-ttl",
+      "status": "pass",
+      "title": "Prices agree with the vendor",
+      "detail": "This app's rate card matches what the vendor recorded for the same tokens.",
+      "titleMsg": {
+       "key": "check.pricing-cache-ttl.pass.title",
+       "vars": {},
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.pricing-cache-ttl.pass.detail",
+       "vars": {},
+       "count": null
+      }
+     },
      {
       "id": "mix-top-heavy",
       "status": "consider",
-      "title": "82% of spend is on the largest models",
-      "detail": "$1136 of $1389 in 30 days went to the top tier. Searching files, reading logs and summarising do as well a tier down; giving those jobs to subagents on a lighter model is the usual way to cut this without touching the hard work."
+      "title": "80% of spend is on the largest models",
+      "detail": "$1063 of $1329 in 30 days went to the top tier. Searching files, reading logs and summarising do as well a tier down; giving those jobs to subagents on a lighter model is the usual way to cut this without touching the hard work.",
+      "titleMsg": {
+       "key": "finding.mix-top-heavy.title",
+       "vars": {
+        "pct": "80"
+       },
+       "count": null
+      },
+      "detailMsg": {
+       "key": "finding.mix-top-heavy.detail",
+       "vars": {
+        "known": "$1329",
+        "top": "$1063"
+       },
+       "count": null
+      }
      },
      {
       "id": "session-long-lived",
       "status": "consider",
       "title": "One session has been open 18 days",
-      "detail": "It cost $94 in the last 30 days. A session re-sends its growing history on every turn, so an old one pays more for each answer and gets slower to steer. Starting fresh for new work, and keeping what matters in project memory, is cheaper."
+      "detail": "It cost $87 in the last 30 days. A session re-sends its growing history on every turn, so an old one pays more for each answer and gets slower to steer. Starting fresh for new work, and keeping what matters in project memory, is cheaper.",
+      "titleMsg": {
+       "key": "finding.session-long-lived.title",
+       "vars": {
+        "days": "18"
+       },
+       "count": null
+      },
+      "detailMsg": {
+       "key": "finding.session-long-lived.detail",
+       "vars": {
+        "cost": "$87"
+       },
+       "count": null
+      }
      },
      {
       "id": "areas-unsorted",
       "status": "pass",
       "title": "Spend is attributable",
-      "detail": "Less than a quarter of spend is without a work area."
+      "detail": "Less than a quarter of spend is without a work area.",
+      "titleMsg": {
+       "key": "check.areas-unsorted.pass.title",
+       "vars": {},
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.areas-unsorted.pass.detail",
+       "vars": {},
+       "count": null
+      }
      },
      {
       "id": "agents-none",
       "status": "pass",
       "title": "Custom agents are in use",
-      "detail": "Specialist agents keep long jobs out of the main context."
+      "detail": "Specialist agents keep long jobs out of the main context.",
+      "titleMsg": {
+       "key": "check.agents-none.pass.title",
+       "vars": {},
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.agents-none.pass.detail",
+       "vars": {},
+       "count": null
+      }
      }
     ]
    },
    {
     "name": "Money",
+    "nameKey": "section.money",
     "checks": [
      {
       "id": "ledger",
       "status": "attention",
       "title": "No subscriptions recorded",
-      "detail": "The app cannot say what the tools cost, when they renew, or whether each plan earns its price until the Subscriptions tab has your numbers."
+      "detail": "The app cannot say what the tools cost, when they renew, or whether each plan earns its price until the Subscriptions tab has your numbers.",
+      "titleMsg": {
+       "key": "check.ledger.none.title",
+       "vars": {},
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.ledger.none.detail",
+       "vars": {},
+       "count": null
+      }
      },
      {
       "id": "clients",
       "status": "attention",
       "title": "Work areas are not mapped to clients",
-      "detail": "4 work areas exist. Mapping them turns spend into a per-client figure you can bill or justify."
+      "detail": "4 work areas exist. Mapping them turns spend into a per-client figure you can bill or justify.",
+      "titleMsg": {
+       "key": "check.clients.attention.title",
+       "vars": {},
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.clients.attention.detail",
+       "vars": {},
+       "count": 4
+      }
      }
     ]
    }
