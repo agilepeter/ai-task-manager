@@ -85,6 +85,11 @@ export type Msg = { key: string; vars: Record<string, string>; count?: number | 
 ///   fr:                ["one", "other"]  (0 and 1 both resolve to "one")
 ///   ru:                ["one", "few", "many"]
 ///   zh, ja, ko:        ["other"]
+/// MUST stay a plain object literal, one row per line, exactly as below --
+/// no `satisfies`, no `as const` rewrite. scripts/i18n.test.mjs and
+/// crates/core/src/i18n.rs both regex-parse this declaration straight out
+/// of this file's source text; a shape their parser doesn't expect breaks
+/// both silently.
 export const PLURAL_FORMS: Record<Locale, readonly string[]> = {
   en: ["one", "other"],
   zh: ["other"],
@@ -159,6 +164,10 @@ export function t(key: string, vars?: Record<string, string | number>, count?: n
   return s;
 }
 
+/// Renders a Msg Rust serialised over the wire. `msg.count ?? undefined`
+/// maps the wire's `null` (Rust's `Option::None`) to "no count" for t(),
+/// while a real count of 0 passes through unchanged -- `??` only catches
+/// null/undefined, never 0.
 export function tm(msg: Msg): string {
   return t(msg.key, msg.vars, msg.count ?? undefined);
 }

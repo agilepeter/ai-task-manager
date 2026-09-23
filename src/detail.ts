@@ -641,9 +641,9 @@ function span(s: SessionSpend): [string, string] {
   const start = new Date(s.startedMs);
   const mins = Math.max(Math.round((s.endedMs - s.startedMs) / 60_000), 1);
   // mins >= 2880 (48h) here, so the day count passed to plural() below is
-  // always >= 2 through this branch -- unreachable-at-zero/one gets a
-  // comment, not a guard (amendment 14). plural() still picks the right
-  // form (ru's few/many, zh's other) for whatever count actually lands here.
+  // always >= 2 through this branch, so no guard for 0/1. plural() still
+  // picks the right form (ru's few/many, zh's other) for whatever count
+  // actually lands here.
   const length =
     mins >= 2880
       ? plural("detail.session.spanDays", Math.round(mins / 1440))
@@ -663,10 +663,9 @@ function lastActive(s: SessionSpend): string {
   const days = Math.floor((Date.now() - s.endedMs) / 86_400_000);
   if (days <= 0) return t("detail.session.activeToday");
   if (days === 1) return t("detail.session.activeYesterday");
-  // days is always >= 2 here (0 and 1 handled above) -- unreachable-at-
-  // zero/one gets a comment, not a guard (amendment 14). plural() still
-  // picks the right form (ru's few/many, zh's other) for whatever count
-  // actually lands here.
+  // days is always >= 2 here (0 and 1 handled above), so no guard for 0/1.
+  // plural() still picks the right form (ru's few/many, zh's other) for
+  // whatever count actually lands here.
   return plural("detail.session.lastActive", days);
 }
 

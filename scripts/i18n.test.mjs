@@ -9,9 +9,11 @@
 // will be guarded by this same file.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
 import { test } from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const localesDir = fileURLToPath(new URL("../src/locales/", import.meta.url));
 const dicts = {};
@@ -50,6 +52,7 @@ for (const key of Object.keys(dicts.en)) {
     if (`${base}.other` in dicts.en) pluralBases.add(base);
   }
 }
+assert.ok(pluralBases.size > 0, "parsed zero plural base keys out of en.json's .one/.other pairs");
 
 // PLURAL_FORMS (locale -> which forms it carries) is parsed out of the real
 // src/i18n.ts rather than re-typed here, so this file and that table cannot
@@ -57,7 +60,11 @@ for (const key of Object.keys(dicts.en)) {
 // (crates/core/src/i18n.rs's plural_forms_match_the_typescript_table) --
 // each reads its own language's source rather than one reading the other's.
 function parsePluralForms(source) {
-  const block = source.match(/PLURAL_FORMS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  // \b...\b, not a bare substring match: an earlier decoy identifier that
+  // merely starts with "PLURAL_FORMS" (e.g. a hypothetical
+  // PLURAL_FORMS_BY_ROOT) would otherwise match first and hand back ITS
+  // object body instead of the real table's -- see the decoy test below.
+  const block = source.match(/\bPLURAL_FORMS\b[^=]*=\s*\{([\s\S]*?)\n\};/);
   assert.ok(block, "could not find a `PLURAL_FORMS = { ... };` block in src/i18n.ts");
   const table = {};
   for (const row of block[1].matchAll(/([\w-]+):\s*\[([^\]]*)\]/g)) {
@@ -65,6 +72,85 @@ function parsePluralForms(source) {
   }
   return table;
 }
+
+test("parsePluralForms is not fooled by an earlier PLURAL_FORMS_BY_ROOT decoy", () => {
+  const decoySource = [
+    "const PLURAL_FORMS_BY_ROOT = {",
+    '  en: ["decoy-should-not-be-parsed"],',
+    "};",
+    "",
+    "export const PLURAL_FORMS: Record<Locale, readonly string[]> = {",
+    '  en: ["one", "other"],',
+    '  ru: ["one", "few", "many"],',
+    "};",
+  ].join("\n");
+  assert.deepEqual(parsePluralForms(decoySource), { en: ["one", "other"], ru: ["one", "few", "many"] });
+});
+
+// Mirrors loadI18nModule in scripts/sub2api-display.test.mjs (same problem:
+// ts.transpileModule doesn't bundle the JSON dictionary imports, so they
+// are inlined as plain object literals before transpiling) rather than
+// inventing a second loader for the same shape of problem.
+async function loadI18nModule() {
+  const source = await readFile(new URL("../src/i18n.ts", import.meta.url), "utf8");
+  const localesDir = new URL("../src/locales/", import.meta.url);
+  const files = (await readdir(localesDir)).filter((f) => f.endsWith(".json"));
+  let inlined = source;
+  for (const file of files) {
+    const name = file.slice(0, -".json".length);
+    const json = await readFile(new URL(file, localesDir), "utf8");
+    inlined = inlined.replace(`import ${name} from "./locales/${file}";`, `const ${name} = ${json};`);
+  }
+  const code = ts.transpileModule(inlined, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+  return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+}
+
+// Same 12 values as crates/core/src/i18n.rs's plural_forms_match_the_typescript_table
+// samples array, kept textually identical by hand so the two lists read as
+// one list split across languages, not two that happen to agree today.
+const PLURAL_FORM_SAMPLES = [0, 1, 2, 3, 5, 11, 12, 21, 22, 25, 100, 101];
+
+// Expected pluralForm() output at each sample above, worked out by hand
+// against the CLDR rule -- not by re-running pluralForm()'s own logic back
+// at itself, which would only prove the function agrees with itself. Covers
+// every locale code pluralForm()'s rule families recognise today, not just
+// the three keyed in PLURAL_FORMS/LOCALES.
+const EXPECTED_PLURAL_FORMS = {
+  en: ["other", "one", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
+  es: ["other", "one", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
+  de: ["other", "one", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
+  "pt-BR": [
+    "other",
+    "one",
+    "other",
+    "other",
+    "other",
+    "other",
+    "other",
+    "other",
+    "other",
+    "other",
+    "other",
+    "other",
+  ],
+  fr: ["one", "one", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
+  zh: ["other", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
+  ja: ["other", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
+  ko: ["other", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
+  ru: ["many", "one", "few", "few", "many", "many", "many", "one", "few", "many", "many", "one"],
+};
+
+test("pluralForm() picks the exact CLDR form, per locale, for every sample", async () => {
+  const { pluralForm } = await loadI18nModule();
+  const mismatches = [];
+  for (const [locale, forms] of Object.entries(EXPECTED_PLURAL_FORMS)) {
+    PLURAL_FORM_SAMPLES.forEach((n, i) => {
+      const got = pluralForm(locale, n);
+      if (got !== forms[i]) mismatches.push(`${locale}(${n}): got "${got}", want "${forms[i]}"`);
+    });
+  }
+  assert.deepEqual(mismatches, [], `pluralForm() mismatches: ${mismatches.join("; ")}`);
+});
 
 const i18nSource = readFileSync(fileURLToPath(new URL("../src/i18n.ts", import.meta.url)), "utf8");
 const PLURAL_FORMS = parsePluralForms(i18nSource);

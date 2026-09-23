@@ -85,9 +85,12 @@ fn lookup(locale: &str, key: &str) -> String {
 }
 
 /// Replaces each `{name}` with its value; a brace with no matching var is
-/// left untouched. Mirrors the split/join substitution in `t()`.
-fn substitute(template: &str, vars: &[(&str, &str)]) -> String {
-    let mut out = template.to_string();
+/// left untouched. Mirrors the split/join substitution in `t()`. Takes
+/// `template` by value: every caller already owns a fresh `String` (from
+/// `lookup()` or `render_core`'s candidate search), so taking `&str` here
+/// would only force a clone this function immediately throws away.
+fn substitute(template: String, vars: &[(&str, &str)]) -> String {
+    let mut out = template;
     for (name, value) in vars {
         out = out.replace(&format!("{{{name}}}"), value);
     }
@@ -114,7 +117,7 @@ pub fn metric_label(cfg: &Value, label: &str) -> String {
         return translated;
     }
     if let Some(model) = label.strip_suffix(" weekly") {
-        return substitute(&lookup(locale, "label.weeklySuffix"), &[("model", model)]);
+        return substitute(lookup(locale, "label.weeklySuffix"), &[("model", model)]);
     }
     label.to_string()
 }
@@ -123,7 +126,7 @@ pub fn pct_left(cfg: &Value, name: &str, label: &str, left: f64) -> String {
     let locale = resolved_locale(cfg);
     let shown = metric_label(cfg, label);
     let left = format!("{left:.0}");
-    substitute(&lookup(locale, "tray.pctLeft"), &[("name", name), ("label", &shown), ("left", &left)])
+    substitute(lookup(locale, "tray.pctLeft"), &[("name", name), ("label", &shown), ("left", &left)])
 }
 
 /// Windows langid → locale via `WINDOWS_LANGIDS`, matched on the primary
@@ -280,7 +283,7 @@ fn render_core(lookup_in: impl Fn(&str, &str) -> Option<String>, locale: &str, m
     if let Some(c) = &count_str {
         pairs.push(("count", c.as_str()));
     }
-    substitute(&template, &pairs)
+    substitute(template, &pairs)
 }
 
 /// `key.<plural_form(locale, count)>` -> `key.other` -> `key`; substitutes
@@ -481,7 +484,12 @@ mod tests {
     /// same one a developer edits -- not a hand-copied fixture that could
     /// silently drift from it.
     fn parse_plural_forms_table(ts_source: &str) -> HashMap<String, Vec<String>> {
-        let block_re = regex::Regex::new(r"(?s)PLURAL_FORMS[^=]*=\s*\{(.*?)\n\};").expect("valid regex");
+        // \b...\b, not a bare substring match: an earlier decoy identifier
+        // that merely starts with "PLURAL_FORMS" (e.g. a hypothetical
+        // PLURAL_FORMS_BY_ROOT) would otherwise match first and hand back
+        // ITS object body instead of the real table's -- see
+        // parse_plural_forms_table_skips_an_earlier_by_root_decoy below.
+        let block_re = regex::Regex::new(r"(?s)\bPLURAL_FORMS\b[^=]*=\s*\{(.*?)\n\};").expect("valid regex");
         let block = block_re
             .captures(ts_source)
             .unwrap_or_else(|| panic!("could not find a `PLURAL_FORMS = {{ ... }};` block in src/i18n.ts"))
@@ -503,6 +511,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_plural_forms_table_skips_an_earlier_by_root_decoy() {
+        let decoy_source = concat!(
+            "const PLURAL_FORMS_BY_ROOT = {\n",
+            "  en: [\"decoy-should-not-be-parsed\"],\n",
+            "};\n",
+            "\n",
+            "export const PLURAL_FORMS: Record<Locale, readonly string[]> = {\n",
+            "  en: [\"one\", \"other\"],\n",
+            "  ru: [\"one\", \"few\", \"many\"],\n",
+            "};\n",
+        );
+        let mut expected: HashMap<String, Vec<String>> = HashMap::new();
+        expected.insert("en".to_string(), vec!["one".to_string(), "other".to_string()]);
+        expected.insert("ru".to_string(), vec!["one".to_string(), "few".to_string(), "many".to_string()]);
+        assert_eq!(parse_plural_forms_table(decoy_source), expected);
+    }
+
+    #[test]
     fn plural_forms_match_the_typescript_table() {
         // For each locale PLURAL_FORMS lists in src/i18n.ts, the SET of
         // forms Rust's plural_form produces over a fixed n sample must
@@ -513,6 +539,17 @@ mod tests {
         // have drifted apart.
         let ts_source = include_str!("../../../src/i18n.ts");
         let table = parse_plural_forms_table(ts_source);
+        // A locale dropped from either side (a deleted LOCALES entry, or a
+        // deleted/renamed PLURAL_FORMS row) must fail here loudly -- the
+        // loop below only ever iterates what it parsed, so on its own a
+        // missing row would just silently check nothing for that locale
+        // instead of failing.
+        let parsed_locales: std::collections::BTreeSet<&str> = table.keys().map(String::as_str).collect();
+        let known_locales: std::collections::BTreeSet<&str> = LOCALES.iter().copied().collect();
+        assert_eq!(
+            parsed_locales, known_locales,
+            "PLURAL_FORMS in src/i18n.ts and Rust's LOCALES list different locales"
+        );
         let samples: [i64; 12] = [0, 1, 2, 3, 5, 11, 12, 21, 22, 25, 100, 101];
         for (locale, expected_forms) in &table {
             let expected: std::collections::BTreeSet<&str> = expected_forms.iter().map(String::as_str).collect();
