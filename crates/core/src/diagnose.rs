@@ -20,6 +20,8 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use crate::i18n::{self, Msg};
+
 /// One place a provider looks for its sign-in.
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -42,8 +44,12 @@ pub struct Diagnosis {
     pub probes: Vec<Probe>,
     /// Has this provider been checked end to end on this operating system?
     pub verified_here: bool,
-    /// What to do, when nothing was found.
+    /// What to do, when nothing was found. English, produced by
+    /// `render("en", &hint_msg)` of the same Msg -- never a second
+    /// literal, so the two can never disagree.
     pub hint: String,
+    /// The key the popover paints in the active locale.
+    pub hint_msg: Msg,
 }
 
 impl Diagnosis {
@@ -114,37 +120,62 @@ pub fn all() -> Vec<Diagnosis> {
         h.join(".config").join("Cursor").join("User").join("globalStorage").join("state.vscdb")
     };
 
+    // One Msg per provider, keyed "hint.<provider-id>". `hint` is always
+    // this same Msg's English rendering (never a second literal), so the
+    // plain-English CLI path and a translated popover can never disagree.
+    // The backtick-quoted commands ("`claude`", "`codex login`", "`gh auth
+    // login`") are literal shell text, not prose -- every locale keeps them
+    // verbatim, same as a product name.
+    let hint = |key: &'static str| -> (String, Msg) {
+        let msg = Msg::new(key);
+        (i18n::render("en", &msg), msg)
+    };
+    let (claude_hint, claude_hint_msg) = hint("hint.claude");
+    let (codex_hint, codex_hint_msg) = hint("hint.codex");
+    let (copilot_hint, copilot_hint_msg) = hint("hint.copilot");
+    let (cursor_hint, cursor_hint_msg) = hint("hint.cursor");
+
     vec![
         Diagnosis {
             id: "claude".into(),
             name: "Claude".into(),
             probes: claude,
             verified_here: true,
-            hint: "Run `claude` in a terminal and sign in.".into(),
+            hint: claude_hint,
+            hint_msg: claude_hint_msg,
         },
         Diagnosis {
             id: "codex".into(),
             name: "Codex".into(),
             probes: vec![file(codex_dir.join("auth.json"))],
             verified_here: cfg!(windows),
-            hint: "Run `codex login` in a terminal.".into(),
+            hint: codex_hint,
+            hint_msg: codex_hint_msg,
         },
         Diagnosis {
             id: "copilot".into(),
             name: "GitHub Copilot".into(),
             probes: copilot,
             verified_here: true,
-            hint: "Sign in to Copilot in your editor, or run `gh auth login`.".into(),
+            hint: copilot_hint,
+            hint_msg: copilot_hint_msg,
         },
         Diagnosis {
             id: "cursor".into(),
             name: "Cursor".into(),
             probes: vec![file(cursor_db)],
             verified_here: cfg!(windows),
-            hint: "Open Cursor and sign in; the app reads its local database.".into(),
+            hint: cursor_hint,
+            hint_msg: cursor_hint_msg,
         },
     ]
 }
+
+/// The test-side key registry: every `hint.<id>` key this module can emit.
+/// Only `i18n.rs`'s test module reads this, so it does not exist in a
+/// release build at all.
+#[cfg(test)]
+pub(crate) const HINT_KEYS: &[&str] = &["hint.claude", "hint.codex", "hint.copilot", "hint.cursor"];
 
 /// Prints what this machine actually shows. Ignored: it reads the filesystem.
 #[test]
@@ -230,6 +261,7 @@ mod tests {
             ],
             verified_here: true,
             hint: "h".into(),
+            hint_msg: Msg::new("hint.x"),
         };
         assert!(!d.nothing_found(), "one hit is enough to be signed in");
         d.probes[1].found = Some(false);

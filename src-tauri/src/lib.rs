@@ -169,18 +169,29 @@ async fn get_inventory() -> Result<inventory::Inventory, String> {
     .map_err(|e| format!("inventory scan: {e}"))
 }
 
+/// Renders a core `Msg` error in the resolved locale before it crosses the
+/// command boundary. Every Tauri command backed by a core `Result<_, Msg>`
+/// funnels its `Err` through this one function -- never a hand-written
+/// closure per command -- so the popover only ever sees a plain, already-
+/// localised string and no command has to re-derive the resolved locale.
+fn user_error(cfg: &Value, m: &i18n::Msg) -> String {
+    i18n::t(cfg, m)
+}
+
 /// Stop one running MCP server. The frontend sends a NAME it was shown and
 /// the user confirmed; `procs::end_task` resolves that to pids from a fresh
 /// snapshot, so no pid crosses this boundary and nothing outside the matched
 /// MCP servers can be reached. It asks (SIGTERM), never forces.
 #[tauri::command]
 async fn end_task(name: String) -> Result<usize, String> {
+    let cfg = config_with_defaults(load_config());
     tauri::async_runtime::spawn_blocking(move || {
         let inv = inventory::scan();
         procs::end_task(&name, &inv.mcp_servers)
     })
     .await
     .map_err(|e| format!("end task: {e}"))?
+    .map_err(|m| user_error(&cfg, &m))
 }
 
 /// Where each provider looks for its sign-in, and whether it is there.
@@ -231,15 +242,18 @@ fn save_clients(rules: Vec<clients::ClientRule>) -> Result<Vec<clients::ClientRu
 /// there. Returns the file's path.
 #[tauri::command]
 fn export_clients_csv(app: tauri::AppHandle, areas: Vec<spend::AreaSpend>) -> Result<String, String> {
+    let cfg = config_with_defaults(load_config());
     let today = chrono::Local::now().date_naive();
     let rules = clients::load_from(&clients::path());
     let body = clients::csv(&clients::rollup(&areas, &rules, today), today);
     let dir = app
         .path()
         .download_dir()
-        .map_err(|e| format!("find the Downloads folder: {e}"))?;
+        .map_err(|e| user_error(&cfg, &i18n::Msg::new("error.export.downloadsDir").var("error", e)))?;
     let file = dir.join(format!("ai-cost-by-client-{}.csv", today.format("%Y-%m-%d")));
-    std::fs::write(&file, body).map_err(|e| format!("write {}: {e}", file.display()))?;
+    std::fs::write(&file, body).map_err(|e| {
+        user_error(&cfg, &i18n::Msg::new("error.export.write").var("path", file.display()).var("error", e))
+    })?;
     use tauri_plugin_opener::OpenerExt;
     let _ = app.opener().reveal_item_in_dir(&file);
     Ok(file.display().to_string())
@@ -293,52 +307,67 @@ async fn get_trust(packages: Vec<String>) -> trust::TrustView {
 /// whatever the frontend sent.
 #[tauri::command]
 fn export_table(app: tauri::AppHandle, name: String, headers: Vec<String>, rows: Vec<Vec<String>>) -> Result<String, String> {
+    let cfg = config_with_defaults(load_config());
+    // Unreachable from the shipped UI, which only ever sends one of the
+    // handful of allowlisted table names it already knows the headers for;
+    // kept as a real, translated refusal rather than a debug-only guard
+    // because a command boundary is not a place to assume the caller.
     if headers.is_empty() || headers.len() > 40 || rows.iter().any(|r| r.len() > 40) {
-        return Err("that table cannot be exported".into());
+        return Err(user_error(&cfg, &i18n::Msg::new("error.export.unsupported")));
     }
-    let dir = app.path().download_dir().map_err(|e| format!("find the Downloads folder: {e}"))?;
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| user_error(&cfg, &i18n::Msg::new("error.export.downloadsDir").var("error", e)))?;
     let today = chrono::Local::now().format("%Y-%m-%d");
     let file = dir.join(format!("{}-{today}.csv", clients::safe_stem(&name)));
-    std::fs::write(&file, clients::table_csv(&headers, &rows)).map_err(|e| format!("write {}: {e}", file.display()))?;
+    std::fs::write(&file, clients::table_csv(&headers, &rows)).map_err(|e| {
+        user_error(&cfg, &i18n::Msg::new("error.export.write").var("path", file.display()).var("error", e))
+    })?;
     use tauri_plugin_opener::OpenerExt;
     let _ = app.opener().reveal_item_in_dir(&file);
     Ok(file.display().to_string())
 }
 
-fn pin_plan_for(name: &str, client: &str) -> Result<pin::PinPlan, String> {
+fn pin_plan_for(name: &str, client: &str) -> Result<pin::PinPlan, i18n::Msg> {
     let inv = inventory::scan();
     let server = inv
         .mcp_servers
         .iter()
         .find(|s| s.name == name && s.client == client && s.pin_to.is_some())
-        .ok_or("that server is not unpinned any more, or its version is not in the local cache")?;
-    let package = server.package.as_deref().ok_or("no package to pin")?;
-    let file = server.source_file.as_deref().ok_or("the config file is not known")?;
-    let installed = pin::installed_version(&server.target, package).ok_or("no installed version found locally")?;
+        .ok_or_else(|| i18n::Msg::new("error.pin.notUnpinned"))?;
+    let package = server.package.as_deref().ok_or_else(|| i18n::Msg::new("error.pin.noPackage"))?;
+    let file = server.source_file.as_deref().ok_or_else(|| i18n::Msg::new("error.pin.unknownFile"))?;
+    let installed =
+        pin::installed_version(&server.target, package).ok_or_else(|| i18n::Msg::new("error.pin.notInstalled"))?;
     pin::plan(std::path::Path::new(file), &server.target, package, &installed)
 }
 
 /// What pinning a server would change. Reads only.
 #[tauri::command]
 async fn pin_preview(name: String, client: String) -> Result<pin::PinPlan, String> {
+    let cfg = config_with_defaults(load_config());
     tauri::async_runtime::spawn_blocking(move || pin_plan_for(&name, &client))
         .await
         .map_err(|e| format!("pin preview: {e}"))?
+        .map_err(|m| user_error(&cfg, &m))
 }
 
 /// Applies the pin the user was shown. The plan is rebuilt here and must
 /// match what they saw, file size and modification time included.
 #[tauri::command]
 async fn pin_apply(name: String, client: String, seen: pin::PinPlanSeen) -> Result<String, String> {
+    let cfg = config_with_defaults(load_config());
     tauri::async_runtime::spawn_blocking(move || {
         let plan = pin_plan_for(&name, &client)?;
         if plan.to != seen.to || plan.file != seen.file || plan.file_len != seen.file_len || plan.file_mtime_ms != seen.file_mtime_ms {
-            return Err("this is no longer the change you were shown. Preview again.".to_string());
+            return Err(i18n::Msg::new("error.pin.planChanged"));
         }
         pin::apply(&plan)
     })
     .await
     .map_err(|e| format!("pin: {e}"))?
+    .map_err(|m| user_error(&cfg, &m))
 }
 
 /// When in the week each of a card's limits gets used, over the last 28
@@ -401,12 +430,17 @@ async fn get_audit() -> Result<audit::AuditReport, String> {
 /// Saves the audit as Markdown in the Downloads folder and reveals it.
 #[tauri::command]
 async fn export_audit(app: tauri::AppHandle) -> Result<String, String> {
+    let cfg = config_with_defaults(load_config());
     let report = tauri::async_runtime::spawn_blocking(build_audit).await.map_err(|e| format!("audit: {e}"))?;
     let now = chrono::Local::now();
-    let dir = app.path().download_dir().map_err(|e| format!("find the Downloads folder: {e}"))?;
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| user_error(&cfg, &i18n::Msg::new("error.export.downloadsDir").var("error", e)))?;
     let file = dir.join(format!("ai-setup-audit-{}.md", now.format("%Y-%m-%d")));
-    std::fs::write(&file, audit::to_markdown(&report, &now.format("%-d %B %Y").to_string()))
-        .map_err(|e| format!("write {}: {e}", file.display()))?;
+    std::fs::write(&file, audit::to_markdown(&report, &now.format("%-d %B %Y").to_string())).map_err(|e| {
+        user_error(&cfg, &i18n::Msg::new("error.export.write").var("path", file.display()).var("error", e))
+    })?;
     use tauri_plugin_opener::OpenerExt;
     let _ = app.opener().reveal_item_in_dir(&file);
     Ok(file.display().to_string())
@@ -444,12 +478,14 @@ fn get_ledger(usage30: std::collections::HashMap<String, f64>) -> ledger::Ledger
 
 #[tauri::command]
 fn save_subscription(subscription: ledger::Subscription) -> Result<ledger::Subscription, String> {
-    ledger::upsert_in(&ledger::path(), subscription)
+    let cfg = config_with_defaults(load_config());
+    ledger::upsert_in(&ledger::path(), subscription).map_err(|m| user_error(&cfg, &m))
 }
 
 #[tauri::command]
 fn delete_subscription(id: String) -> Result<(), String> {
-    ledger::delete_in(&ledger::path(), &id)
+    let cfg = config_with_defaults(load_config());
+    ledger::delete_in(&ledger::path(), &id).map_err(|m| user_error(&cfg, &m))
 }
 
 /// Limit readings for one card over the last `hours`, for the detail view.
@@ -2484,25 +2520,29 @@ async fn fetch_usage(
     let remind_days = cfg.get("renewalReminderDays").and_then(Value::as_i64).unwrap_or(0);
     for due in ledger::take_reminders_in(&ledger::path(), chrono::Local::now().date_naive(), remind_days) {
         use tauri_plugin_notification::NotificationExt;
-        let when = match due.days_left {
-            Some(0) => "today".to_string(),
-            Some(1) => "tomorrow".to_string(),
-            Some(n) => format!("in {n} days"),
-            None => continue,
+        let price = format!("{:.2}", due.subscription.price);
+        let cycle_key = match due.subscription.cycle {
+            ledger::Cycle::Monthly => "notify.renewal.cycleMonthly",
+            ledger::Cycle::Yearly => "notify.renewal.cycleYearly",
         };
+        let cycle = i18n::Msg::new(cycle_key);
+        let body = match due.days_left {
+            Some(0) => i18n::Msg::new("notify.renewal.today"),
+            Some(1) => i18n::Msg::new("notify.renewal.tomorrow"),
+            // Only "one" is unreachable here (0 and 1 have their own keys
+            // above); every n >= 2 the app can produce needs a real plural
+            // form, so this is a genuine count.
+            Some(n) => i18n::Msg::new("notify.renewal.inDays").count(n),
+            None => continue,
+        }
+        .var("name", &due.subscription.name)
+        .var("price", price)
+        .sub("cycle", cycle);
         let _ = app
             .notification()
             .builder()
-            .title("Renewal coming up")
-            .body(format!(
-                "{} renews {when} ({:.2} {}).",
-                due.subscription.name,
-                due.subscription.price,
-                match due.subscription.cycle {
-                    ledger::Cycle::Monthly => "monthly",
-                    ledger::Cycle::Yearly => "yearly",
-                }
-            ))
+            .title(i18n::t(&cfg, &i18n::Msg::new("notify.renewal.title")))
+            .body(i18n::t(&cfg, &body))
             .show();
     }
 
@@ -2511,8 +2551,8 @@ async fn fetch_usage(
         let _ = app
             .notification()
             .builder()
-            .title(&alert.title)
-            .body(&alert.body)
+            .title(i18n::t(&cfg, &alert.title))
+            .body(i18n::t(&cfg, &alert.body))
             .show();
     }
 
@@ -2709,11 +2749,15 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
                 .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
                 .unwrap_or_default();
             for (client, spent, budget) in clients::over_budget(&rows, &rules, today, &mut fired) {
+                let body = i18n::Msg::new("notify.clientBudget.body")
+                    .var("client", &client)
+                    .var("spent", format!("{spent:.0}"))
+                    .var("budget", format!("{budget:.0}"));
                 let _ = app
                     .notification()
                     .builder()
-                    .title("Client budget passed")
-                    .body(format!("{client} is at ${spent:.0} this month, past its ${budget:.0} budget."))
+                    .title(i18n::t(&cfg, &i18n::Msg::new("notify.clientBudget.title")))
+                    .body(i18n::t(&cfg, &body))
                     .show();
                 changed = true;
             }
@@ -2737,18 +2781,24 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
             );
             // One notification, about the costliest: several at once is noise.
             if let Some((_, days, cost)) = due.first() {
-                let more = match due.len() - 1 {
-                    0 => String::new(),
-                    1 => " One other session is in the same state.".to_string(),
-                    n => format!(" {n} other sessions are in the same state."),
-                };
+                let mut body = i18n::t(
+                    &cfg,
+                    &i18n::Msg::new("notify.longSession.body")
+                        .var("days", format!("{days:.0}"))
+                        .var("cost", format!("{cost:.0}")),
+                );
+                // The tail is only rendered and appended when there IS one
+                // (n > 0), so its "one" plural form is genuinely reachable.
+                let others = due.len() - 1;
+                if others > 0 {
+                    body.push(' ');
+                    body.push_str(&i18n::t(&cfg, &i18n::Msg::new("notify.longSession.others").count(others as i64)));
+                }
                 let _ = app
                     .notification()
                     .builder()
-                    .title("A long-running session")
-                    .body(format!(
-                        "A session you are still using has been open {days:.0} days and cost ${cost:.0} in 30 days. For new work, a fresh session is cheaper and easier to steer.{more}"
-                    ))
+                    .title(i18n::t(&cfg, &i18n::Msg::new("notify.longSession.title")))
+                    .body(body)
                     .show();
                 changed = true;
             }
@@ -2763,7 +2813,8 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
                 result.iter().map(|p| (p.id.clone(), p.last30.cost)).collect();
             let ledger_view = ledger::view(&ledger::load_from(&ledger::path()), today, &usage30);
             if let Some(d) = digest::build(&result, &ledger_view) {
-                let _ = app.notification().builder().title(&d.title).body(&d.body).show();
+                let body = d.body.iter().map(|m| i18n::t(&cfg, m)).collect::<Vec<_>>().join(" ");
+                let _ = app.notification().builder().title(i18n::t(&cfg, &d.title)).body(body).show();
             }
             // Marked even when there was nothing to say: an empty week is
             // not retried every ten minutes.
@@ -2785,8 +2836,8 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
         let _ = app
             .notification()
             .builder()
-            .title(&alert.title)
-            .body(&alert.body)
+            .title(i18n::t(&cfg, &alert.title))
+            .body(i18n::t(&cfg, &alert.body))
             .show();
     }
     result

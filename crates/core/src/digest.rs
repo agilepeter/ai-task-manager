@@ -4,14 +4,36 @@
 //! Sent once per ISO week, on the weekday the user picked, not before 9 in
 //! the morning local time. A week with nothing to report sends nothing.
 
+use crate::i18n::Msg;
 use crate::ledger::LedgerView;
 use crate::spend::ProviderSpend;
 use chrono::{Datelike, NaiveDate, Weekday};
 
+/// One Msg per sentence, joined with " " at the `tauri_plugin_notification`
+/// call in `lib.rs` (today's `parts.join(" ")`), same as `Alert` -- ephemeral
+/// and never painted by the popover, so there is no English rendering
+/// carried alongside.
 pub struct Digest {
-    pub title: String,
-    pub body: String,
+    pub title: Msg,
+    pub body: Vec<Msg>,
 }
+
+/// The test-side key registry: every `digest.*` key this module can emit.
+/// Only `i18n.rs`'s test module reads this, so it does not exist in a
+/// release build at all.
+#[cfg(test)]
+pub(crate) const DIGEST_KEYS: &[&str] = &[
+    "digest.title",
+    "digest.total",
+    "digest.totalFlat",
+    "digest.totalUp",
+    "digest.totalDown",
+    "digest.mostWentTo",
+    "digest.renewal.today",
+    "digest.renewal.tomorrow",
+    "digest.renewal.inDays",
+    "digest.renewal.many",
+];
 
 fn money(n: f64) -> String {
     if n >= 10.0 { format!("${:.0}", n) } else { format!("${:.2}", n) }
@@ -63,19 +85,29 @@ pub fn build(spend: &[ProviderSpend], ledger: &LedgerView) -> Option<Digest> {
         return None;
     }
 
-    let mut parts: Vec<String> = Vec::new();
+    let mut body: Vec<Msg> = Vec::new();
     if week >= 0.005 {
-        let change = if before >= 1.0 {
+        // The up/down clause used to be appended to this sentence as a
+        // half-formed fragment (", up 12% on the week before" -- no capital,
+        // no terminal period, not a sentence a translator could judge on
+        // its own). Each shape below is instead a complete, independently
+        // translatable sentence, chosen by which comparison applies; the
+        // "no prior week" case (`before` too small to compare against) is
+        // its own key rather than folded into `totalFlat`, since "about the
+        // same" and "nothing to compare against" are different claims.
+        let total = if before >= 1.0 {
             let pct = (week - before) / before * 100.0;
             if pct.abs() < 5.0 {
-                ", about the same as the week before".to_string()
+                Msg::new("digest.totalFlat").var("money", money(week))
+            } else if pct > 0.0 {
+                Msg::new("digest.totalUp").var("money", money(week)).var("pct", format!("{:.0}", pct.abs()))
             } else {
-                format!(", {} {:.0}% on the week before", if pct > 0.0 { "up" } else { "down" }, pct.abs())
+                Msg::new("digest.totalDown").var("money", money(week)).var("pct", format!("{:.0}", pct.abs()))
             }
         } else {
-            String::new()
+            Msg::new("digest.total").var("money", money(week))
         };
-        parts.push(format!("{} of AI usage in 7 days{change}.", money(week)));
+        body.push(total);
 
         // Where it went: the largest work area over 7 days, by top folder.
         let mut areas: std::collections::HashMap<&str, f64> = Default::default();
@@ -87,29 +119,35 @@ pub fn build(spend: &[ProviderSpend], ledger: &LedgerView) -> Option<Digest> {
             .filter(|(a, c)| *c >= 0.005 && !a.starts_with('('))
             .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(a.0)))
         {
-            parts.push(format!("Most went to {area} ({}).", money(cost)));
+            body.push(Msg::new("digest.mostWentTo").var("area", area).var("money", money(cost)));
         }
     }
     match renewing.as_slice() {
         [] => {}
-        [one] => parts.push(format!(
-            "{} renews {} ({}).",
-            one.subscription.name,
-            match one.days_left {
-                Some(0) => "today".to_string(),
-                Some(1) => "tomorrow".to_string(),
-                Some(n) => format!("in {n} days"),
-                None => String::new(),
-            },
-            money(one.subscription.price)
-        )),
-        many => parts.push(format!(
-            "{} subscriptions renew this week ({}).",
-            many.len(),
-            money(many.iter().map(|i| i.subscription.price).sum())
-        )),
+        [one] => {
+            let name = &one.subscription.name;
+            let price = money(one.subscription.price);
+            let msg = match one.days_left {
+                Some(0) => Some(Msg::new("digest.renewal.today").var("name", name).var("money", &price)),
+                Some(1) => Some(Msg::new("digest.renewal.tomorrow").var("name", name).var("money", &price)),
+                // Only "one" is unreachable here (0 and 1 have their own
+                // keys above); every n >= 2 the app can produce needs a
+                // real plural form, so this is a genuine count.
+                Some(n) => Some(Msg::new("digest.renewal.inDays").var("name", name).var("money", &price).count(n)),
+                None => None,
+            };
+            body.extend(msg);
+        }
+        // `many` is only ever reached with 2+ items (`[]` and `[one]` match
+        // first), so its "one" form is unreachable -- kept anyway because a
+        // count-bearing key needs every form its locale's plural rule has.
+        many => body.push(
+            Msg::new("digest.renewal.many")
+                .var("money", money(many.iter().map(|i| i.subscription.price).sum()))
+                .count(many.len() as i64),
+        ),
     }
-    Some(Digest { title: "Your AI week".into(), body: parts.join(" ") })
+    Some(Digest { title: Msg::new("digest.title"), body })
 }
 
 #[cfg(test)]
@@ -121,6 +159,14 @@ mod tests {
 
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    /// Every test below already read as English; joining the rendered
+    /// sentences with " " reproduces the single `body: String` these
+    /// assertions were written against, before `Digest.body` became
+    /// `Vec<Msg>`.
+    fn en_body(body: &[Msg]) -> String {
+        body.iter().map(|m| crate::i18n::render("en", m)).collect::<Vec<_>>().join(" ")
     }
 
     fn provider(daily_tail: &[f64], areas: &[(&str, &[f64])]) -> ProviderSpend {
@@ -199,9 +245,9 @@ mod tests {
         let misc: Vec<f64> = vec![5.0; 7];
         let sp = provider(&tail, &[("acme/web", &acme), ("tools", &misc), ("(unsorted)", &[99.0; 7])]);
         let got = build(&[sp], &ledger(Some("2026-09-24"), "2026-09-21")).unwrap();
-        assert_eq!(got.title, "Your AI week");
+        assert_eq!(crate::i18n::render("en", &got.title), "Your AI week");
         assert_eq!(
-            got.body,
+            en_body(&got.body),
             "$140 of AI usage in 7 days, up 100% on the week before. Most went to acme ($105). Claude Max renews in 3 days ($200)."
         );
     }
@@ -209,11 +255,11 @@ mod tests {
     #[test]
     fn a_steady_week_says_so_and_an_empty_one_says_nothing() {
         let steady = provider(&[10.0; 14], &[]);
-        let body = build(&[steady], &ledger(None, "2026-09-21")).unwrap().body;
+        let body = en_body(&build(&[steady], &ledger(None, "2026-09-21")).unwrap().body);
         assert_eq!(body, "$70 of AI usage in 7 days, about the same as the week before.");
         assert!(build(&[provider(&[], &[])], &ledger(None, "2026-09-21")).is_none());
         // Nothing spent, but a renewal is still worth the note.
         let only_renewal = build(&[provider(&[], &[])], &ledger(Some("2026-09-21"), "2026-09-21")).unwrap();
-        assert_eq!(only_renewal.body, "Claude Max renews today ($200).");
+        assert_eq!(en_body(&only_renewal.body), "Claude Max renews today ($200).");
     }
 }

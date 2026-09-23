@@ -16,6 +16,7 @@
 //! when a new reset period begins. State is in-memory by design — matching
 //! the Mac's "already-bad at launch won't alert" behavior.
 
+use crate::i18n::Msg;
 use crate::providers::Snapshot;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -39,10 +40,35 @@ fn states() -> &'static Mutex<HashMap<String, MetricState>> {
     STATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Ephemeral: evaluated and fired in the same beat, never painted by the
+/// popover and never stored, so unlike `Opportunity`/`Diagnosis` there is no
+/// English rendering carried alongside -- `title`/`body` are rendered once,
+/// at the `tauri_plugin_notification` call in `lib.rs`, in the locale that
+/// call already has in scope.
 pub struct Alert {
-    pub title: String,
-    pub body: String,
+    pub title: Msg,
+    pub body: Msg,
 }
+
+/// The test-side key registry: every `alert.<case>.title`/`alert.<case>…`
+/// key this module can emit. Only `i18n.rs`'s test module reads this, so it
+/// does not exist in a release build at all.
+#[cfg(test)]
+pub(crate) const ALERT_KEYS: &[&str] = &[
+    "alert.reset.title",
+    "alert.reset.backTo100",
+    "alert.reset.available",
+    "alert.runOut.title",
+    "alert.runOut.body",
+    "alert.close.title",
+    "alert.close.body",
+    "alert.almostOut.title",
+    "alert.almostOut.body",
+    "alert.burningFast.title",
+    "alert.burningFast.body",
+    "alert.dailySpend.title",
+    "alert.dailySpend.body",
+];
 
 #[derive(PartialEq, Clone, Copy)]
 enum Verdict {
@@ -220,95 +246,39 @@ pub fn evaluate_at(snapshots: &[Snapshot], cfg: &Value, now: i64) -> Vec<Alert> 
             if want_reset && rolled_over {
                 let shown = crate::i18n::metric_label(cfg, &metric.label);
                 let name = format!("{} {}", snapshot.name, shown);
-                let loc = crate::i18n::resolved_locale(cfg);
-                let next = metric.resets_at.map(|resets| {
-                    compact_duration(resets - chrono::Utc::now().timestamp_millis())
-                });
+                // `advanced` (required for `rolled_over`) only holds when
+                // both the old and new reset times are `Some`, so
+                // `metric.resets_at` is always `Some` here -- `next` is
+                // never absent in this branch.
+                let next = metric
+                    .resets_at
+                    .map(|resets| compact_duration(resets - chrono::Utc::now().timestamp_millis()))
+                    .expect("resets_at is Some whenever rolled_over is true");
+                let body_key = if used < 2.0 { "alert.reset.backTo100" } else { "alert.reset.available" };
                 alerts.push(Alert {
-                    title: match loc {
-                        "zh" => "额度已重置".into(),
-                        "ru" => "Лимит сброшен".into(),
-                        _ => "Limit reset".into(),
-                    },
-                    body: match loc {
-                        "zh" => format!(
-                            "{}{}",
-                            if used < 2.0 {
-                                format!("{name} 已恢复到 100%。")
-                            } else {
-                                format!("{name} 已重置 — 可用 {left:.0}%。")
-                            },
-                            next.map_or(String::new(), |rel| format!(" 下次重置：{rel} 后。"))
-                        ),
-                        "ru" => format!(
-                            "{}{}",
-                            if used < 2.0 {
-                                format!("{name} снова 100%.")
-                            } else {
-                                format!("{name} сброшен — доступно {left:.0}%.")
-                            },
-                            next.map_or(String::new(), |rel| {
-                                format!(" Следующий сброс через {rel}.")
-                            })
-                        ),
-                        _ => format!(
-                            "{}{}",
-                            if used < 2.0 {
-                                format!("{name} is back to 100%.")
-                            } else {
-                                format!("{name} has reset — {left:.0}% available.")
-                            },
-                            next.map_or(String::new(), |rel| format!(" Next reset in {rel}."))
-                        ),
-                    },
+                    title: Msg::new("alert.reset.title"),
+                    body: Msg::new(body_key).var("name", &name).var("left", format!("{left:.0}")).var("next", next),
                 });
             }
 
             if !baseline {
                 let shown = crate::i18n::metric_label(cfg, &metric.label);
                 let name = format!("{} {}", snapshot.name, shown);
-                let loc = crate::i18n::resolved_locale(cfg);
                 if want_runout && run_out_now && !entry.run_out {
                     alerts.push(Alert {
-                        title: match loc {
-                            "zh" => "将会用完".into(),
-                            "ru" => "Кончится до сброса".into(),
-                            _ => "Will Run Out".into(),
-                        },
-                        body: match loc {
-                            "zh" => format!("{name} 按当前速度会在重置前用完。"),
-                            "ru" => format!("{name} при текущем темпе исчерпается до сброса."),
-                            _ => format!("{name} is on pace to hit its limit before the reset."),
-                        },
+                        title: Msg::new("alert.runOut.title"),
+                        body: Msg::new("alert.runOut.body").var("name", &name),
                     });
                 } else if want_close && close_now && !entry.close {
                     alerts.push(Alert {
-                        title: match loc {
-                            "zh" => "余量紧张".into(),
-                            "ru" => "Запас на исходе".into(),
-                            _ => "Cutting It Close".into(),
-                        },
-                        body: match loc {
-                            "zh" => format!("{name} 按当前速度重置时大约只剩 {spare:.0}%。"),
-                            "ru" => format!("{name} к сбросу останется примерно {spare:.0}%."),
-                            _ => format!(
-                                "{name} is on pace to finish with only ~{spare:.0}% spare."
-                            ),
-                        },
+                        title: Msg::new("alert.close.title"),
+                        body: Msg::new("alert.close.body").var("name", &name).var("spare", format!("{spare:.0}")),
                     });
                 }
                 if want_almost && almost_now && !entry.almost_out {
                     alerts.push(Alert {
-                        title: match loc {
-                            "zh" => "即将用完".into(),
-                            "ru" => "Почти кончилось".into(),
-                            _ => "Almost Out".into(),
-                        },
-                        body: match loc {
-                            "zh" => format!("{name} 剩余不足 10%（还剩 {left:.0}%）。"),
-                            "ru" => format!("{name} осталось меньше 10% (ещё {left:.0}%)."),
-                            _ => format!("{name} is under 10% remaining ({left:.0}% left)."),
-                        },
+                        title: Msg::new("alert.almostOut.title"),
+                        body: Msg::new("alert.almostOut.body").var("name", &name).var("left", format!("{left:.0}")),
                     });
                 }
             }
@@ -321,19 +291,13 @@ pub fn evaluate_at(snapshots: &[Snapshot], cfg: &Value, now: i64) -> Vec<Alert> 
                 if let (true, false, Some((points, minutes))) = (hot, entry.burning, rise) {
                     let shown = crate::i18n::metric_label(cfg, &metric.label);
                     let name = format!("{} {}", snapshot.name, shown);
-                    alerts.push(match crate::i18n::resolved_locale(cfg) {
-                        "zh" => Alert {
-                            title: "消耗过快".into(),
-                            body: format!("{name} 在 {minutes} 分钟内用掉了 {points:.0}%，剩余 {left:.0}%。"),
-                        },
-                        "ru" => Alert {
-                            title: "Быстрый расход".into(),
-                            body: format!("{name}: {points:.0}% за {minutes} мин, осталось {left:.0}%."),
-                        },
-                        _ => Alert {
-                            title: "Burning Fast".into(),
-                            body: format!("{name} used {points:.0}% in {minutes} min. {left:.0}% left."),
-                        },
+                    alerts.push(Alert {
+                        title: Msg::new("alert.burningFast.title"),
+                        body: Msg::new("alert.burningFast.body")
+                            .var("name", &name)
+                            .var("points", format!("{points:.0}"))
+                            .var("minutes", minutes)
+                            .var("left", format!("{left:.0}")),
                     });
                 }
                 // Re-arm only once the rate has clearly fallen, so a spike
@@ -376,19 +340,11 @@ pub fn evaluate_spend(today_cost: f64, today: &str, cfg: &Value) -> Option<Alert
         return None;
     }
     *fired = Some(today.to_string());
-    Some(match crate::i18n::resolved_locale(cfg) {
-        "zh" => Alert {
-            title: "今日花费".into(),
-            body: format!("今天已花费 ${today_cost:.0}，超过了你设定的 ${limit:.0}。"),
-        },
-        "ru" => Alert {
-            title: "Расход за день".into(),
-            body: format!("Сегодня потрачено ${today_cost:.0}, это больше вашего порога ${limit:.0}."),
-        },
-        _ => Alert {
-            title: "Daily Spend".into(),
-            body: format!("${today_cost:.0} spent today, past your ${limit:.0} mark."),
-        },
+    Some(Alert {
+        title: Msg::new("alert.dailySpend.title"),
+        body: Msg::new("alert.dailySpend.body")
+            .var("spent", format!("{today_cost:.0}"))
+            .var("limit", format!("{limit:.0}")),
     })
 }
 
@@ -429,6 +385,13 @@ pub fn has_state_for_test(key: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// Every test below built its `cfg` with `"locale": "en"` before `Alert`
+    /// carried a `Msg`, so rendering in English here reproduces exactly the
+    /// string each assertion already pinned.
+    fn en(msg: &Msg) -> String {
+        crate::i18n::render("en", msg)
+    }
+
     const MIN: i64 = 60_000;
     const WEEK: i64 = 7 * 24 * 60 * MIN;
 
@@ -460,8 +423,9 @@ mod tests {
         assert!(evaluate_at(&[weekly(id, 26.0, t0)], &cfg, t0 + 10 * MIN).is_empty(), "6 points is normal");
         let fired = evaluate_at(&[weekly(id, 37.0, t0)], &cfg, t0 + 20 * MIN);
         assert_eq!(fired.len(), 1, "17 points in 20 minutes");
-        assert_eq!(fired[0].title, "Burning Fast");
-        assert!(fired[0].body.contains("17%") && fired[0].body.contains("20 min"), "{}", fired[0].body);
+        assert_eq!(en(&fired[0].title), "Burning Fast");
+        let body = en(&fired[0].body);
+        assert!(body.contains("17%") && body.contains("20 min"), "{body}");
         assert!(evaluate_at(&[weekly(id, 39.0, t0)], &cfg, t0 + 25 * MIN).is_empty(), "fires once");
         // An hour of calm, then a second spike is a new event.
         assert!(evaluate_at(&[weekly(id, 40.0, t0)], &cfg, t0 + 90 * MIN).is_empty());
@@ -498,8 +462,9 @@ mod tests {
         let cfg = serde_json::json!({"dailySpendAlert": 50, "locale": "en"});
         assert!(evaluate_spend(49.99, "2026-09-21", &cfg).is_none());
         let alert = evaluate_spend(62.4, "2026-09-21", &cfg).expect("crossed $50");
-        assert_eq!(alert.title, "Daily Spend");
-        assert!(alert.body.contains("$62") && alert.body.contains("$50"), "{}", alert.body);
+        assert_eq!(en(&alert.title), "Daily Spend");
+        let body = en(&alert.body);
+        assert!(body.contains("$62") && body.contains("$50"), "{body}");
         assert!(evaluate_spend(80.0, "2026-09-21", &cfg).is_none(), "once per day");
         assert!(evaluate_spend(55.0, "2026-09-22", &cfg).is_some(), "a new day re-arms");
         // Raising the threshold past today's spend must not re-fire today.
@@ -542,7 +507,7 @@ mod tests {
         assert!(evaluate(&[make(ids[0], 40.0), make(ids[1], 40.0)], &cfg).is_empty());
         let alerts = evaluate(&[make(ids[0], 95.0), make(ids[1], 95.0)], &cfg);
         assert_eq!(alerts.len(), 4);
-        assert_eq!(alerts.iter().filter(|alert| alert.body.contains(ids[0])).count(), 2);
+        assert_eq!(alerts.iter().filter(|alert| en(&alert.body).contains(ids[0])).count(), 2);
         assert!(evaluate(&[make(ids[0], 95.0), make(ids[1], 95.0)], &cfg).is_empty());
         let wallet = Snapshot::ok(ids[0], "Wallet", None,
             vec![crate::providers::Metric::text("Balance", "$-20.00".into())]);
@@ -590,9 +555,10 @@ mod tests {
         assert!(evaluate(&[make(80.0, t)], &cfg).is_empty());
         let alerts = evaluate(&[make(0.0, t + period)], &cfg);
         assert_eq!(alerts.len(), 1);
-        assert_eq!(alerts[0].title, "Limit reset");
-        assert!(alerts[0].body.contains("Codex Weekly is back to 100%"));
-        assert!(alerts[0].body.contains("Next reset in"));
+        assert_eq!(en(&alerts[0].title), "Limit reset");
+        let body = en(&alerts[0].body);
+        assert!(body.contains("Codex Weekly is back to 100%"));
+        assert!(body.contains("Next reset in"));
         assert!(evaluate(&[make(0.0, t + period)], &cfg).is_empty());
         forget_snapshot(id);
     }
@@ -613,8 +579,9 @@ mod tests {
         // what's left, not a full quota.
         let alerts = evaluate(&[make(20.0, t + period)], &cfg);
         assert_eq!(alerts.len(), 1);
-        assert!(alerts[0].body.contains("has reset — 80% available"));
-        assert!(!alerts[0].body.contains("100%"));
+        let body = en(&alerts[0].body);
+        assert!(body.contains("has reset — 80% available"));
+        assert!(!body.contains("100%"));
         forget_snapshot(id);
     }
 
@@ -719,14 +686,15 @@ mod tests {
         forget_snapshot("onenewapi@ticket07-abcd");
     }
 
-    /// Written BEFORE `Alert` gains a `Msg` field, against the inline
-    /// `match crate::i18n::resolved_locale(cfg) { "zh" => …, "ru" => …, _
-    /// => … }` arms this file has today. Drives every alert case for all
-    /// three shipped locales and pins the exact text as literal
-    /// assertions, table-driven (fixture -> expected title/body per
-    /// locale). Once the arms move into the locale JSON files, this test
-    /// is repointed at `i18n::render(locale, &msg)` with the SAME literal
-    /// expectations -- a reword during that migration fails here first.
+    /// First written against the inline `match
+    /// crate::i18n::resolved_locale(cfg) { "zh" => …, "ru" => …, _ => … }`
+    /// arms this file used to have, before `Alert` carried a `Msg` at all.
+    /// Drives every alert case for all three shipped locales and pins the
+    /// exact text as literal assertions, table-driven (fixture -> expected
+    /// title/body per locale). Now that the arms live in the locale JSON
+    /// files, it renders through `i18n::render(locale, &msg)` -- same
+    /// literal expectations as when it was written, so a reword during
+    /// that migration would have failed here first.
     ///
     /// The "Limit reset" case appends a "next reset in …" clause built
     /// from the real clock (see `evaluate_at`), so those two fixtures
@@ -747,6 +715,7 @@ mod tests {
         ];
         let next_lead = ["Next reset in", "下次重置：", "Следующий сброс через"];
         for (i, locale) in locales.iter().enumerate() {
+            let locale = *locale;
             let id = format!("snap-reset-back-{locale}");
             let cfg = serde_json::json!({"notifyReset": true, "locale": locale});
             let period = 7 * 86_400_000_i64;
@@ -760,9 +729,10 @@ mod tests {
             assert!(evaluate_at(&[make(80.0, t)], &cfg, t).is_empty(), "{locale}: baseline must be silent");
             let alerts = evaluate_at(&[make(0.0, t + period)], &cfg, t + period);
             assert_eq!(alerts.len(), 1, "{locale}");
-            assert_eq!(alerts[0].title, title[i], "{locale} reset title");
-            assert!(alerts[0].body.starts_with(lead[i]), "{locale}: {}", alerts[0].body);
-            assert!(alerts[0].body.contains(next_lead[i]), "{locale}: {}", alerts[0].body);
+            assert_eq!(crate::i18n::render(locale, &alerts[0].title), title[i], "{locale} reset title");
+            let body = crate::i18n::render(locale, &alerts[0].body);
+            assert!(body.starts_with(lead[i]), "{locale}: {body}");
+            assert!(body.contains(next_lead[i]), "{locale}: {body}");
             forget_snapshot(&id);
         }
 
@@ -773,6 +743,7 @@ mod tests {
             "Codex За неделю сброшен — доступно 80%.",
         ];
         for (i, locale) in locales.iter().enumerate() {
+            let locale = *locale;
             let id = format!("snap-reset-avail-{locale}");
             let cfg = serde_json::json!({"notifyReset": true, "locale": locale});
             let period = 7 * 86_400_000_i64;
@@ -786,9 +757,10 @@ mod tests {
             assert!(evaluate_at(&[make(80.0, t)], &cfg, t).is_empty(), "{locale}: baseline must be silent");
             let alerts = evaluate_at(&[make(20.0, t + period)], &cfg, t + period);
             assert_eq!(alerts.len(), 1, "{locale}");
-            assert_eq!(alerts[0].title, title[i], "{locale} reset title");
-            assert!(alerts[0].body.starts_with(avail_lead[i]), "{locale}: {}", alerts[0].body);
-            assert!(alerts[0].body.contains(next_lead[i]), "{locale}: {}", alerts[0].body);
+            assert_eq!(crate::i18n::render(locale, &alerts[0].title), title[i], "{locale} reset title");
+            let body = crate::i18n::render(locale, &alerts[0].body);
+            assert!(body.starts_with(avail_lead[i]), "{locale}: {body}");
+            assert!(body.contains(next_lead[i]), "{locale}: {body}");
             forget_snapshot(&id);
         }
 
@@ -800,6 +772,7 @@ mod tests {
             "Codex За неделю при текущем темпе исчерпается до сброса.",
         ];
         for (i, locale) in locales.iter().enumerate() {
+            let locale = *locale;
             let id = format!("snap-runout-{locale}");
             let cfg = serde_json::json!({"notifyWillRunOut": true, "locale": locale});
             let t = chrono::Utc::now().timestamp_millis() + 2 * 3_600_000;
@@ -813,8 +786,8 @@ mod tests {
             assert!(evaluate(&[make(10.0)], &cfg).is_empty(), "{locale}: baseline must be silent");
             let alerts = evaluate(&[make(99.0)], &cfg);
             assert_eq!(alerts.len(), 1, "{locale}");
-            assert_eq!(alerts[0].title, run_out_title[i], "{locale}");
-            assert_eq!(alerts[0].body, run_out_body[i], "{locale}");
+            assert_eq!(crate::i18n::render(locale, &alerts[0].title), run_out_title[i], "{locale}");
+            assert_eq!(crate::i18n::render(locale, &alerts[0].body), run_out_body[i], "{locale}");
             forget_snapshot(&id);
         }
 
@@ -826,6 +799,7 @@ mod tests {
             "Codex За неделю к сбросу останется примерно 9%.",
         ];
         for (i, locale) in locales.iter().enumerate() {
+            let locale = *locale;
             let id = format!("snap-close-{locale}");
             let cfg = serde_json::json!({"notifyCuttingClose": true, "locale": locale});
             let t = chrono::Utc::now().timestamp_millis() + 2 * 3_600_000;
@@ -839,8 +813,8 @@ mod tests {
             assert!(evaluate(&[make(10.0)], &cfg).is_empty(), "{locale}: baseline must be silent");
             let alerts = evaluate(&[make(90.0)], &cfg);
             assert_eq!(alerts.len(), 1, "{locale}");
-            assert_eq!(alerts[0].title, close_title[i], "{locale}");
-            assert_eq!(alerts[0].body, close_body[i], "{locale}");
+            assert_eq!(crate::i18n::render(locale, &alerts[0].title), close_title[i], "{locale}");
+            assert_eq!(crate::i18n::render(locale, &alerts[0].body), close_body[i], "{locale}");
             forget_snapshot(&id);
         }
 
@@ -852,6 +826,7 @@ mod tests {
             "Codex За неделю осталось меньше 10% (ещё 5%).",
         ];
         for (i, locale) in locales.iter().enumerate() {
+            let locale = *locale;
             let id = format!("snap-almost-{locale}");
             let cfg = serde_json::json!({"notifyAlmostOut": true, "locale": locale});
             let make = |used| Snapshot::ok(&id, "Codex", None, vec![crate::providers::Metric::progress("Weekly", used, None)]);
@@ -859,8 +834,8 @@ mod tests {
             assert!(evaluate(&[make(50.0)], &cfg).is_empty(), "{locale}: baseline must be silent");
             let alerts = evaluate(&[make(95.0)], &cfg);
             assert_eq!(alerts.len(), 1, "{locale}");
-            assert_eq!(alerts[0].title, almost_title[i], "{locale}");
-            assert_eq!(alerts[0].body, almost_body[i], "{locale}");
+            assert_eq!(crate::i18n::render(locale, &alerts[0].title), almost_title[i], "{locale}");
+            assert_eq!(crate::i18n::render(locale, &alerts[0].body), almost_body[i], "{locale}");
             forget_snapshot(&id);
         }
 
@@ -872,6 +847,7 @@ mod tests {
             "Codex За неделю: 17% за 20 мин, осталось 63%.",
         ];
         for (i, locale) in locales.iter().enumerate() {
+            let locale = *locale;
             let id = format!("snap-burn-{locale}");
             let cfg = serde_json::json!({"burnAlertPoints": 15, "locale": locale});
             let t0 = 20_000 * 60_000_i64;
@@ -886,8 +862,8 @@ mod tests {
             assert!(evaluate_at(&[weekly(26.0)], &cfg, t0 + 10 * 60_000).is_empty(), "{locale}: 6 points is normal");
             let alerts = evaluate_at(&[weekly(37.0)], &cfg, t0 + 20 * 60_000);
             assert_eq!(alerts.len(), 1, "{locale}");
-            assert_eq!(alerts[0].title, burn_title[i], "{locale}");
-            assert_eq!(alerts[0].body, burn_body[i], "{locale}");
+            assert_eq!(crate::i18n::render(locale, &alerts[0].title), burn_title[i], "{locale}");
+            assert_eq!(crate::i18n::render(locale, &alerts[0].body), burn_body[i], "{locale}");
             forget_snapshot(&id);
         }
 
@@ -899,11 +875,12 @@ mod tests {
             "Сегодня потрачено $62, это больше вашего порога $50.",
         ];
         for (i, locale) in locales.iter().enumerate() {
+            let locale = *locale;
             reset_spend_alert_for_test();
             let cfg = serde_json::json!({"dailySpendAlert": 50, "locale": locale});
             let alert = evaluate_spend(62.4, "2026-09-21", &cfg).expect("crossed $50");
-            assert_eq!(alert.title, spend_title[i], "{locale}");
-            assert_eq!(alert.body, spend_body[i], "{locale}");
+            assert_eq!(crate::i18n::render(locale, &alert.title), spend_title[i], "{locale}");
+            assert_eq!(crate::i18n::render(locale, &alert.body), spend_body[i], "{locale}");
         }
         reset_spend_alert_for_test();
     }

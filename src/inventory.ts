@@ -45,6 +45,7 @@ interface Diagnosis {
   probes: Probe[];
   verifiedHere: boolean;
   hint: string;
+  hintMsg?: Msg | null;
 }
 
 interface PinPlan {
@@ -103,6 +104,7 @@ interface TrustView {
   listed: number;
   ratings: Rating[];
   error: string | null;
+  errorMsg?: Msg | null;
 }
 
 /// Config lives in main.ts; the Inventory tab only needs this one switch.
@@ -296,14 +298,16 @@ function renderMcp(list: McpServer[]): string {
   const on = host?.trustLookup() === true;
   const status = !on
     ? T("trust.offNote")
-    : trust?.error
-      ? T("trust.fetchError", { error: trust.error })
-      : trust?.fetchedAt
-        ? T("trust.status", {
-            listed: trust.listed,
-            date: new Date(trust.fetchedAt).toLocaleDateString(localeTag(), { month: "short", day: "numeric" }),
-          })
-        : t("detail.loading");
+    : trust?.errorMsg
+      ? tm(trust.errorMsg)
+      : trust?.error
+        ? T("trust.fetchError", { error: trust.error })
+        : trust?.fetchedAt
+          ? T("trust.status", {
+              listed: trust.listed,
+              date: new Date(trust.fetchedAt).toLocaleDateString(localeTag(), { month: "short", day: "numeric" }),
+            })
+          : t("detail.loading");
   const trustLead = `<label class="inv-filter">${esc(T("trust.label"))}
       <select id="inv-trust">
         <option value="off"${on ? "" : " selected"}>${esc(t("settings.alertOff"))}</option>
@@ -403,7 +407,10 @@ function renderSignIns(): string {
       const unverified = d.verifiedHere
         ? ""
         : `<span class="inv-chip sig-unverified" title="${esc(T("signins.unverifiedTip"))}">${esc(T("signins.unverified"))}</span>`;
-      const hint = d.probes.length && d.probes.every((p) => p.found === false) ? `<p class="sig-hint">${esc(d.hint)}</p>` : "";
+      const hint =
+        d.probes.length && d.probes.every((p) => p.found === false)
+          ? `<p class="sig-hint">${esc(d.hintMsg ? tm(d.hintMsg) : d.hint)}</p>`
+          : "";
       return `
       <div class="inv-row sig-row">
         <div class="inv-row-main">

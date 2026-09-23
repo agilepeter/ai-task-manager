@@ -12,6 +12,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+use crate::i18n::{self, Msg};
+
 pub const INDEX_URL: &str = "https://staas.fund/mcp/scanner/servers.json";
 pub const INDEX_PAGE: &str = "https://staas.fund/mcp/";
 const MAX_INDEX_BYTES: usize = 1024 * 1024;
@@ -56,7 +58,11 @@ pub struct TrustView {
     pub listed: usize,
     pub ratings: Vec<Rating>,
     /// Set when the list could not be fetched and there is no cache.
+    /// English, produced by `render("en", &error_msg)` of the same Msg --
+    /// never a second literal, so the two can never disagree.
     pub error: Option<String>,
+    /// The key `inventory.ts` paints in the active locale.
+    pub error_msg: Option<Msg>,
 }
 
 // ---------------------------------------------------------------------------
@@ -147,22 +153,22 @@ pub fn cache_path() -> std::path::PathBuf {
 }
 
 /// A plain GET of the public list. Nothing about this machine goes with it.
-async fn fetch() -> Result<Vec<Entry>, String> {
+async fn fetch() -> Result<Vec<Entry>, Msg> {
     let resp = crate::providers::http()
         .get(INDEX_URL)
         .send()
         .await
-        .map_err(|e| format!("fetch the trust index: {e}"))?;
+        .map_err(|e| Msg::new("error.trust.fetch").var("error", e))?;
     if !resp.status().is_success() {
-        return Err(format!("trust index: HTTP {}", resp.status()));
+        return Err(Msg::new("error.trust.http").var("status", resp.status()));
     }
     if resp.content_length().is_some_and(|n| n > MAX_INDEX_BYTES as u64) {
-        return Err("trust index: response too large".into());
+        return Err(Msg::new("error.trust.tooLarge"));
     }
-    let raw = resp.text().await.map_err(|e| format!("read the trust index: {e}"))?;
+    let raw = resp.text().await.map_err(|e| Msg::new("error.trust.read").var("error", e))?;
     let entries = parse_index(&raw);
     if entries.is_empty() {
-        return Err("trust index: nothing usable in the response".into());
+        return Err(Msg::new("error.trust.empty"));
     }
     Ok(entries)
 }
@@ -175,7 +181,7 @@ pub async fn view(enabled: bool, packages: &[String], now: i64) -> TrustView {
     }
     let path = cache_path();
     let cached = load_cache(&path);
-    let (entries, fetched_at, error) = match cached {
+    let (entries, fetched_at, error_msg) = match cached {
         Some(c) if is_fresh(c.fetched_at, now) => (c.entries, Some(c.fetched_at), None),
         stale => match fetch().await {
             Ok(entries) => {
@@ -193,9 +199,17 @@ pub async fn view(enabled: bool, packages: &[String], now: i64) -> TrustView {
         fetched_at,
         listed: entries.len(),
         ratings: if entries.is_empty() { Vec::new() } else { rate(packages, &entries) },
-        error,
+        error: error_msg.as_ref().map(|m| i18n::render("en", m)),
+        error_msg,
     }
 }
+
+/// The test-side key registry: every `error.trust.*` key this module can
+/// emit. Only `i18n.rs`'s test module reads this, so it does not exist in a
+/// release build at all.
+#[cfg(test)]
+pub(crate) const ERROR_KEYS: &[&str] =
+    &["error.trust.fetch", "error.trust.http", "error.trust.tooLarge", "error.trust.read", "error.trust.empty"];
 
 #[cfg(test)]
 mod tests {
@@ -279,7 +293,7 @@ mod tests {
     fn live_fetch() {
         match crate::rt::block_on(fetch()) {
             Ok(entries) => println!("fetched {} entries, first: {}", entries.len(), entries[0].name),
-            Err(e) => println!("FETCH FAILED: {e}"),
+            Err(e) => println!("FETCH FAILED: {}", i18n::render("en", &e)),
         }
     }
 

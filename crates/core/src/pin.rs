@@ -23,6 +23,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+use crate::i18n::Msg;
+
 const MAX_CONFIG_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -146,22 +148,28 @@ fn only_args_changed(a: &Value, b: &Value, from: &str, to: &str, in_args: bool) 
 }
 
 /// The new file text, or why not. Pure: no filesystem.
-pub fn rewrite(raw: &str, from: &str, to: &str) -> Result<(String, usize), String> {
+pub fn rewrite(raw: &str, from: &str, to: &str) -> Result<(String, usize), Msg> {
     if from == to {
-        return Err("already pinned".into());
+        return Err(Msg::new("error.pin.alreadyPinned"));
     }
-    let before: Value = serde_json::from_str(raw).map_err(|_| "the config is not valid JSON; leaving it alone")?;
+    let before: Value = serde_json::from_str(raw).map_err(|_| Msg::new("error.pin.invalidJson"))?;
     // The spec exactly as JSON writes it, quotes and escapes included.
-    let token = serde_json::to_string(from).map_err(|e| e.to_string())?;
-    let replacement = serde_json::to_string(to).map_err(|e| e.to_string())?;
+    // Serialising an already-owned Rust string as a JSON string cannot fail
+    // in practice (no NaN/Infinity-style edge case the way a float has), so
+    // this arm is effectively unreachable defensive code; its message is
+    // still a real Msg because every locale file must agree on the same key
+    // set regardless of reachability.
+    let encode_err = |e: serde_json::Error| Msg::new("error.pin.encode").var("error", e);
+    let token = serde_json::to_string(from).map_err(encode_err)?;
+    let replacement = serde_json::to_string(to).map_err(encode_err)?;
     let occurrences = raw.matches(&token).count();
     if occurrences == 0 {
-        return Err("that package spec is not in this file any more".into());
+        return Err(Msg::new("error.pin.notFound"));
     }
     let next = raw.replace(&token, &replacement);
-    let after: Value = serde_json::from_str(&next).map_err(|_| "the edit would break the file; nothing was written")?;
+    let after: Value = serde_json::from_str(&next).map_err(|_| Msg::new("error.pin.editBroke"))?;
     if !only_args_changed(&before, &after, from, to, false) {
-        return Err("the same text appears outside a server's arguments; this needs a manual edit".into());
+        return Err(Msg::new("error.pin.outsideArgs"));
     }
     Ok((next, occurrences))
 }
@@ -173,13 +181,20 @@ fn mtime_ms(meta: &std::fs::Metadata) -> i64 {
         .map_or(0, |d| d.as_millis() as i64)
 }
 
-pub fn plan(file: &Path, launcher: &str, package: &str, installed: &str) -> Result<PinPlan, String> {
-    let meta = std::fs::metadata(file).map_err(|e| format!("read {}: {e}", file.display()))?;
+/// `read {path}: {error}` -- the same wrapper for every metadata/read
+/// failure below. The OS error text (`{error}`) is not ours to translate;
+/// it stays a var everywhere it appears in this module.
+fn read_err(path: &Path) -> impl Fn(std::io::Error) -> Msg + '_ {
+    move |e| Msg::new("error.pin.read").var("path", path.display()).var("error", e)
+}
+
+pub fn plan(file: &Path, launcher: &str, package: &str, installed: &str) -> Result<PinPlan, Msg> {
+    let meta = std::fs::metadata(file).map_err(read_err(file))?;
     if meta.len() > MAX_CONFIG_BYTES {
-        return Err("that config file is too large to edit safely".into());
+        return Err(Msg::new("error.pin.tooLarge"));
     }
-    let raw = std::fs::read_to_string(file).map_err(|e| format!("read {}: {e}", file.display()))?;
-    let to = pin_spec(launcher, package, installed).ok_or("this launcher has no pin syntax the app knows")?;
+    let raw = std::fs::read_to_string(file).map_err(read_err(file))?;
+    let to = pin_spec(launcher, package, installed).ok_or_else(|| Msg::new("error.pin.noPinSyntax"))?;
     let (_, occurrences) = rewrite(&raw, package, &to)?;
     Ok(PinPlan {
         file: file.display().to_string(),
@@ -194,26 +209,53 @@ pub fn plan(file: &Path, launcher: &str, package: &str, installed: &str) -> Resu
 }
 
 /// Applies a plan the user has seen. Returns the backup's path.
-pub fn apply(plan: &PinPlan) -> Result<String, String> {
+pub fn apply(plan: &PinPlan) -> Result<String, Msg> {
     let file = PathBuf::from(&plan.file);
-    let meta = std::fs::metadata(&file).map_err(|e| format!("read {}: {e}", file.display()))?;
+    let meta = std::fs::metadata(&file).map_err(read_err(&file))?;
     if meta.len() != plan.file_len || mtime_ms(&meta) != plan.file_mtime_ms {
-        return Err("the file changed since the preview (its owner wrote to it). Preview again.".into());
+        return Err(Msg::new("error.pin.changed"));
     }
-    let raw = std::fs::read_to_string(&file).map_err(|e| format!("read {}: {e}", file.display()))?;
+    let raw = std::fs::read_to_string(&file).map_err(read_err(&file))?;
     let (next, _) = rewrite(&raw, &plan.from, &plan.to)?;
     let backup = PathBuf::from(format!("{}.aitm-backup-{}", plan.file, crate::providers::unique_stamp()));
-    std::fs::copy(&file, &backup).map_err(|e| format!("save a backup: {e}"))?;
+    std::fs::copy(&file, &backup).map_err(|e| Msg::new("error.pin.backup").var("error", e))?;
     // Same folder, so the rename is atomic; permissions carried over first.
     let tmp = PathBuf::from(format!("{}.aitm-tmp-{}", plan.file, crate::providers::unique_stamp()));
-    std::fs::write(&tmp, next).map_err(|e| format!("write the new file: {e}"))?;
+    std::fs::write(&tmp, next).map_err(|e| Msg::new("error.pin.write").var("error", e))?;
     let _ = std::fs::set_permissions(&tmp, meta.permissions());
     std::fs::rename(&tmp, &file).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
-        format!("replace the file: {e}")
+        Msg::new("error.pin.replace").var("error", e)
     })?;
     Ok(backup.display().to_string())
 }
+
+/// The test-side key registry: every `error.pin.*` key that can reach the
+/// user (from this module, and from the two `lib.rs` sites that share this
+/// namespace -- `pin_plan_for`'s four short-circuits and the Tauri
+/// `pin_apply` command's own staleness check). Only `i18n.rs`'s test module
+/// reads this, so it does not exist in a release build at all.
+#[cfg(test)]
+pub(crate) const ERROR_KEYS: &[&str] = &[
+    "error.pin.alreadyPinned",
+    "error.pin.invalidJson",
+    "error.pin.encode",
+    "error.pin.notFound",
+    "error.pin.editBroke",
+    "error.pin.outsideArgs",
+    "error.pin.read",
+    "error.pin.tooLarge",
+    "error.pin.noPinSyntax",
+    "error.pin.changed",
+    "error.pin.backup",
+    "error.pin.write",
+    "error.pin.replace",
+    "error.pin.planChanged",
+    "error.pin.notUnpinned",
+    "error.pin.noPackage",
+    "error.pin.unknownFile",
+    "error.pin.notInstalled",
+];
 
 /// Default cache locations. Environment overrides first, as the tools do.
 pub fn npm_cache_dir() -> Option<PathBuf> {
@@ -248,6 +290,10 @@ pub fn installed_version(launcher: &str, package: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn en(msg: &Msg) -> String {
+        crate::i18n::render("en", msg)
+    }
+
     const CONFIG: &str = r#"{
   "numStartups": 412,
   "mcpServers": {
@@ -274,11 +320,11 @@ mod tests {
     fn it_refuses_when_the_same_text_lives_outside_a_servers_arguments() {
         let tricky = r#"{"mcpServers":{"b":{"command":"uvx","args":["blender-mcp"]}},"notes":["blender-mcp"]}"#;
         let err = rewrite(tricky, "blender-mcp", "blender-mcp@1.6.4").unwrap_err();
-        assert!(err.contains("manual edit"), "{err}");
+        assert!(en(&err).contains("manual edit"), "{err:?}");
         let as_key = r#"{"mcpServers":{"blender-mcp":{"command":"uvx","args":["blender-mcp"]}}}"#;
         assert!(rewrite(as_key, "blender-mcp", "blender-mcp@1.6.4").is_err(), "a server NAMED like its package");
         assert!(rewrite("{not json", "a", "a@1").is_err());
-        assert!(rewrite(CONFIG, "gone-mcp", "gone-mcp@1").unwrap_err().contains("not in this file"));
+        assert!(en(&rewrite(CONFIG, "gone-mcp", "gone-mcp@1").unwrap_err()).contains("not in this file"));
         assert!(rewrite(CONFIG, "x@1", "x@1").is_err());
     }
 
@@ -320,7 +366,7 @@ mod tests {
             match plan(Path::new(s.source_file.as_deref().unwrap()), &s.target, package, &installed) {
                 Ok(p) => println!("{} ({}): {} -> {}  [installed {}, {} place(s), file …/{}]", s.name, s.client, p.from, p.to,
                     p.installed_version, p.occurrences, Path::new(&p.file).file_name().unwrap().to_string_lossy()),
-                Err(e) => println!("{} ({}): REFUSED: {e}", s.name, s.client),
+                Err(e) => println!("{} ({}): REFUSED: {}", s.name, s.client, en(&e)),
             }
         }
     }
@@ -341,7 +387,7 @@ mod tests {
         assert!(std::fs::read_dir(&dir).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().contains("aitm-tmp")));
 
         // The same plan again: the file is no longer what was previewed.
-        assert!(apply(&p).unwrap_err().contains("changed since the preview"));
+        assert!(en(&apply(&p).unwrap_err()).contains("changed since the preview"));
         // A fresh plan on the already pinned file has nothing to do.
         assert!(plan(&file, "npx", "chrome-devtools-mcp@latest", "1.9.0").is_err());
         let _ = std::fs::remove_dir_all(&dir);

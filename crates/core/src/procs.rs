@@ -309,11 +309,14 @@ pub fn snapshot(servers: &[McpServer]) -> Vec<RunningServer> {
 ///   Nothing here escalates to SIGKILL;
 /// * the server is meant to come back: every client starts these on demand, so
 ///   ending one frees the memory and the next request spawns a fresh copy.
-pub fn end_task(name: &str, servers: &[McpServer]) -> Result<usize, String> {
+pub fn end_task(name: &str, servers: &[McpServer]) -> Result<usize, Msg> {
     let live = snapshot(servers);
-    let target = live.iter().find(|s| s.name == name).ok_or_else(|| format!("{name} is not running any more"))?;
+    let target = live
+        .iter()
+        .find(|s| s.name == name)
+        .ok_or_else(|| Msg::new("error.procs.notRunning").var("name", name))?;
     if target.pids.is_empty() {
-        return Err(format!("{name} has no processes to end"));
+        return Err(Msg::new("error.procs.noProcesses").var("name", name));
     }
     // Children first: ending a runner first can orphan what it spawned.
     let mut pids = target.pids.clone();
@@ -325,10 +328,17 @@ pub fn end_task(name: &str, servers: &[McpServer]) -> Result<usize, String> {
         }
     }
     if ended == 0 {
-        return Err(format!("could not end {name}: the system refused every process"));
+        return Err(Msg::new("error.procs.refused").var("name", name));
     }
     Ok(ended)
 }
+
+/// The test-side key registry: every `error.procs.*` key this module can
+/// emit. Only `i18n.rs`'s test module reads this, so it does not exist in a
+/// release build at all.
+#[cfg(test)]
+pub(crate) const ERROR_KEYS: &[&str] =
+    &["error.procs.notRunning", "error.procs.noProcesses", "error.procs.refused"];
 
 /// Ask one process to stop. Never forces.
 #[cfg(not(windows))]
@@ -656,7 +666,7 @@ mod tests {
     fn a_name_that_is_not_running_is_refused() {
         // No inventory, so the snapshot cannot contain it whatever is live.
         let err = end_task("definitely-not-running-xyz", &[]).expect_err("must refuse");
-        assert!(err.contains("not running"), "{err}");
+        assert!(crate::i18n::render("en", &err).contains("not running"), "{err:?}");
     }
 
     /// A missing translation key renders as its own literal key text instead

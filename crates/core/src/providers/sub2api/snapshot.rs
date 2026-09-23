@@ -506,7 +506,11 @@ mod tests {
                 snapshot.id = id.clone();
                 assert_eq!(snapshot.status, "ok");
                 let alerts = crate::alerts::evaluate(&[snapshot], &cfg);
-                assert_eq!(alerts.first().map(|alert| alert.title.as_str()), expected, "{window} at {used}%");
+                assert_eq!(
+                    alerts.first().map(|alert| crate::i18n::render("en", &alert.title)),
+                    expected.map(str::to_string),
+                    "{window} at {used}%"
+                );
                 assert_eq!(alerts.len(), usize::from(expected.is_some()));
             }
             let mut next_period = response(json!({"mode":"quota_limited",

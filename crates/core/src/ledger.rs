@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::i18n::Msg;
+
 const MAX_ITEMS: usize = 200;
 const MAX_NAME: usize = 80;
 const MAX_NOTES: usize = 300;
@@ -203,17 +205,17 @@ pub fn view(items: &[Subscription], today: NaiveDate, usage30: &HashMap<String, 
 
 /// Cleans and checks an entry from the UI. Text is trimmed and bounded, the
 /// price must be a real non-negative amount, the date a real date.
-pub fn validate(mut sub: Subscription) -> Result<Subscription, String> {
+pub fn validate(mut sub: Subscription) -> Result<Subscription, Msg> {
     sub.name = sub.name.trim().chars().take(MAX_NAME).collect();
     if sub.name.is_empty() {
-        return Err("Give the subscription a name.".into());
+        return Err(Msg::new("error.ledger.name"));
     }
     if !sub.price.is_finite() || sub.price < 0.0 || sub.price > MAX_PRICE {
-        return Err("Enter the price as a number, zero or more.".into());
+        return Err(Msg::new("error.ledger.price"));
     }
     sub.renews_on = match sub.renews_on.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         Some(d) => Some(
-            parse_date(d).ok_or("Use a real date, like 2026-10-05.")?.format("%Y-%m-%d").to_string(),
+            parse_date(d).ok_or_else(|| Msg::new("error.ledger.date"))?.format("%Y-%m-%d").to_string(),
         ),
         None => None,
     };
@@ -262,18 +264,26 @@ pub fn load_from(path: &Path) -> Vec<Subscription> {
         .unwrap_or_default()
 }
 
-fn save_to(path: &Path, items: &[Subscription]) -> Result<(), String> {
+/// `save_to`'s own two failures ("create settings folder" / "encode
+/// ledger") are real sentences and translate normally. The write itself
+/// delegates to the same atomic writer the credential stores use, which is
+/// shared, general-purpose infrastructure well outside this module's
+/// business text -- its returned string is carried as an opaque `{error}`
+/// var rather than given a wrapping sentence of its own, so the message a
+/// user already sees does not change wording.
+fn save_to(path: &Path, items: &[Subscription]) -> Result<(), Msg> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("create settings folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| Msg::new("error.ledger.folder").var("error", e))?;
     }
     let body = serde_json::to_string_pretty(&LedgerFile { items: items.to_vec() })
-        .map_err(|e| format!("encode ledger: {e}"))?;
+        .map_err(|e| Msg::new("error.ledger.encode").var("error", e))?;
     // Same writer as saved API keys: temp file, owner-only, atomic replace.
     crate::providers::onenewapi::store::atomic_write(path, &body)
+        .map_err(|e| Msg::new("error.ledger.write").var("error", e))
 }
 
 /// Adds the entry, or replaces the one with the same id.
-pub fn upsert_in(path: &Path, sub: Subscription) -> Result<Subscription, String> {
+pub fn upsert_in(path: &Path, sub: Subscription) -> Result<Subscription, Msg> {
     let mut sub = validate(sub)?;
     let mut items = load_from(path);
     match items.iter_mut().find(|i| !sub.id.is_empty() && i.id == sub.id) {
@@ -288,7 +298,7 @@ pub fn upsert_in(path: &Path, sub: Subscription) -> Result<Subscription, String>
         }
         None => {
             if items.len() >= MAX_ITEMS {
-                return Err("The ledger is full.".into());
+                return Err(Msg::new("error.ledger.full"));
             }
             sub.id = format!("sub-{}", crate::providers::unique_stamp());
             sub.reminded_for = None;
@@ -299,7 +309,7 @@ pub fn upsert_in(path: &Path, sub: Subscription) -> Result<Subscription, String>
     Ok(sub)
 }
 
-pub fn delete_in(path: &Path, id: &str) -> Result<(), String> {
+pub fn delete_in(path: &Path, id: &str) -> Result<(), Msg> {
     let mut items = load_from(path);
     let before = items.len();
     items.retain(|i| i.id != id);
@@ -308,6 +318,20 @@ pub fn delete_in(path: &Path, id: &str) -> Result<(), String> {
     }
     save_to(path, &items)
 }
+
+/// The test-side key registry: every `error.ledger.*` key this module can
+/// emit. Only `i18n.rs`'s test module reads this, so it does not exist in a
+/// release build at all.
+#[cfg(test)]
+pub(crate) const ERROR_KEYS: &[&str] = &[
+    "error.ledger.name",
+    "error.ledger.price",
+    "error.ledger.date",
+    "error.ledger.full",
+    "error.ledger.folder",
+    "error.ledger.encode",
+    "error.ledger.write",
+];
 
 /// Reminders due now, persisted as sent so each renewal reminds once.
 pub fn take_reminders_in(path: &Path, today: NaiveDate, within_days: i64) -> Vec<ItemView> {

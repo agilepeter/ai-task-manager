@@ -360,6 +360,35 @@ pub fn t(cfg: &Value, msg: &Msg) -> String {
     render(resolved_locale(cfg), msg)
 }
 
+/// The test-side key registry for the three hardcoded notifications built
+/// in `src-tauri/src/lib.rs` (renewal, client budget, long session). They
+/// live in the Tauri crate, which this crate cannot depend on, so their key
+/// list is registered here instead -- next to the completeness tests that
+/// read it -- rather than beside the code that renders them. Only this
+/// module's own test module reads it, so it does not exist in a release
+/// build at all.
+#[cfg(test)]
+pub(crate) const NOTIFY_KEYS: &[&str] = &[
+    "notify.renewal.title",
+    "notify.renewal.today",
+    "notify.renewal.tomorrow",
+    "notify.renewal.inDays",
+    "notify.renewal.cycleMonthly",
+    "notify.renewal.cycleYearly",
+    "notify.clientBudget.title",
+    "notify.clientBudget.body",
+    "notify.longSession.title",
+    "notify.longSession.body",
+    "notify.longSession.others",
+];
+
+/// Same reasoning as `NOTIFY_KEYS`: `export_table` / `export_audit` /
+/// `export_clients_csv` are Tauri commands in `src-tauri/src/lib.rs`, so
+/// their `error.export.*` keys are registered here instead of beside them.
+#[cfg(test)]
+pub(crate) const EXPORT_ERROR_KEYS: &[&str] =
+    &["error.export.unsupported", "error.export.downloadsDir", "error.export.write"];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -588,6 +617,39 @@ mod tests {
         }
     }
 
+    /// Same shape as the test above, for the five newer prefixes:
+    /// `alert.*` / `digest.*` / `notify.*` / `hint.*` / `error.*`. Unlike
+    /// `finding.*`/`check.*`, none of these have a uniform "one Msg per id,
+    /// with a `.title`/`.detail` pair" shape -- a `hint.<id>` is one bare
+    /// sentence, `digest.renewal.inDays` is a count-bearing sentence with no
+    /// `.title` at all, `alert.reset` has two different body keys for one
+    /// title. So each registry lists exact base keys (bare, or the stem of
+    /// a count-bearing key) rather than id prefixes needing a suffix
+    /// appended, and `has_key_or_forms` (bare-or-complete-forms) is applied
+    /// to each one directly.
+    #[test]
+    fn every_alert_and_notification_key_exists() {
+        let en = dict("en");
+        let has_key_or_forms = |base: &str| -> bool {
+            non_empty(en, base).is_some() || ["one", "other"].iter().all(|f| non_empty(en, &format!("{base}.{f}")).is_some())
+        };
+        let keys: Vec<&str> = crate::alerts::ALERT_KEYS
+            .iter()
+            .chain(crate::digest::DIGEST_KEYS)
+            .chain(crate::diagnose::HINT_KEYS)
+            .chain(NOTIFY_KEYS)
+            .chain(crate::pin::ERROR_KEYS)
+            .chain(crate::procs::ERROR_KEYS)
+            .chain(crate::ledger::ERROR_KEYS)
+            .chain(crate::trust::ERROR_KEYS)
+            .chain(EXPORT_ERROR_KEYS)
+            .copied()
+            .collect();
+        for key in keys {
+            assert!(has_key_or_forms(key), "{key} is missing from en.json (bare or complete plural forms)");
+        }
+    }
+
     /// The reverse of the test above: every `finding.*` / `check.*` /
     /// `section.*` / `unit.*` key actually sitting in `en.json` maps back to
     /// something a module registered. Catches a typo'd or orphaned key --
@@ -605,6 +667,23 @@ mod tests {
             .map(|id| format!("finding.{id}."))
             .collect();
         let check_prefixes: Vec<String> = crate::audit::CHECK_KEYS.iter().map(|k| format!("{k}.")).collect();
+        // Every registered alert/digest/notify/hint/error base, as an exact
+        // key or a "base." prefix (for a count-bearing key's forms).
+        let exact_or_prefix = |registered: &[&str], key: &str| -> bool {
+            registered.iter().any(|&r| key == r || key.starts_with(&format!("{r}.")))
+        };
+        let alert_keys = crate::alerts::ALERT_KEYS;
+        let digest_keys = crate::digest::DIGEST_KEYS;
+        let hint_keys = crate::diagnose::HINT_KEYS;
+        let notify_keys = NOTIFY_KEYS;
+        let error_keys: Vec<&str> = crate::pin::ERROR_KEYS
+            .iter()
+            .chain(crate::procs::ERROR_KEYS)
+            .chain(crate::ledger::ERROR_KEYS)
+            .chain(crate::trust::ERROR_KEYS)
+            .chain(EXPORT_ERROR_KEYS)
+            .copied()
+            .collect();
 
         for key in dict("en").keys() {
             if key.starts_with("finding.") {
@@ -618,6 +697,16 @@ mod tests {
                     UNIT_KEYS.iter().any(|&u| key == u || key.starts_with(&format!("{u}."))),
                     "orphan unit key: {key}"
                 );
+            } else if key.starts_with("alert.") {
+                assert!(exact_or_prefix(alert_keys, key), "orphan alert key: {key}");
+            } else if key.starts_with("digest.") {
+                assert!(exact_or_prefix(digest_keys, key), "orphan digest key: {key}");
+            } else if key.starts_with("notify.") {
+                assert!(exact_or_prefix(notify_keys, key), "orphan notify key: {key}");
+            } else if key.starts_with("hint.") {
+                assert!(exact_or_prefix(hint_keys, key), "orphan hint key: {key}");
+            } else if key.starts_with("error.") {
+                assert!(exact_or_prefix(&error_keys, key), "orphan error key: {key}");
             }
         }
     }
