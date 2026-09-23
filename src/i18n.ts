@@ -60,7 +60,10 @@ export function localeTag(): string {
 }
 
 export function t(key: string, vars?: Record<string, string | number>): string {
-  let s = DICTS[active][key] ?? DICTS.en[key] ?? key;
+  // `||`, not `??`: translators hand-edit these files, and a blank cell
+  // (present but "") must paint English rather than nothing, same as an
+  // absent key does.
+  let s = DICTS[active][key] || DICTS.en[key] || key;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
       s = s.split(`{${k}}`).join(String(v));

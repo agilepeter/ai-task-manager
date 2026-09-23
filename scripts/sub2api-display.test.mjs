@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { test } from "node:test";
 import ts from "typescript";
 
@@ -115,20 +115,30 @@ test("strip tooltip includes valid restriction status separately from percentage
   assert.deepEqual(sub2ApiStatusDetails([metric("Balance")]), []);
 });
 
-// i18n.ts now imports its three dictionaries from src/locales/*.json.
-// ts.transpileModule only transpiles this one file — it doesn't bundle those
-// imports — and Node's native ESM loader can neither resolve a relative
-// specifier against a data: URL nor take a bare JSON import without an
-// attribute (which Vite's bundler build doesn't need). Inline the three
-// dictionaries as plain object literals before transpiling so the module is
-// self-contained again, the same way it was before they moved out.
-async function loadI18nModule() {
+// i18n.ts imports its dictionaries from src/locales/*.json. ts.transpileModule
+// only transpiles this one file — it doesn't bundle those imports — and
+// Node's native ESM loader can neither resolve a relative specifier against a
+// data: URL nor take a bare JSON import without an attribute (which Vite's
+// bundler build doesn't need). Inline every dictionary as a plain object
+// literal before transpiling so the module is self-contained again, the same
+// way it was before they moved out. The locale list is read from the
+// directory (like scripts/i18n.test.mjs already does), not hardcoded: a new
+// locales/xx.json — and the `import xx from "./locales/xx.json"` it comes
+// with — must not need this loader edited too.
+// `extraSource`, when given, is appended after the inlined dictionaries and
+// before transpiling — a way for a test to plant a synthetic dict entry
+// without depending on anything the real locale files happen to contain.
+async function loadI18nModule(extraSource = "") {
   const source = await readFile(new URL("../src/i18n.ts", import.meta.url), "utf8");
+  const localesDir = new URL("../src/locales/", import.meta.url);
+  const files = (await readdir(localesDir)).filter((f) => f.endsWith(".json"));
   let inlined = source;
-  for (const name of ["en", "zh", "ru"]) {
-    const json = await readFile(new URL(`../src/locales/${name}.json`, import.meta.url), "utf8");
-    inlined = inlined.replace(`import ${name} from "./locales/${name}.json";`, `const ${name} = ${json};`);
+  for (const file of files) {
+    const name = file.slice(0, -".json".length);
+    const json = await readFile(new URL(file, localesDir), "utf8");
+    inlined = inlined.replace(`import ${name} from "./locales/${file}";`, `const ${name} = ${json};`);
   }
+  inlined += extraSource;
   const code = ts.transpileModule(inlined, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
@@ -148,4 +158,16 @@ test("partial quota card text retains and localizes its explicit reset time", as
   assert.equal(displayMetricDetail(text), "Unknown of $10.00 · 2030-01-01 00:00 UTC 重置");
   setActiveLocale("en");
   assert.equal(displayMetricDetail(text), text);
+});
+
+test("t() treats an empty locale value as missing and falls through to English", async () => {
+  // Planted directly in the transpiled source, not read from src/locales/*.json:
+  // the real files can't carry an empty value (the "no value is empty" test in
+  // scripts/i18n.test.mjs forbids it), so this is the only way to exercise the
+  // fallback without waiting for a translator to leave a cell blank.
+  const { setActiveLocale, t } = await loadI18nModule(
+    '\nen["__t_fallback_test__"] = "English fallback text";\nzh["__t_fallback_test__"] = "";\n',
+  );
+  setActiveLocale("zh");
+  assert.equal(t("__t_fallback_test__"), "English fallback text");
 });
