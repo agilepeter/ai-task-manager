@@ -3,6 +3,9 @@
 // numbers; a detected plan is offered by name only, never with a guessed price.
 
 import { invoke } from "@tauri-apps/api/core";
+import { localeTag, plural, t } from "./i18n";
+
+const T = (k: string, v?: Record<string, string | number>) => t(`ledger.${k}`, v);
 
 type Cycle = "monthly" | "yearly";
 
@@ -56,7 +59,7 @@ function esc(s: string): string {
 }
 
 function money(n: number): string {
-  return n >= 10 ? `$${Math.round(n).toLocaleString()}` : `$${n.toFixed(2)}`;
+  return n >= 10 ? `$${Math.round(n).toLocaleString(localeTag())}` : `$${n.toFixed(2)}`;
 }
 
 function cap(s: string): string {
@@ -64,32 +67,36 @@ function cap(s: string): string {
 }
 
 function renewalText(item: ItemView): string {
-  if (item.daysLeft === null || !item.nextRenewal) return "No renewal date";
-  const date = new Date(`${item.nextRenewal}T00:00:00`).toLocaleDateString([], { month: "short", day: "numeric" });
-  if (item.daysLeft === 0) return `Renews today · ${date}`;
-  if (item.daysLeft === 1) return `Renews tomorrow · ${date}`;
-  return `Renews in ${item.daysLeft} days · ${date}`;
+  if (item.daysLeft === null || !item.nextRenewal) return T("renewal.none");
+  const date = new Date(`${item.nextRenewal}T00:00:00`).toLocaleDateString(localeTag(), { month: "short", day: "numeric" });
+  if (item.daysLeft === 0) return T("renewal.today", { date });
+  if (item.daysLeft === 1) return T("renewal.tomorrow", { date });
+  // daysLeft is always >= 2 here: 0 and 1 are handled above, so plural()'s
+  // .one form (n === 1) is unreachable through this branch.
+  return plural("ledger.renewal.inDays", item.daysLeft, { date });
 }
 
 function valueLine(item: ItemView): string {
   if (item.idle) {
-    return `<p class="lg-flag lg-flag-idle">No measured usage in 30 days. Cancelling saves ${money(item.monthlyCost)} a month.</p>`;
+    return `<p class="lg-flag lg-flag-idle">${esc(T("value.idle", { amount: money(item.monthlyCost) }))}</p>`;
   }
   if (item.whatIf?.kind === "plan-wins") {
     const w = item.whatIf;
-    return `<p class="lg-flag">Pay-as-you-go, the last 30 days would have cost about ${money(w.apiCost)}. The plan is ${money(w.planCost)} a month: about ${money(w.difference)} saved.</p>`;
+    return `<p class="lg-flag">${esc(T("value.planWins", { apiCost: money(w.apiCost), planCost: money(w.planCost), difference: money(w.difference) }))}</p>`;
   }
   if (item.whatIf?.kind === "plan-loses") {
     const w = item.whatIf;
-    return `<p class="lg-flag lg-flag-idle">About ${money(w.apiCost)} of work in 30 days on a ${money(w.planCost)} a month plan. Pay-as-you-go, or a smaller plan, would have cost about ${money(w.difference)} less.</p>`;
+    return `<p class="lg-flag lg-flag-idle">${esc(T("value.planLoses", { apiCost: money(w.apiCost), planCost: money(w.planCost), difference: money(w.difference) }))}</p>`;
   }
   if (item.usage30 === null || item.valueRatio === null) return "";
   const times = item.valueRatio >= 10 ? item.valueRatio.toFixed(0) : item.valueRatio.toFixed(1);
+  // verdict is itself translated text (no markup), passed as a var into the
+  // outer T() call below — same nesting inventory.ts uses for running.summary.
   const verdict =
     item.valueRatio >= 1
-      ? `${times}x its price`
-      : `${Math.round(item.valueRatio * 100)}% of its price`;
-  return `<p class="lg-flag">${money(item.usage30)} of API-equivalent work in 30 days: ${verdict}.</p>`;
+      ? T("value.timesPrice", { times })
+      : T("value.pctPrice", { pct: Math.round(item.valueRatio * 100) });
+  return `<p class="lg-flag">${esc(T("value.summary", { value: money(item.usage30), verdict }))}</p>`;
 }
 
 function blank(): Subscription {
@@ -98,32 +105,37 @@ function blank(): Subscription {
 
 function form(sub: Subscription): string {
   const tools = source?.tools() ?? [];
+  // Named `tool`, not `t`: this module imports the translator as `t`, and a
+  // same-named callback param here would shadow it silently (same fix as
+  // inventory.ts's renderTools).
   const toolOptions =
-    `<option value="">Nothing tracked here</option>` +
+    `<option value="">${esc(T("form.nothingTracked"))}</option>` +
     tools
-      .map((t) => `<option value="${esc(t.id)}"${sub.provider === t.id ? " selected" : ""}>${esc(t.name)}</option>`)
+      .map((tool) => `<option value="${esc(tool.id)}"${sub.provider === tool.id ? " selected" : ""}>${esc(tool.name)}</option>`)
       .join("");
+  // The Name placeholder ("Claude Max") is an example plan name, not prose:
+  // it stays as-is in every locale, same as a detected plan name would.
   return `
     <form class="card-panel lg-form" id="lg-form">
-      <label>Name <input id="lg-name" type="text" maxlength="80" value="${esc(sub.name)}" placeholder="Claude Max" required /></label>
+      <label>${esc(T("form.name"))} <input id="lg-name" type="text" maxlength="80" value="${esc(sub.name)}" placeholder="Claude Max" required /></label>
       <div class="lg-form-row">
-        <label>Price <input id="lg-price" type="number" min="0" step="0.01" value="${sub.price > 0 ? sub.price : ""}" placeholder="0.00" required /></label>
-        <label>Billed
+        <label>${esc(T("form.price"))} <input id="lg-price" type="number" min="0" step="0.01" value="${sub.price > 0 ? sub.price : ""}" placeholder="0.00" required /></label>
+        <label>${esc(T("form.billed"))}
           <select id="lg-cycle">
-            <option value="monthly"${sub.cycle === "monthly" ? " selected" : ""}>Monthly</option>
-            <option value="yearly"${sub.cycle === "yearly" ? " selected" : ""}>Yearly</option>
+            <option value="monthly"${sub.cycle === "monthly" ? " selected" : ""}>${esc(T("form.monthly"))}</option>
+            <option value="yearly"${sub.cycle === "yearly" ? " selected" : ""}>${esc(T("form.yearly"))}</option>
           </select>
         </label>
       </div>
       <div class="lg-form-row">
-        <label>Renews on <input id="lg-date" type="date" value="${esc(sub.renewsOn ?? "")}" /></label>
-        <label>Pays for <select id="lg-provider">${toolOptions}</select></label>
+        <label>${esc(T("form.renewsOn"))} <input id="lg-date" type="date" value="${esc(sub.renewsOn ?? "")}" /></label>
+        <label>${esc(T("form.paysFor"))} <select id="lg-provider">${toolOptions}</select></label>
       </div>
-      <label>Notes <input id="lg-notes" type="text" maxlength="300" value="${esc(sub.notes ?? "")}" placeholder="Optional" /></label>
+      <label>${esc(T("form.notes"))} <input id="lg-notes" type="text" maxlength="300" value="${esc(sub.notes ?? "")}" placeholder="${esc(T("form.optional"))}" /></label>
       ${formError ? `<p class="lg-error" role="alert">${esc(formError)}</p>` : ""}
       <div class="lg-form-actions">
-        <button type="button" class="inv-learn" id="lg-cancel">Cancel</button>
-        <button type="submit" class="lg-save">${sub.id ? "Save changes" : "Add subscription"}</button>
+        <button type="button" class="inv-learn" id="lg-cancel">${esc(t("dialog.cancel"))}</button>
+        <button type="submit" class="lg-save">${sub.id ? esc(T("form.saveChanges")) : esc(T("form.addSubscription"))}</button>
       </div>
     </form>`;
 }
@@ -132,7 +144,7 @@ function render(): void {
   const el = document.querySelector<HTMLElement>("#ledger");
   if (!el) return;
   if (loadError) {
-    el.innerHTML = `<article class="provider"><div class="card-panel"><p class="inv-empty">Could not open the ledger: ${esc(loadError)}</p></div></article>`;
+    el.innerHTML = `<article class="provider"><div class="card-panel"><p class="inv-empty">${esc(T("loadError", { error: loadError }))}</p></div></article>`;
     return;
   }
   if (!ledger) {
@@ -141,15 +153,18 @@ function render(): void {
   }
   const lg = ledger;
   const linked = new Set(lg.items.map((i) => i.provider).filter(Boolean));
-  const suggestions = (source?.tools() ?? []).filter((t) => !linked.has(t.id));
+  // `tool`, not `t`: see the comment in form() above.
+  const suggestions = (source?.tools() ?? []).filter((tool) => !linked.has(tool.id));
 
   const headline = lg.items.length
     ? `<article class="provider"><div class="card-panel lg-total">
-        <div class="dt-headline"><b>${money(lg.monthly)}</b><span>a month · ${money(lg.yearly)} a year</span></div>
-        ${lg.idleMonthly > 0 ? `<p class="lg-flag lg-flag-idle">${money(lg.idleMonthly)} a month is going to tools with no measured usage.</p>` : ""}
+        <div class="dt-headline"><b>${money(lg.monthly)}</b><span>${esc(T("total.line", { yearly: money(lg.yearly) }))}</span></div>
+        ${lg.idleMonthly > 0 ? `<p class="lg-flag lg-flag-idle">${esc(T("idleTotal", { amount: money(lg.idleMonthly) }))}</p>` : ""}
       </div></article>`
     : "";
 
+  // "mo"/"yr" are format tokens, like $ and %, not words: they stay literal
+  // in every locale (binding conventions for this task).
   const rows = lg.items
     .map((item) =>
       editing?.id === item.id
@@ -163,8 +178,8 @@ function render(): void {
         <div class="lg-item-sub">
           <span>${esc(renewalText(item))}</span>
           <span class="lg-actions">
-            <button class="lg-link" data-edit="${esc(item.id)}">Edit</button>
-            <button class="lg-link${confirmDelete === item.id ? " lg-danger" : ""}" data-delete="${esc(item.id)}">${confirmDelete === item.id ? "Really delete?" : "Delete"}</button>
+            <button class="lg-link" data-edit="${esc(item.id)}">${esc(T("item.edit"))}</button>
+            <button class="lg-link${confirmDelete === item.id ? " lg-danger" : ""}" data-delete="${esc(item.id)}">${confirmDelete === item.id ? esc(T("item.reallyDelete")) : esc(T("item.delete"))}</button>
           </span>
         </div>
         ${valueLine(item)}
@@ -175,22 +190,22 @@ function render(): void {
 
   const empty =
     lg.items.length === 0 && !editing
-      ? `<article class="provider"><div class="card-panel"><p class="inv-empty">Nothing here yet. Add what you pay for AI tools to see the monthly total, renewal dates, and whether each plan earns its price.</p></div></article>`
+      ? `<article class="provider"><div class="card-panel"><p class="inv-empty">${esc(T("empty"))}</p></div></article>`
       : "";
 
   const suggest =
     suggestions.length && !editing
-      ? `<div class="lg-suggest"><span>Found on this computer:</span>${suggestions
-          .map((t) => `<button class="inv-chip lg-chip" data-suggest="${esc(t.id)}">+ ${esc(t.name)}${t.plan ? ` ${esc(cap(t.plan))}` : ""}</button>`)
+      ? `<div class="lg-suggest"><span>${esc(T("suggest.found"))}</span>${suggestions
+          .map((tool) => `<button class="inv-chip lg-chip" data-suggest="${esc(tool.id)}">+ ${esc(tool.name)}${tool.plan ? ` ${esc(cap(tool.plan))}` : ""}</button>`)
           .join("")}</div>`
       : "";
 
   el.innerHTML = `
     <div class="inv-toolbar">
-      <p class="inv-note">Your own numbers, kept on this computer. Prices are never guessed.</p>
+      <p class="inv-note">${esc(T("note"))}</p>
       <span class="lg-toolbar">
-        ${lg.items.length && !editing ? `<button class="inv-rescan" id="lg-export" title="Save the ledger as a CSV in your Downloads folder">Export CSV</button>` : ""}
-        ${editing ? "" : `<button class="inv-rescan" id="lg-add">Add</button>`}
+        ${lg.items.length && !editing ? `<button class="inv-rescan" id="lg-export" title="${esc(T("export.tip"))}">${esc(T("export.button"))}</button>` : ""}
+        ${editing ? "" : `<button class="inv-rescan" id="lg-add">${esc(T("add"))}</button>`}
       </span>
     </div>
     ${exportNote ? `<p class="inv-note">${esc(exportNote)}</p>` : ""}
@@ -243,6 +258,14 @@ export function showLedger(): void {
   void load();
 }
 
+/// Redraws the Subscriptions tab in place, e.g. after a locale switch (task 7
+/// wires this into the locale-change handler). A no-op while another view is
+/// showing, or before the first load has produced anything to redraw.
+export function rerender(): void {
+  const el = document.querySelector<HTMLElement>("#ledger");
+  if (el && !el.hidden) render();
+}
+
 export function setupLedger(src: LedgerSource): void {
   source = src;
   const el = document.querySelector<HTMLElement>("#ledger");
@@ -261,13 +284,16 @@ export function setupLedger(src: LedgerSource): void {
       if (!ledger) return;
       void invoke<string>("export_table", {
         name: "ai subscriptions",
-        headers: ["Name", "Price", "Billed", "Monthly cost", "Next renewal", "Pays for", "30-day API-equivalent usage", "Notes"],
+        headers: [
+          t("ledger.form.name"), t("ledger.form.price"), t("ledger.form.billed"), t("ledger.csv.monthlyCost"),
+          t("ledger.csv.nextRenewal"), t("ledger.form.paysFor"), t("ledger.csv.usage30"), t("ledger.form.notes"),
+        ],
         rows: ledger.items.map((i) => [
           i.name, i.price.toFixed(2), i.cycle, i.monthlyCost.toFixed(2), i.nextRenewal ?? "", i.provider ?? "",
           i.usage30 === null ? "" : i.usage30.toFixed(2), i.notes ?? "",
         ]),
       }).then(
-        (path) => { exportNote = `Saved ${path}`; render(); },
+        (path) => { exportNote = t("detail.csv.saved", { path }); render(); },
         (err) => { exportNote = String(err); render(); },
       );
       return;
@@ -278,7 +304,7 @@ export function setupLedger(src: LedgerSource): void {
     } else if (target.closest("#lg-cancel")) {
       editing = null;
     } else if (suggestId) {
-      const tool = source?.tools().find((t) => t.id === suggestId);
+      const tool = source?.tools().find((entry) => entry.id === suggestId);
       editing = { ...blank(), name: tool ? `${tool.name}${tool.plan ? ` ${cap(tool.plan)}` : ""}` : "", provider: suggestId };
     } else if (editId) {
       const item = ledger?.items.find((i) => i.id === editId);

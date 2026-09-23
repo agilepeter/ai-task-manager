@@ -4,6 +4,9 @@
 // only draws it. Statuses are always a word as well as a colour.
 
 import { invoke } from "@tauri-apps/api/core";
+import { plural, t } from "./i18n";
+
+const T = (k: string, v?: Record<string, string | number>) => t(`audit.${k}`, v);
 
 interface Check {
   id: string;
@@ -32,7 +35,6 @@ let report: AuditReport | null = null;
 let note = "";
 let firstRun = false;
 
-const WORD: Record<Check["status"], string> = { pass: "Pass", attention: "Needs attention", consider: "Worth a look", info: "Note" };
 /** Which tab fixes a check, when one does. */
 const WHERE: Record<string, "inventory" | "ledger" | "usage"> = {
   "mcp-unpinned": "inventory", "mcp-env-secrets": "inventory", "mcp-remote": "inventory",
@@ -47,25 +49,50 @@ function esc(s: string): string {
   );
 }
 
+/// Rust's Section.name is a fixed, small vocabulary ("Setup" / "Guardrails" /
+/// "Usage" / "Money", crates/core/src/audit.rs). Mapped by the English name it
+/// sends today; task 9 gives Rust a name_key so this stops guessing from text.
+/// An unrecognised name (a future section not yet mapped) falls back to itself
+/// rather than showing nothing.
+function sectionLabel(name: string): string {
+  if (name === "Setup") return T("section.setup");
+  if (name === "Guardrails") return T("section.guardrails");
+  if (name === "Usage") return T("section.usage");
+  if (name === "Money") return T("section.money");
+  return name;
+}
+
+/// The "Open …" link under a check that names which tab fixes it.
+function gotoLabel(where: "inventory" | "ledger" | "usage"): string {
+  if (where === "ledger") return T("goto.ledger");
+  if (where === "usage") return T("goto.usage");
+  return T("goto.inventory");
+}
+
 function render(): void {
   const el = document.querySelector<HTMLElement>("#audit-body");
   if (!el) return;
   if (!report) {
-    el.innerHTML = `<p class="dt-empty">Reading this computer's AI setup…</p>`;
+    el.innerHTML = `<p class="dt-empty">${esc(T("loading"))}</p>`;
     return;
   }
   const r = report;
   const scored = r.passed + r.attention;
+  // Rebuilt on every render (not a module-level const) so a locale switch is
+  // reflected immediately, same reasoning as inventory.ts's tierLabel().
+  const WORD: Record<Check["status"], string> = {
+    pass: T("status.pass"), attention: T("status.attention"), consider: T("status.consider"), info: T("status.info"),
+  };
   const head = `
     <section class="dt-section au-head">
-      ${firstRun ? `<p class="au-welcome">Here is what is on this computer. Nothing was sent anywhere to work this out.</p>` : ""}
+      ${firstRun ? `<p class="au-welcome">${esc(T("welcome"))}</p>` : ""}
       <div class="au-score">
         <b>${r.score === null ? "–" : r.score}</b>
-        <span>${r.score === null ? "Nothing to score yet" : `of 100 · ${r.passed} of ${scored} checks pass`}</span>
+        <span>${r.score === null ? esc(T("score.none")) : esc(T("score.line", { passed: r.passed, scored }))}</span>
       </div>
-      <div class="au-meter" role="img" aria-label="${r.passed} of ${scored} scored checks pass"><span style="width:${scored ? (r.passed / scored) * 100 : 0}%"></span></div>
-      <p class="dt-caption">The score is checks passed over checks that apply. Only gaps count against it: "Worth a look" and notes are not scored. ${r.attention ? `Start with the ${r.attention} marked "Needs attention".` : "Nothing needs attention."}</p>
-      <div class="dt-rule-actions"><span class="spacer"></span><button class="inv-learn" id="au-export" title="Save this audit as a Markdown file in your Downloads folder">Export report</button></div>
+      <div class="au-meter" role="img" aria-label="${esc(T("score.meterAria", { passed: r.passed, scored }))}"><span style="width:${scored ? (r.passed / scored) * 100 : 0}%"></span></div>
+      <p class="dt-caption">${esc(T("score.explain", { consider: WORD.consider }))} ${r.attention ? esc(plural("audit.score.attention", r.attention, { status: WORD.attention })) : esc(T("score.nothingNeeded"))}</p>
+      <div class="dt-rule-actions"><span class="spacer"></span><button class="inv-learn" id="au-export" title="${esc(T("export.tip"))}">${esc(T("export.button"))}</button></div>
       ${note ? `<p class="dt-caption">${esc(note)}</p>` : ""}
     </section>`;
   const sections = r.sections
@@ -73,13 +100,13 @@ function render(): void {
       // What needs attention first, then what passes, then notes.
       const order = { attention: 0, consider: 1, pass: 2, info: 3 } as const;
       const checks = [...s.checks].sort((a, b) => order[a.status] - order[b.status]);
-      return `<section class="dt-section"><h3>${esc(s.name)}</h3>${checks
+      return `<section class="dt-section"><h3>${esc(sectionLabel(s.name))}</h3>${checks
         .map(
           (c) => `
         <div class="au-check au-${c.status}">
-          <div class="au-check-head"><span class="au-status">${WORD[c.status]}</span><span class="au-title">${esc(c.title)}</span></div>
+          <div class="au-check-head"><span class="au-status">${esc(WORD[c.status])}</span><span class="au-title">${esc(c.title)}</span></div>
           ${c.detail ? `<p class="au-detail">${esc(c.detail)}</p>` : ""}
-          ${(c.status === "attention" || c.status === "consider") && WHERE[c.id] ? `<button class="lg-link" data-goto="${WHERE[c.id]}">Open ${WHERE[c.id] === "ledger" ? "Subscriptions" : WHERE[c.id] === "inventory" ? "Inventory" : "Usage"}</button>` : ""}
+          ${(c.status === "attention" || c.status === "consider") && WHERE[c.id] ? `<button class="lg-link" data-goto="${WHERE[c.id]}">${esc(gotoLabel(WHERE[c.id]))}</button>` : ""}
         </div>`,
         )
         .join("")}</section>`;
@@ -114,6 +141,12 @@ export function maybeFirstRunAudit(): void {
   }
 }
 
+/// Redraws the audit panel in place, e.g. after a locale switch (task 7 wires
+/// this into the locale-change handler). A no-op while the panel is closed.
+export function rerender(): void {
+  if (document.body.classList.contains("audit-open")) render();
+}
+
 export function setupAudit(h: AuditHost): void {
   host = h;
   document.querySelector("#audit-close")?.addEventListener("click", close);
@@ -130,7 +163,7 @@ export function setupAudit(h: AuditHost): void {
     }
     if (target.closest("#au-export")) {
       void invoke<string>("export_audit").then(
-        (path) => { note = `Saved ${path}`; render(); },
+        (path) => { note = t("detail.csv.saved", { path }); render(); },
         (err) => { note = String(err); render(); },
       );
     }

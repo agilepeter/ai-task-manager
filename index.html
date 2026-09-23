@@ -59,7 +59,7 @@
         <div id="view-tabs" class="tabs view-tabs" role="tablist" aria-label="Views">
           <button class="tab active" role="tab" aria-selected="true" data-view="usage">Usage</button>
           <button class="tab" role="tab" aria-selected="false" data-view="inventory" data-i18n="inventory.tab">Inventory</button>
-          <button class="tab" role="tab" aria-selected="false" data-view="ledger">Subscriptions</button>
+          <button class="tab" role="tab" aria-selected="false" data-view="ledger" data-i18n="ledger.tab">Subscriptions</button>
         </div>
         <div class="content">
           <section id="inventory" hidden></section>
@@ -113,19 +113,19 @@
     </aside>
 
     <!-- About: the maker, where to learn more, and the projects this stands on. -->
-    <aside id="about" aria-label="About">
+    <aside id="about" aria-label="About" data-i18n-aria="about.panel.title">
       <div class="panel-head glass-bar">
-        <button class="mini-btn" id="about-close">&#8592; Done</button>
-        <span class="panel-title">About</span>
+        <button class="mini-btn" id="about-close" data-i18n="settings.done">&#8592; Done</button>
+        <span class="panel-title" data-i18n="about.panel.title">About</span>
       </div>
       <div id="about-body"></div>
     </aside>
 
     <!-- Audit: a scored read of the whole setup. Opens itself on first run. -->
-    <aside id="audit" aria-label="Audit">
+    <aside id="audit" aria-label="Audit" data-i18n-aria="audit.panel.ariaLabel">
       <div class="panel-head glass-bar">
-        <button class="mini-btn" id="audit-close">&#8592; Done</button>
-        <span class="panel-title">AI setup audit</span>
+        <button class="mini-btn" id="audit-close" data-i18n="settings.done">&#8592; Done</button>
+        <span class="panel-title" data-i18n="audit.panel.title">AI setup audit</span>
       </div>
       <div id="audit-body"></div>
     </aside>

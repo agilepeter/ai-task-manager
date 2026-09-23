@@ -5,19 +5,30 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { BRAND, CREDITS } from "./brand";
+import { t } from "./i18n";
 
-// Short, upbeat, emoji-forward: he is the most cheerful character there is.
-const LINES = [
-  "Hi! 👋",
-  "I counted your tokens! 🔢✨",
-  "Pinned versions are my love language 📌💙",
-  "Beep! Still under the limit! 🎉",
-  "MiniDoge says hi 🐕",
-  "I fetched that for you 🦴… wait, wrong job 😅",
-  "Fresh session? Fresh start! 🌱",
-  "Okay okay, that tickles 🤖💫",
-];
+const T = (k: string, v?: Record<string, string | number>) => t(`about.${k}`, v);
+
 let pokes = 0;
+
+/// The bubble text for a given poke count, cycling through 8 lines. Each case
+/// is a literal T("egg....") call, not a computed key, so i18n.test.mjs's
+/// KEYED_SOURCES coverage check (which greps for quoted literals) actually
+/// sees every egg.* reference. Short, upbeat, emoji-forward: he is the most
+/// cheerful character there is. Each locale gets its own real joke, not a
+/// word-for-word one, with the emoji kept.
+function eggLine(n: number): string {
+  switch ((n - 1) % 8) {
+    case 0: return T("egg.hi");
+    case 1: return T("egg.tokens");
+    case 2: return T("egg.pinned");
+    case 3: return T("egg.beep");
+    case 4: return T("egg.minidoge");
+    case 5: return T("egg.fetch");
+    case 6: return T("egg.freshSession");
+    default: return T("egg.tickles");
+  }
+}
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -25,8 +36,11 @@ function esc(s: string): string {
   );
 }
 
-const BOT = `
-<svg class="ab-bot" viewBox="0 0 240 240" role="img" aria-label="A small friendly robot">
+/// A function, not a module-level constant: the aria-label must re-read
+/// through T() on every render so a locale switch actually changes it.
+function botSvg(): string {
+  return `
+<svg class="ab-bot" viewBox="0 0 240 240" role="img" aria-label="${esc(T("bot.ariaLabel"))}">
   <g class="ab-bot-body">
     <circle class="ab-antenna-glow" cx="120" cy="34" r="20"/>
     <rect x="116" y="40" width="8" height="26" rx="4" fill="#c2c2cc"/>
@@ -39,21 +53,28 @@ const BOT = `
     <g fill="#5cc8ff"><rect x="82" y="146" width="9" height="9" rx="2"/><rect x="94" y="152" width="9" height="9" rx="2"/><rect x="106" y="155" width="9" height="9" rx="2"/><rect x="118" y="156" width="9" height="9" rx="2"/><rect x="130" y="155" width="9" height="9" rx="2"/><rect x="142" y="152" width="9" height="9" rx="2"/><rect x="154" y="146" width="9" height="9" rx="2"/></g>
   </g>
 </svg>`;
+}
 
 function render(version: string): void {
   const el = document.querySelector<HTMLElement>("#about-body");
   if (!el) return;
+  // CREDITS is brand.ts data (MIT attribution, stays fixed in any fork per
+  // CLAUDE.md); the connecting "by" stays with it rather than being the one
+  // translated word inside an otherwise-English attribution line.
+  const credits = CREDITS.map(
+    (c) => `<p class="ab-credit"><button class="lg-link" data-link="${esc(c.url)}">${esc(c.name)}</button> by ${esc(c.by)}: ${esc(c.note)}.</p>`,
+  ).join("");
   el.innerHTML = `
     <section class="dt-section ab-hero">
-      <button class="ab-bot-btn" id="ab-bot" aria-label="Say hi to the robot">${BOT}</button>
+      <button class="ab-bot-btn" id="ab-bot" aria-label="${esc(T("bot.pokeAriaLabel"))}">${botSvg()}</button>
       <p class="ab-bubble" id="ab-bubble" aria-live="polite" hidden></p>
       <h2>${esc(BRAND.product)}</h2>
       <p class="ab-tagline">${esc(BRAND.tagline)}</p>
-      <p class="ab-maker">Made by <button class="lg-link" data-link="${esc(BRAND.makerUrl)}">${esc(BRAND.maker)}</button> · ${esc(BRAND.by)}</p>
-      <p class="dt-caption">Version ${esc(version)}</p>
+      <p class="ab-maker">${esc(T("madeBy"))} <button class="lg-link" data-link="${esc(BRAND.makerUrl)}">${esc(BRAND.maker)}</button> · ${esc(BRAND.by)}</p>
+      <p class="dt-caption">${esc(T("version", { version }))}</p>
     </section>
     <section class="dt-section">
-      <h3>Learn more</h3>
+      <h3>${esc(T("learnMore"))}</h3>
       ${BRAND.links
         .map(
           (l) => `
@@ -64,9 +85,9 @@ function render(version: string): void {
         .join("")}
     </section>
     <section class="dt-section">
-      <h3>Standing on</h3>
-      ${CREDITS.map((c) => `<p class="ab-credit"><button class="lg-link" data-link="${esc(c.url)}">${esc(c.name)}</button> by ${esc(c.by)}: ${esc(c.note)}.</p>`).join("")}
-      <p class="dt-caption">Open source under the MIT licence. Everything this app reads stays on your computer.</p>
+      <h3>${esc(T("standingOn"))}</h3>
+      ${credits}
+      <p class="dt-caption">${esc(T("license"))}</p>
     </section>`;
 }
 
@@ -75,13 +96,13 @@ function poke(): void {
   const bot = document.querySelector<HTMLElement>("#ab-bot");
   const bubble = document.querySelector<HTMLElement>("#ab-bubble");
   if (!bot || !bubble) return;
-  bubble.textContent = LINES[(pokes - 1) % LINES.length];
+  bubble.textContent = eggLine(pokes);
   bubble.hidden = false;
   // Restart the little hop; every tenth poke earns the full dance.
   bot.classList.remove("ab-hop", "ab-dance");
   void bot.offsetWidth;
   bot.classList.add(pokes % 10 === 0 ? "ab-dance" : "ab-hop");
-  if (pokes % 10 === 0) bubble.textContent = "DANCE BREAK! 🕺💃🤖✨";
+  if (pokes % 10 === 0) bubble.textContent = T("egg.dance");
 }
 
 export function setupAbout(): void {

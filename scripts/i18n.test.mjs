@@ -87,6 +87,9 @@ test("language endonyms are identical across locales", () => {
 const KEYED_SOURCES = [
   ["../src/detail.ts", "detail."],
   ["../src/inventory.ts", "inventory."],
+  ["../src/audit.ts", "audit."],
+  ["../src/about.ts", "about."],
+  ["../src/ledger.ts", "ledger."],
 ];
 
 function escapeForRegex(s) {
