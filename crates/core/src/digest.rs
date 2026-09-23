@@ -39,6 +39,13 @@ fn money(n: f64) -> String {
     if n >= 10.0 { format!("${:.0}", n) } else { format!("${:.2}", n) }
 }
 
+/// `{:.0}` -- the shared whole-number formatting for a percentage or a bare
+/// dollar amount whose `%`/`$` sign is already literal in the surrounding
+/// template (unlike `money()` above, which puts its own `$` on).
+pub fn n0(x: f64) -> String {
+    format!("{x:.0}")
+}
+
 /// "mon" … "sun". Anything else, including "off", is no digest.
 pub fn weekday_of(setting: &str) -> Option<Weekday> {
     match setting.to_ascii_lowercase().as_str() {

@@ -16,6 +16,7 @@
 //! when a new reset period begins. State is in-memory by design — matching
 //! the Mac's "already-bad at launch won't alert" behavior.
 
+use crate::digest::n0;
 use crate::i18n::Msg;
 use crate::providers::Snapshot;
 use serde_json::Value;
@@ -257,7 +258,7 @@ pub fn evaluate_at(snapshots: &[Snapshot], cfg: &Value, now: i64) -> Vec<Alert> 
                 let body_key = if used < 2.0 { "alert.reset.backTo100" } else { "alert.reset.available" };
                 alerts.push(Alert {
                     title: Msg::new("alert.reset.title"),
-                    body: Msg::new(body_key).var("name", &name).var("left", format!("{left:.0}")).var("next", next),
+                    body: Msg::new(body_key).var("name", &name).var("left", n0(left)).var("next", next),
                 });
             }
 
@@ -272,13 +273,13 @@ pub fn evaluate_at(snapshots: &[Snapshot], cfg: &Value, now: i64) -> Vec<Alert> 
                 } else if want_close && close_now && !entry.close {
                     alerts.push(Alert {
                         title: Msg::new("alert.close.title"),
-                        body: Msg::new("alert.close.body").var("name", &name).var("spare", format!("{spare:.0}")),
+                        body: Msg::new("alert.close.body").var("name", &name).var("spare", n0(spare)),
                     });
                 }
                 if want_almost && almost_now && !entry.almost_out {
                     alerts.push(Alert {
                         title: Msg::new("alert.almostOut.title"),
-                        body: Msg::new("alert.almostOut.body").var("name", &name).var("left", format!("{left:.0}")),
+                        body: Msg::new("alert.almostOut.body").var("name", &name).var("left", n0(left)),
                     });
                 }
             }
@@ -295,9 +296,9 @@ pub fn evaluate_at(snapshots: &[Snapshot], cfg: &Value, now: i64) -> Vec<Alert> 
                         title: Msg::new("alert.burningFast.title"),
                         body: Msg::new("alert.burningFast.body")
                             .var("name", &name)
-                            .var("points", format!("{points:.0}"))
+                            .var("points", n0(points))
                             .var("minutes", minutes)
-                            .var("left", format!("{left:.0}")),
+                            .var("left", n0(left)),
                     });
                 }
                 // Re-arm only once the rate has clearly fallen, so a spike
@@ -342,9 +343,7 @@ pub fn evaluate_spend(today_cost: f64, today: &str, cfg: &Value) -> Option<Alert
     *fired = Some(today.to_string());
     Some(Alert {
         title: Msg::new("alert.dailySpend.title"),
-        body: Msg::new("alert.dailySpend.body")
-            .var("spent", format!("{today_cost:.0}"))
-            .var("limit", format!("{limit:.0}")),
+        body: Msg::new("alert.dailySpend.body").var("spent", n0(today_cost)).var("limit", n0(limit)),
     })
 }
 
@@ -702,6 +701,11 @@ mod tests {
     /// side of the clock-derived duration instead of one `assert_eq!` on
     /// the whole string; every other case has no clock-derived content
     /// and is checked exactly.
+    ///
+    /// The six cases below are hand-enumerated rather than driven from
+    /// `ALERT_KEYS`, so a seventh alert added later is not automatically
+    /// forced into this wording pin -- `every_alert_and_notification_key_exists`
+    /// in `i18n.rs` is what catches a new alert missing its en/zh/ru values.
     #[test]
     fn zh_and_ru_alert_text_is_unchanged() {
         let locales = ["en", "zh", "ru"];

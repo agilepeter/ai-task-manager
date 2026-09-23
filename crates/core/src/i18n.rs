@@ -582,6 +582,16 @@ mod tests {
         assert_eq!(render_with(&dicts, "en", &one), "see 1 process");
     }
 
+    /// A base key resolves in `en.json` either as a bare value or with a
+    /// complete `.one`/`.other` plural-form pair (the two forms English
+    /// ever needs -- see `PLURAL_FORMS` in `src/i18n.ts`). Shared by both
+    /// completeness tests below, one for the `finding.*`/`check.*` id
+    /// registries, one for the newer `alert.*`/`digest.*`/`notify.*`/
+    /// `hint.*`/`error.*` ones.
+    fn has_key_or_forms(en: &HashMap<String, String>, base: &str) -> bool {
+        non_empty(en, base).is_some() || ["one", "other"].iter().all(|f| non_empty(en, &format!("{base}.{f}")).is_some())
+    }
+
     /// Every finding id each emitting module registers, and every check
     /// prefix `audit.rs` registers: `en.json` has a `.title` (bare, or the
     /// full plural-form set) and a `.detail` (same) for each -- unless the
@@ -597,9 +607,6 @@ mod tests {
     fn every_finding_and_check_id_has_title_and_detail_keys() {
         const NO_DETAIL: &[&str] = &["check.mcp.configured", "check.perm-none.pass"];
         let en = dict("en");
-        let has_key_or_forms = |base: &str| -> bool {
-            non_empty(en, base).is_some() || ["one", "other"].iter().all(|f| non_empty(en, &format!("{base}.{f}")).is_some())
-        };
         let mut prefixes: Vec<String> = crate::inventory::FINDING_IDS
             .iter()
             .chain(crate::coaching::FINDING_IDS)
@@ -610,9 +617,9 @@ mod tests {
         prefixes.extend(crate::audit::CHECK_KEYS.iter().map(|k| k.to_string()));
 
         for prefix in &prefixes {
-            assert!(has_key_or_forms(&format!("{prefix}.title")), "{prefix}.title is missing from en.json");
+            assert!(has_key_or_forms(en, &format!("{prefix}.title")), "{prefix}.title is missing from en.json");
             if !NO_DETAIL.contains(&prefix.as_str()) {
-                assert!(has_key_or_forms(&format!("{prefix}.detail")), "{prefix}.detail is missing from en.json");
+                assert!(has_key_or_forms(en, &format!("{prefix}.detail")), "{prefix}.detail is missing from en.json");
             }
         }
     }
@@ -630,9 +637,6 @@ mod tests {
     #[test]
     fn every_alert_and_notification_key_exists() {
         let en = dict("en");
-        let has_key_or_forms = |base: &str| -> bool {
-            non_empty(en, base).is_some() || ["one", "other"].iter().all(|f| non_empty(en, &format!("{base}.{f}")).is_some())
-        };
         let keys: Vec<&str> = crate::alerts::ALERT_KEYS
             .iter()
             .chain(crate::digest::DIGEST_KEYS)
@@ -646,7 +650,7 @@ mod tests {
             .copied()
             .collect();
         for key in keys {
-            assert!(has_key_or_forms(key), "{key} is missing from en.json (bare or complete plural forms)");
+            assert!(has_key_or_forms(en, key), "{key} is missing from en.json (bare or complete plural forms)");
         }
     }
 

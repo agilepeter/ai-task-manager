@@ -300,7 +300,11 @@ function renderMcp(list: McpServer[]): string {
     ? T("trust.offNote")
     : trust?.errorMsg
       ? tm(trust.errorMsg)
-      : trust?.error
+      : // trust::view() always emits error and errorMsg as a matched pair, so
+        // this branch is unreachable from the live command today; it is the
+        // fallback for a cached payload from before errorMsg existed, or a
+        // fixture/demo mock that only sets error.
+        trust?.error
         ? T("trust.fetchError", { error: trust.error })
         : trust?.fetchedAt
           ? T("trust.status", {

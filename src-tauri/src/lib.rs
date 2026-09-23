@@ -2751,8 +2751,8 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
             for (client, spent, budget) in clients::over_budget(&rows, &rules, today, &mut fired) {
                 let body = i18n::Msg::new("notify.clientBudget.body")
                     .var("client", &client)
-                    .var("spent", format!("{spent:.0}"))
-                    .var("budget", format!("{budget:.0}"));
+                    .var("spent", digest::n0(spent))
+                    .var("budget", digest::n0(budget));
                 let _ = app
                     .notification()
                     .builder()
@@ -2783,9 +2783,7 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
             if let Some((_, days, cost)) = due.first() {
                 let mut body = i18n::t(
                     &cfg,
-                    &i18n::Msg::new("notify.longSession.body")
-                        .var("days", format!("{days:.0}"))
-                        .var("cost", format!("{cost:.0}")),
+                    &i18n::Msg::new("notify.longSession.body").var("days", digest::n0(*days)).var("cost", digest::n0(*cost)),
                 );
                 // The tail is only rendered and appended when there IS one
                 // (n > 0), so its "one" plural form is genuinely reachable.
