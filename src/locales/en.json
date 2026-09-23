@@ -662,5 +662,10 @@
   "ledger.csv.nextRenewal": "Next renewal",
   "ledger.csv.usage30": "30-day API-equivalent usage",
   "ledger.perMonthShort": "/mo",
-  "ledger.perYearShort": "/yr"
+  "ledger.perYearShort": "/yr",
+  "ledger.csv.name": "Name",
+  "ledger.csv.price": "Price",
+  "ledger.csv.billed": "Billed",
+  "ledger.csv.paysFor": "Pays for",
+  "ledger.csv.notes": "Notes"
 }

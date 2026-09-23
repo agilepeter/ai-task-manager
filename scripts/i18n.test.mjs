@@ -120,4 +120,26 @@ for (const [rel, prefix] of KEYED_SOURCES) {
     const missing = [...referenced].filter((k) => !(k in dicts.en) && !(`${k}.one` in dicts.en));
     assert.deepEqual(missing, [], `${rel}: referenced ${prefix}* keys missing from en.json`);
   });
+
+  // Forward guard: the qualified/aliased regexes above only ever match a plain
+  // '"..."'/"'...'" literal right after t(/T(. A template-literal call —
+  // T(`egg.${x}`) was a real bug caught by hand in about.ts — silently drops
+  // its key out of coverage instead of failing loudly, because neither regex
+  // matches a backtick. This catches that shape directly, independent of
+  // whether the key it hides happens to exist in en.json.
+  test(`${rel}: no t()/T() call is hidden from the coverage check above behind a template literal`, () => {
+    const source = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+    const stripped = source
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(?<!:)\/\/.*$/gm, "")
+      // The T alias's own definition legitimately builds its key with a
+      // template literal (`` `prefix.${k}` ``, inventory.ts's convention) —
+      // that's the one call site this guard must not flag.
+      .replace(/const T = \([^)]*\)\s*=>\s*t\(`[a-zA-Z][a-zA-Z0-9_]*\.\$\{k\}`(?:,\s*v)?\);?/g, "");
+    assert.doesNotMatch(
+      stripped,
+      /\b[tT]\(\s*`/,
+      `${rel}: a t()/T() call takes a template literal, which the coverage check above cannot see through — use a literal string per branch instead (see about.ts's eggLine() for the fix)`,
+    );
+  });
 }

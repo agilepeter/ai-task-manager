@@ -662,5 +662,10 @@
   "ledger.csv.nextRenewal": "Следующее продление",
   "ledger.csv.usage30": "Использование в API-эквиваленте за 30 дней",
   "ledger.perMonthShort": "/мес",
-  "ledger.perYearShort": "/год"
+  "ledger.perYearShort": "/год",
+  "ledger.csv.name": "Название",
+  "ledger.csv.price": "Цена",
+  "ledger.csv.billed": "Периодичность оплаты",
+  "ledger.csv.paysFor": "Оплачивает",
+  "ledger.csv.notes": "Заметки"
 }

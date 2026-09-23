@@ -201,6 +201,7 @@ function render(): void {
       ? `<article class="provider"><div class="card-panel"><p class="inv-empty">${esc(T("empty"))}</p></div></article>`
       : "";
 
+  // `tool`, not `t`: see the comment in form() above.
   const suggest =
     suggestions.length && !editing
       ? `<div class="lg-suggest"><span>${esc(T("suggest.found"))}</span>${suggestions
@@ -292,9 +293,12 @@ export function setupLedger(src: LedgerSource): void {
       if (!ledger) return;
       void invoke<string>("export_table", {
         name: "ai subscriptions",
+        // CSV headers own their keys (ledger.csv.*), never reused from the form's
+        // labels, so the sheet's columns never change shape when an on-screen label's
+        // wording does.
         headers: [
-          t("ledger.form.name"), t("ledger.form.price"), t("ledger.form.billed"), t("ledger.csv.monthlyCost"),
-          t("ledger.csv.nextRenewal"), t("ledger.form.paysFor"), t("ledger.csv.usage30"), t("ledger.form.notes"),
+          t("ledger.csv.name"), t("ledger.csv.price"), t("ledger.csv.billed"), t("ledger.csv.monthlyCost"),
+          t("ledger.csv.nextRenewal"), t("ledger.csv.paysFor"), t("ledger.csv.usage30"), t("ledger.csv.notes"),
         ],
         rows: ledger.items.map((i) => [
           i.name, i.price.toFixed(2), i.cycle, i.monthlyCost.toFixed(2), i.nextRenewal ?? "", i.provider ?? "",
