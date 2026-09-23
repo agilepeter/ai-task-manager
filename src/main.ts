@@ -97,6 +97,8 @@ interface Snapshot {
   /// The last fetch failed and this is the last good snapshot standing in.
   /// Inside the grace window the card shows nothing; a manual refresh does.
   attempt_failed?: boolean;
+  /// When the shown numbers were actually fetched (ms since the epoch).
+  fetched_at?: number | null;
   warning: string | null;
   dashboard_url?: string | null;
 }
@@ -3084,7 +3086,15 @@ async function refresh(force = false, usageOnly = false): Promise<void> {
     // say "Updated" over numbers that did not move — that is exactly what
     // reads as the app being stuck (2026-09-22: a failed Claude fetch right
     // after a weekly rollover looked like a frozen 100%).
-    const heldBack = force ? snapshots.filter((s) => s.attempt_failed).map((s) => s.name) : [];
+    // Name the time the shown numbers are from, so "earlier data" is a fact
+    // the user can weigh ("Claude (08:22)") rather than a shrug.
+    const dataTime = (s: Snapshot): string =>
+      typeof s.fetched_at === "number"
+        ? new Date(s.fetched_at).toLocaleTimeString(localeTag(), { hour: "2-digit", minute: "2-digit" })
+        : "";
+    const heldBack = force
+      ? snapshots.filter((s) => s.attempt_failed).map((s) => (dataTime(s) ? `${s.name} (${dataTime(s)})` : s.name))
+      : [];
     status.textContent = configSaveError
       ? t("footer.configSaveFailed", { err: configSaveError })
       : heldBack.length > 0

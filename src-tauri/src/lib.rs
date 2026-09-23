@@ -1673,6 +1673,16 @@ fn api_key_baseline_ids(provider: &str) -> Vec<String> {
 
 // Owned id/name so dynamically discovered account cards (claude@<hash>)
 // can ride the same guard as the static providers under a 'static spawn.
+/// A snapshot younger than this is served as it is instead of being fetched
+/// again. The background loop polls every minute; a refresh the user clicks
+/// lands seconds after one of its ticks, and that second call inside the
+/// same minute is what Anthropic answers with a 429 -- which then benched
+/// the loop's own fetches for five minutes, so clicking Refresh made the
+/// numbers *stop*. Two reports in two days (2026-09-22 and 23) were exactly
+/// that. Forty-five seconds is under the loop's own period, so the loop is
+/// never starved by it; and forty-five-second-old numbers are current.
+const FRESH_REUSE_MS: i64 = 45_000;
+
 async fn guarded<F>(id: String, name: String, fut: F) -> providers::Snapshot
 where
     F: std::future::Future<Output = providers::Snapshot>,
@@ -1689,6 +1699,19 @@ where
         .unwrap_or(0);
     let _credit_bind = CreditMeterBindGuard::begin(credit_meter_bind_ids(id));
     let now = now_ms() as i64;
+    // The window yields to the loop, as the loop already yields to the
+    // window: a good answer from a moment ago is the answer.
+    let recent = {
+        let map = last_ok().lock().unwrap();
+        map.get(id)
+            .filter(|c| c.snap.status == "ok" && now >= c.at && now - c.at <= FRESH_REUSE_MS)
+            .map(|c| c.snap.clone())
+    };
+    if let Some(mut snap) = recent {
+        snap.attempt_failed = false;
+        snap.stale = false;
+        return snap;
+    }
     let benched = {
         let map = fail_state().lock().unwrap();
         map.get(id)
@@ -4987,6 +5010,41 @@ mod tests {
             fail_state().lock().unwrap().get(id).is_none(),
             "a late failure from the old key must not bench the new key"
         );
+    }
+
+    #[test]
+    fn a_snapshot_younger_than_the_reuse_window_is_served_without_a_fetch() {
+        let id = "kilo-fresh";
+        let _guard = SnapCacheGuard::new(id);
+        let now = super::now_ms() as i64;
+        let mut fresh = Snapshot::ok(id, "Kilo", None, vec![]);
+        fresh.fetched_at = Some(now - 10_000);
+        last_ok().lock().unwrap().insert(id.into(), CachedSnap { at: now - 10_000, snap: fresh });
+        let snap = tauri::async_runtime::block_on(guarded(id.to_string(), "Kilo".into(), async {
+            panic!("a fetch ten seconds after a good one is the double call that gets rate limited");
+            #[allow(unreachable_code)]
+            Snapshot::ok(id, "Kilo", None, vec![])
+        }));
+        assert_eq!(snap.status, "ok");
+        assert_eq!(snap.fetched_at, Some(now - 10_000), "the real fetch time survives, so the footer can say it");
+        assert!(!snap.attempt_failed);
+        assert!(!snap.stale);
+    }
+
+    #[test]
+    fn a_snapshot_older_than_the_reuse_window_is_fetched_again() {
+        let id = "kilo-old";
+        let _guard = SnapCacheGuard::new(id);
+        let now = super::now_ms() as i64;
+        let mut old = Snapshot::ok(id, "Kilo", None, vec![]);
+        old.fetched_at = Some(now - 120_000);
+        last_ok().lock().unwrap().insert(id.into(), CachedSnap { at: now - 120_000, snap: old });
+        let snap = tauri::async_runtime::block_on(guarded(id.to_string(), "Kilo".into(), async {
+            let mut s = Snapshot::ok(id, "Kilo", None, vec![]);
+            s.plan = Some("fetched".into());
+            s
+        }));
+        assert_eq!(snap.plan.as_deref(), Some("fetched"), "two minutes old is worth a real fetch");
     }
 
     #[test]
