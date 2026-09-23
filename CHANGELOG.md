@@ -88,6 +88,11 @@ upstream copy.
   rather than "limit reached" three times with no period, after a weekly rollover made
   it look like a stuck weekly limit. The bar still clamps at 100; the words carry the
   real figure.
+- **Never two vendor calls inside a minute.** A refresh, whether from the background loop, a
+  click or a reset timer, reuses any answer younger than sixty seconds instead of asking again.
+  A click seconds after the loop's own poll used to be a second call in the same minute, which
+  Anthropic answers with a 429; that benched the provider for minutes and froze the card. A
+  held-back refresh now names the time its numbers are from, with the reason on hover.
 - **A manual refresh admits what it could not refresh.** When a provider's fetch fails
   and its last good numbers are shown instead, a refresh you asked for says so in the
   footer instead of "Updated".
