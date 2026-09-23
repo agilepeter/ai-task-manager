@@ -253,7 +253,10 @@ Three tabs.
 name for a detail page: limits over time from a local 90-day history, spend
 grouped by model, project or day, a 7x24 heatmap of when a limit actually gets
 used, and a forecast that says when you run out at your recent rate. Click a
-work area or a day to see the sessions behind it.
+work area or a day to see the sessions behind it, or group Spend by Session for
+every session of the last 30 days with its age and size. Each row has a Reveal
+button that shows the log file so you can archive it yourself; the app never
+deletes one, because those logs are also where its spend figures come from.
 
 **Subscriptions** is your own ledger of what you pay. It never guesses a price:
 a detected plan names a tier, not what it costs you. It steps renewal dates
@@ -268,7 +271,9 @@ and shows which of those servers are actually running, grouped by runner, with
 their memory, and lets you end one. **Audit** scores the whole setup: every
 finding is computed from your machine, states its own numbers, and disappears
 when it no longer applies. Nothing is graded twice, and what cannot be judged
-is left out rather than counted against you.
+is left out rather than counted against you. If you came looking for an MCP
+manager, this tab is it: every server, what it runs, whether it is pinned, and
+which copies are live.
 
 Also: work areas and client attribution with CSV export, budget alerts per
 client, an optional weekly digest, a read-only [local HTTP

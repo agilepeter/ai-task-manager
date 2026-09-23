@@ -1860,6 +1860,9 @@ pub struct SessionSpend {
     /// Cost and tokens inside the 30-day window.
     pub cost: f64,
     pub tokens: f64,
+    /// Size of the log file on disk. A session that is weeks old and still
+    /// being appended to is usually also the largest; the size says so.
+    pub bytes: u64,
     pub top_model: Option<String>,
     /// (area, cost) inside the window, largest first.
     pub areas: Vec<(String, f64)>,
@@ -1867,7 +1870,7 @@ pub struct SessionSpend {
     pub day_cost: Option<f64>,
 }
 
-fn session_from(id: &str, project: &str, data: &FileData, st: Option<&ClaudeFileState>, today: i32) -> Option<SessionSpend> {
+fn session_from(id: &str, project: &str, data: &FileData, st: Option<&ClaudeFileState>, today: i32, bytes: u64) -> Option<SessionSpend> {
     let in_window = |day: i32| day > today - TREND_DAYS as i32 && day <= today;
     let mut models: HashMap<&str, f64> = HashMap::new();
     let (mut cost, mut tokens) = (0.0, 0.0);
@@ -1896,6 +1899,7 @@ fn session_from(id: &str, project: &str, data: &FileData, st: Option<&ClaudeFile
         ended_ms: st.and_then(|s| s.last_ms),
         cost,
         tokens,
+        bytes,
         top_model: models
             .into_iter()
             .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(a.0)))
@@ -1910,14 +1914,40 @@ fn session_from(id: &str, project: &str, data: &FileData, st: Option<&ClaudeFile
 /// `YYYY-MM-DD`) keeps those that spent on that day and ranks by that day's
 /// cost, which answers "what was that expensive day?". Otherwise ranked by
 /// 30-day cost. Reads what the last `collect` cached; it does not rescan.
+/// Where Claude Code keeps its session logs: `<config dir>/projects`.
+fn claude_projects_root() -> PathBuf {
+    std::env::var("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
+        .join("projects")
+}
+
+/// The log file behind a session id, if the scan cache knows it. Only a
+/// `.jsonl` one folder under the projects root can match, so an id can name
+/// a Claude Code session and nothing else the cache has seen (codex logs,
+/// grok's unified file). The id is a file stem, so it cannot carry a path.
+fn session_path_among<'a>(root: &Path, paths: impl Iterator<Item = &'a PathBuf>, id: &str) -> Option<PathBuf> {
+    paths
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl"))
+        .filter(|p| project_of(root, p).is_some())
+        .find(|p| p.file_stem().and_then(|s| s.to_str()) == Some(id))
+        .cloned()
+}
+
+/// `session_path_among` over the real cache. Reads only; the caller shows
+/// the file, it never touches it.
+pub fn session_path(id: &str) -> Option<PathBuf> {
+    load_persisted_cache();
+    let root = claude_projects_root();
+    let map = cache().lock().ok()?;
+    session_path_among(&root, map.keys(), id)
+}
+
 pub fn claude_sessions(area: Option<&str>, day: Option<&str>, limit: usize) -> Vec<SessionSpend> {
     let day = day
         .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
         .map(|d| d.num_days_from_ce());
-    let root = std::env::var("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
-        .join("projects");
+    let root = claude_projects_root();
     load_persisted_cache();
     let today = Local::now().date_naive().num_days_from_ce();
     let known = crate::inventory::known_project_paths();
@@ -1928,7 +1958,7 @@ pub fn claude_sessions(area: Option<&str>, day: Option<&str>, limit: usize) -> V
             let project = project_of(&root, path)?;
             let id = path.file_stem()?.to_str()?;
             let mut session =
-                session_from(id, &resolve_project(&project, &known), &entry.data, entry.claude.as_ref(), today)?;
+                session_from(id, &resolve_project(&project, &known), &entry.data, entry.claude.as_ref(), today, entry.size)?;
             if let Some(day) = day {
                 let on_day: f64 =
                     entry.data.days.iter().filter(|((d, _), _)| *d == day).map(|(_, (c, _))| c).sum();
@@ -4717,15 +4747,39 @@ mod tests {
             claude_line(&mut st, &l, &mut data);
         }
         let today = day_of_utc(parse_ts(Some(&json!("2026-09-21T00:00:00Z"))).unwrap());
-        let s = session_from("sess-1", "/w", &data, Some(&st), today).unwrap();
+        let s = session_from("sess-1", "/w", &data, Some(&st), today, 4096).unwrap();
         assert_eq!(s.cost, 9.0);
+        assert_eq!(s.bytes, 4096, "the log's size rides along so a stale, still-open session shows its weight");
         assert_eq!(s.top_model.as_deref(), Some("claude-opus-5"));
         assert_eq!(s.ended_ms.unwrap() - s.started_ms.unwrap(), 135 * 60_000, "2h15m from first to last message");
         assert_eq!(s.areas, [("acme".to_string(), 6.0), ("beta".to_string(), 2.0), ("(unsorted)".to_string(), 1.0)]);
         // Outside the window there is nothing to report.
-        assert_eq!(session_from("old", "/w", &data, Some(&st), today + 60), None);
+        assert_eq!(session_from("old", "/w", &data, Some(&st), today + 60, 1), None);
         // No checkpoint (a non-Claude or pre-upgrade entry) still reports, without a span.
-        assert_eq!(session_from("x", "/w", &data, None, today).unwrap().started_ms, None);
+        assert_eq!(session_from("x", "/w", &data, None, today, 1).unwrap().started_ms, None);
+    }
+
+    #[test]
+    fn a_session_id_finds_its_own_log_and_nothing_else() {
+        let root = PathBuf::from("/h/.claude/projects");
+        let paths = vec![
+            root.join("-w-acme").join("abc").with_extension("jsonl"),
+            root.join("-w-acme").join("def").with_extension("jsonl"),
+            // Same stem, other tools' logs: the cache has these too.
+            PathBuf::from("/h/.codex/sessions/def.jsonl"),
+            PathBuf::from("/h/.grok/def.jsonl"),
+            // A stray file under the root that is not a session log.
+            root.join("-w-acme").join("def").with_extension("txt"),
+        ];
+        let find = |id: &str| session_path_among(&root, paths.iter(), id);
+        assert_eq!(find("def"), Some(root.join("-w-acme").join("def.jsonl")));
+        assert_eq!(find("abc"), Some(root.join("-w-acme").join("abc.jsonl")));
+        assert_eq!(find("ghi"), None, "unknown id");
+        assert_eq!(find("../def"), None, "a stem never contains a separator, so a path cannot pass as an id");
+        assert_eq!(find(""), None);
+        // Nothing outside the projects root can be named, whatever the stem.
+        let outside = vec![PathBuf::from("/h/.codex/sessions/def.jsonl")];
+        assert_eq!(session_path_among(&root, outside.iter(), "def"), None);
     }
 
     #[test]

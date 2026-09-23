@@ -88,6 +88,8 @@ interface SessionSpend {
   endedMs: number | null;
   cost: number;
   tokens: number;
+  /** Log file size on disk. Absent in fixtures made before it existed. */
+  bytes?: number;
   topModel: string | null;
   areas: [string, number][];
   dayCost: number | null;
@@ -137,7 +139,7 @@ export interface DetailSource {
 }
 
 type WindowKey = "today" | "yesterday" | "last30";
-type GroupKey = "model" | "client" | "area" | "project" | "day";
+type GroupKey = "model" | "client" | "area" | "project" | "day" | "session";
 
 /** Rows shown before the rest fold into one "Other" row. */
 const MAX_BAR_ROWS = 12;
@@ -172,6 +174,11 @@ let clientView: ClientView | null = null;
 /** Rules being edited; null while the saved ones are shown. */
 let draftRules: ClientRule[] | null = null;
 let clientNote = "";
+/** Every session of the last 30 days, for Group by → Session; null until loaded. */
+let sessionsAll: SessionSpend[] | null = null;
+let sessionNote = "";
+/** Where "Reveal" puts the file. Named so the button says what will open. */
+const REVEAL_IN = /Mac|iPhone|iPad/.test(navigator.platform) ? "Finder" : "your file manager";
 /** What the Spend section is showing, kept so Export CSV saves exactly that. */
 let lastTable: { name: string; headers: string[]; rows: string[][] } | null = null;
 /** Forecasts per card, refreshed with the history. */
@@ -581,24 +588,90 @@ function span(s: SessionSpend): [string, string] {
   return [`${day}, ${time}`, `spans ${length}`];
 }
 
+/// "active today", "active yesterday", "last active 12 days ago": when the
+/// session last wrote a line. An old session still being appended to is the
+/// one worth finding, and this is what gives it away.
+function lastActive(s: SessionSpend): string {
+  if (s.endedMs === null) return "";
+  const days = Math.floor((Date.now() - s.endedMs) / 86_400_000);
+  return days <= 0 ? "active today" : days === 1 ? "active yesterday" : `last active ${days} days ago`;
+}
+
+function fileSize(bytes: number): string {
+  return bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/// One row per session. Reveal shows the log file; nothing here deletes.
+function sessionRows(sessions: SessionSpend[]): string {
+  return sessions
+    .map((s) => {
+      const shown = s.dayCost ?? s.cost;
+      const where = s.areas.slice(0, 3).map(([a]) => a).join(", ");
+      const [started, length] = span(s);
+      const facts = [
+        length,
+        lastActive(s),
+        s.topModel ? `mostly ${s.topModel}` : "",
+        where,
+        s.dayCost !== null ? `${money(s.cost)} over 30 days` : "",
+        s.bytes ? fileSize(s.bytes) : "",
+      ]
+        .filter(Boolean)
+        .map(esc)
+        .join(" · ");
+      return `
+      <div class="dt-session">
+        <div class="lg-item-head"><span class="inv-name">${esc(started || "Time not recorded")}</span><span class="lg-price">${money(shown)}</span></div>
+        <div class="dt-session-sub">${facts} <button class="inv-chip" data-reveal-session="${esc(s.id)}" title="Show this session's log file in ${REVEAL_IN}">Reveal</button></div>
+      </div>`;
+    })
+    .join("");
+}
+
 function drillSection(): string {
   const d = drill!;
   const head = `<div class="dt-drill-head"><button class="inv-learn" id="dt-drill-back">&#8592; Back</button><span>Sessions · ${esc(d.title)}</span></div>`;
   if (!d.sessions) return `${head}<p class="dt-empty">Loading…</p>`;
   if (!d.sessions.length) return `${head}<p class="dt-empty">No sessions found for this.</p>`;
-  const rows = d.sessions
-    .map((s) => {
-      const shown = s.dayCost ?? s.cost;
-      const where = s.areas.slice(0, 3).map(([a]) => a).join(", ");
+  return `${head}${sessionRows(d.sessions)}<p class="dt-caption">One row per Claude Code session, most expensive first. Times and totals only: conversation titles and content are never read.</p>`;
+}
+
+/// Group by → Session: every session of the last 30 days, heaviest first.
+/// The janitor's view, minus the broom: the app shows you the file and you
+/// decide, because deleting a session log also deletes the spend it produced.
+function sessionsSection(): string {
+  if (!sessionsAll) return `<p class="dt-empty">Loading…</p>`;
+  if (!sessionsAll.length) return `<p class="dt-empty">No sessions in the last 30 days.</p>`;
+  lastTable = {
+    name: "sessions last 30 days",
+    headers: ["Started", "Last active", "Length", "Cost (USD)", "Tokens", "Top model", "Areas", "Size (bytes)", "Session id"],
+    rows: sessionsAll.map((s) => {
       const [started, length] = span(s);
-      return `
-      <div class="dt-session">
-        <div class="lg-item-head"><span class="inv-name">${esc(started || "Time not recorded")}</span><span class="lg-price">${money(shown)}</span></div>
-        <div class="dt-session-sub">${[length, s.topModel ? `mostly ${s.topModel}` : "", where, s.dayCost !== null ? `${money(s.cost)} over 30 days` : ""].filter(Boolean).map(esc).join(" · ")}</div>
-      </div>`;
-    })
-    .join("");
-  return `${head}${rows}<p class="dt-caption">One row per Claude Code session, most expensive first. Times and totals only: conversation titles and content are never read.</p>`;
+      return [
+        started,
+        s.endedMs === null ? "" : new Date(s.endedMs).toISOString(),
+        length,
+        s.cost.toFixed(4),
+        String(Math.round(s.tokens)),
+        s.topModel ?? "",
+        s.areas.map(([a]) => a).join("; "),
+        s.bytes === undefined ? "" : String(s.bytes),
+        s.id,
+      ];
+    }),
+  };
+  const note = sessionNote ? `<p class="dt-caption">${esc(sessionNote)}</p>` : "";
+  return `${sessionRows(sessionsAll)}${note}<p class="dt-caption">One row per Claude Code session, most expensive over the last 30 days first. Times, sizes and totals only: conversation titles and content are never read. Reveal shows the log file in ${REVEAL_IN} so you can archive it yourself; the app never deletes a session, because these logs are also where its spend figures come from.</p>`;
+}
+
+async function loadSessions(): Promise<void> {
+  try {
+    sessionsAll = await invoke<SessionSpend[]>("get_sessions", { area: null, day: null });
+  } catch (err) {
+    sessionsAll = [];
+    sessionNote = String(err);
+  }
+  render();
 }
 
 async function openDrill(next: { title: string; area?: string; day?: string }): Promise<void> {
@@ -701,10 +774,10 @@ function spendSection(sp: ProviderSpend | undefined): string {
   const groups: [string, string][] = [["model", "Model"]];
   if (hasAreas) groups.push(["client", "Client"], ["area", "Work area"]);
   if (hasProjects) groups.push(["project", "Project"]);
-  groups.push(["day", "Day"]);
+  groups.push(["day", "Day"], ["session", "Session"]);
   const controls = `<div class="dt-controls">
       <label>Group by ${select("dt-group", groups, groupKey)}</label>
-      ${groupKey === "day" ? "" : `<label>Period ${select("dt-window", WINDOWS, windowKey)}</label>`}
+      ${groupKey === "day" || groupKey === "session" ? "" : `<label>Period ${select("dt-window", WINDOWS, windowKey)}</label>`}
       ${groupKey === "area" ? `<label>Detail ${select("dt-depth", [["1", "Top folders"], ["2", "Two levels"]], areaDepth)}</label>` : ""}
     </div>`;
 
@@ -712,6 +785,8 @@ function spendSection(sp: ProviderSpend | undefined): string {
   let body: string;
   if (groupKey === "day") {
     body = dayBars(sp.daily_cost ?? []);
+  } else if (groupKey === "session") {
+    body = sessionsSection();
   } else if (groupKey === "client") {
     body = clientSection();
   } else if (groupKey === "area") {
@@ -984,7 +1059,11 @@ function markSelected(): void {
 }
 
 function open(id: string): void {
-  if (openId !== id) drill = null;
+  if (openId !== id) {
+    drill = null;
+    sessionsAll = null;
+    sessionNote = "";
+  }
   openId = id;
   if (historyFor !== id) history = [];
   document.body.classList.add("detail-open");
@@ -1036,7 +1115,9 @@ export function refreshDetail(): void {
     if (first) open(first);
     return;
   }
-  if (!openId || Date.now() - lastLoad < 60_000) return;
+  if (!openId) return;
+  if (groupKey === "session") void loadSessions();
+  if (Date.now() - lastLoad < 60_000) return;
   void loadHistory();
 }
 
@@ -1087,6 +1168,12 @@ export function setupDetail(src: DetailSource): void {
       void loadClients();
       return;
     }
+    if (t.id === "dt-group" && t.value === "session") {
+      groupKey = "session";
+      sessionNote = "";
+      void loadSessions();
+      return;
+    }
     clientNote = "";
     if (t.id === "dt-burn-metric") burnMetric = t.value;
     else if (t.id === "dt-depth") areaDepth = t.value as "1" | "2";
@@ -1101,6 +1188,14 @@ export function setupDetail(src: DetailSource): void {
   document.querySelector("#detail-body")?.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
     const root = document.querySelector<HTMLElement>("#detail-body")!;
+    const revealId = target.closest<HTMLElement>("[data-reveal-session]")?.dataset.revealSession;
+    if (revealId) {
+      void invoke("reveal_session", { id: revealId }).catch((err) => {
+        sessionNote = String(err);
+        render();
+      });
+      return;
+    }
     const drillArea = target.closest<HTMLElement>("[data-drill-area]")?.dataset.drillArea;
     const drillDay = target.closest<HTMLElement>("[data-drill-day]");
     if (target.closest("#dt-drill-back")) {

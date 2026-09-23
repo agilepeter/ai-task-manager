@@ -212,6 +212,7 @@ mod tests {
             ended_ms: Some((days * 86_400_000.0) as i64),
             cost,
             tokens: 0.0,
+            bytes: 0,
             top_model: None,
             areas: vec![],
             day_cost: None,

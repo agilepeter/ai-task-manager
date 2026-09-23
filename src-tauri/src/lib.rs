@@ -420,6 +420,19 @@ async fn get_sessions(area: Option<String>, day: Option<String>) -> Result<Vec<s
         .map_err(|e| format!("sessions: {e}"))
 }
 
+/// Shows a session's log file in the OS file manager. Read-only, and the
+/// most the app will ever do about an old session: it never deletes one,
+/// because these logs are also where its spend figures come from. The id is
+/// matched against the scan cache and the path comes from there, so nothing
+/// the popover sends can name a file.
+#[tauri::command]
+fn reveal_session(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let path = spend::session_path(&id)
+        .ok_or_else(|| "that session is no longer in the scan cache; refresh and try again".to_string())?;
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().reveal_item_in_dir(&path).map_err(|e| format!("could not show the file: {e}"))
+}
+
 /// The subscription ledger with totals, renewals and value against usage.
 /// `usage30` is each card's 30-day API-equivalent spend, which the frontend
 /// already holds from the spend scan; passing it in avoids a second scan.
@@ -3553,6 +3566,7 @@ pub fn run() {
             get_trust,
             get_forecast,
             get_sessions,
+            reveal_session,
             client_rollup,
             save_clients,
             export_clients_csv,
