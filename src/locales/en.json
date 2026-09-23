@@ -660,5 +660,7 @@
   "ledger.add": "Add",
   "ledger.csv.monthlyCost": "Monthly cost",
   "ledger.csv.nextRenewal": "Next renewal",
-  "ledger.csv.usage30": "30-day API-equivalent usage"
+  "ledger.csv.usage30": "30-day API-equivalent usage",
+  "ledger.perMonthShort": "/mo",
+  "ledger.perYearShort": "/yr"
 }

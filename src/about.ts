@@ -10,6 +10,8 @@ import { t } from "./i18n";
 const T = (k: string, v?: Record<string, string | number>) => t(`about.${k}`, v);
 
 let pokes = 0;
+/** The version render() last drew, so rerender() can redraw with it. */
+let lastVersion = "";
 
 /// The bubble text for a given poke count, cycling through 8 lines. Each case
 /// is a literal T("egg....") call, not a computed key, so i18n.test.mjs's
@@ -56,6 +58,7 @@ function botSvg(): string {
 }
 
 function render(version: string): void {
+  lastVersion = version;
   const el = document.querySelector<HTMLElement>("#about-body");
   if (!el) return;
   // CREDITS is brand.ts data (MIT attribution, stays fixed in any fork per
@@ -103,6 +106,15 @@ function poke(): void {
   void bot.offsetWidth;
   bot.classList.add(pokes % 10 === 0 ? "ab-dance" : "ab-hop");
   if (pokes % 10 === 0) bubble.textContent = T("egg.dance");
+}
+
+/// Redraws the About panel in place, e.g. after a locale switch (task 7
+/// wires this into the locale-change handler). A no-op while the panel is
+/// closed. render() takes the version string (fetched async, so it isn't
+/// known up front the way audit's report or ledger's data are), so this
+/// redraws with the last version render() actually drew.
+export function rerender(): void {
+  if (document.body.classList.contains("about-open")) render(lastVersion);
 }
 
 export function setupAbout(): void {

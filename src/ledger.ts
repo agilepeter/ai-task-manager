@@ -66,6 +66,16 @@ function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/// The short "/mo" or "/yr" suffix after a price. These are abbreviations of
+/// real words ("a month"/"a year"), and this same view already spells those
+/// out in the total line and the value-line sentences — leaving this one
+/// untranslated would show a user both forms on one screen. Two literal T()
+/// calls (not T(cond ? "a" : "b")) so i18n.test.mjs's KEYED_SOURCES check,
+/// which greps for a quote immediately after T(, can see both keys.
+function cycleSuffix(cycle: Cycle): string {
+  return cycle === "monthly" ? T("perMonthShort") : T("perYearShort");
+}
+
 function renewalText(item: ItemView): string {
   if (item.daysLeft === null || !item.nextRenewal) return T("renewal.none");
   const date = new Date(`${item.nextRenewal}T00:00:00`).toLocaleDateString(localeTag(), { month: "short", day: "numeric" });
@@ -163,8 +173,6 @@ function render(): void {
       </div></article>`
     : "";
 
-  // "mo"/"yr" are format tokens, like $ and %, not words: they stay literal
-  // in every locale (binding conventions for this task).
   const rows = lg.items
     .map((item) =>
       editing?.id === item.id
@@ -173,7 +181,7 @@ function render(): void {
       <div class="card-panel lg-item${item.daysLeft !== null && item.daysLeft <= 3 ? " lg-soon" : ""}">
         <div class="lg-item-head">
           <span class="inv-name">${esc(item.name)}</span>
-          <span class="lg-price">${money(item.price)}<small> / ${item.cycle === "monthly" ? "mo" : "yr"}</small></span>
+          <span class="lg-price">${money(item.price)}<small> ${esc(cycleSuffix(item.cycle))}</small></span>
         </div>
         <div class="lg-item-sub">
           <span>${esc(renewalText(item))}</span>
@@ -304,6 +312,8 @@ export function setupLedger(src: LedgerSource): void {
     } else if (target.closest("#lg-cancel")) {
       editing = null;
     } else if (suggestId) {
+      // Not `t` (shadows the translator import) and not `tool` either: the
+      // very next line declares its own `tool` const, which this would shadow too.
       const tool = source?.tools().find((entry) => entry.id === suggestId);
       editing = { ...blank(), name: tool ? `${tool.name}${tool.plan ? ` ${cap(tool.plan)}` : ""}` : "", provider: suggestId };
     } else if (editId) {

@@ -660,5 +660,7 @@
   "ledger.add": "Добавить",
   "ledger.csv.monthlyCost": "Стоимость в месяц",
   "ledger.csv.nextRenewal": "Следующее продление",
-  "ledger.csv.usage30": "Использование в API-эквиваленте за 30 дней"
+  "ledger.csv.usage30": "Использование в API-эквиваленте за 30 дней",
+  "ledger.perMonthShort": "/мес",
+  "ledger.perYearShort": "/год"
 }

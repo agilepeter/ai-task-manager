@@ -660,5 +660,7 @@
   "ledger.add": "添加",
   "ledger.csv.monthlyCost": "月费",
   "ledger.csv.nextRenewal": "下次续订",
-  "ledger.csv.usage30": "30 天 API 等值用量"
+  "ledger.csv.usage30": "30 天 API 等值用量",
+  "ledger.perMonthShort": "/月",
+  "ledger.perYearShort": "/年"
 }
