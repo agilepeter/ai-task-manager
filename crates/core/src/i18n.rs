@@ -228,12 +228,19 @@ impl Msg {
     /// independent counts (a server count and, inside it, a process count,
     /// say): the outer `Msg`'s own `count` can only select one plural form,
     /// so the second count travels as a nested `Msg` under its own key
-    /// (typically a shared `unit.*` one) and picks its own form.
+    /// (typically a shared `unit.*` one) and picks its own form. A nested
+    /// `Msg` is owned (`Box<Msg>`), never a reference back into anything, so
+    /// the tree it forms is always finite and `render_core`'s recursion into
+    /// it always terminates.
     pub fn sub(mut self, k: &'static str, v: Msg) -> Self {
         self.vars.insert(k, Var::Msg(Box::new(v)));
         self
     }
 
+    /// The English `.one` value spells the number out ("1 MCP server
+    /// runs…") rather than using `{count}`, matching the sentences the
+    /// existing, English-pinning tests were already written against; a
+    /// non-English locale's `.one` is free to use `{count}` instead.
     pub fn count(mut self, n: i64) -> Self {
         self.count = Some(n);
         self

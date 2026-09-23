@@ -42,15 +42,17 @@ pub struct Section {
 /// Every `check.<id>.<variant>` key prefix this module can emit on its own
 /// account, plus the `.pass` variant of every finding id it turns into a
 /// check via `from_finding` (see below) -- together, every `check.*` prefix
-/// that can ever reach the popover.
-pub const CHECK_KEYS: &[&str] = &[
+/// that can ever reach the popover. Only `i18n.rs`'s test module reads this.
+#[allow(dead_code)]
+pub(crate) const CHECK_KEYS: &[&str] = &[
     "check.tools.info",
     "check.mcp.none",
     "check.mcp.configured",
     "check.perm-rules.pass",
     "check.perm-deny.pass",
     "check.perm-deny.attention",
-    "check.model.info",
+    "check.model.pinned",
+    "check.model.unpinned",
     "check.usage-thin.info",
     "check.ledger.none",
     "check.ledger.tracked",
@@ -74,7 +76,9 @@ pub const CHECK_KEYS: &[&str] = &[
     "check.agents-none.pass",
 ];
 
-pub const SECTION_KEYS: &[&str] = &["section.setup", "section.guardrails", "section.usage", "section.money"];
+/// Only `i18n.rs`'s test module reads this.
+#[allow(dead_code)]
+pub(crate) const SECTION_KEYS: &[&str] = &["section.setup", "section.guardrails", "section.usage", "section.money"];
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -97,30 +101,20 @@ pub struct Inputs<'a> {
     pub work_areas: usize,
 }
 
-/// A check whose title and detail are both real sentences.
-fn check(id: &str, status: &str, title_msg: Msg, detail_msg: Msg) -> Check {
+/// The only place `render("en", …)` runs for a `Check`: title is always
+/// this Msg's English rendering, and so is detail whenever `detail_msg` is
+/// `Some`. `None` is for a detail that is not a sentence at all -- pure data
+/// (the joined tool or server names) -- or is deliberately empty; either
+/// way the trailing `detail` is used exactly as given instead, and is
+/// ignored when `detail_msg` is `Some`.
+fn check(id: &str, status: &str, title_msg: Msg, detail_msg: Option<Msg>, detail: impl Into<String>) -> Check {
     Check {
         id: id.into(),
         status: status.into(),
         title: i18n::render("en", &title_msg),
-        detail: i18n::render("en", &detail_msg),
+        detail: detail_msg.as_ref().map(|m| i18n::render("en", m)).unwrap_or_else(|| detail.into()),
         title_msg,
-        detail_msg: Some(detail_msg),
-    }
-}
-
-/// A check whose detail is not a sentence -- pure data (the joined tool or
-/// server names), or deliberately empty -- so there is no Msg behind it: the
-/// string is the same in every locale because there is nothing in it to
-/// translate.
-fn check_data(id: &str, status: &str, title_msg: Msg, detail: impl Into<String>) -> Check {
-    Check {
-        id: id.into(),
-        status: status.into(),
-        title: i18n::render("en", &title_msg),
-        detail: detail.into(),
-        title_msg,
-        detail_msg: None,
+        detail_msg,
     }
 }
 
@@ -146,14 +140,7 @@ fn from_finding(inv: &Inventory, id: &str, pass_title_msg: Msg, pass_detail_msg:
     match inv.opportunities.iter().find(|o| o.id == id) {
         Some(o) if o.kind == "tighten" => check_from_opportunity(id, "attention", o),
         Some(o) => check_from_opportunity(id, "consider", o),
-        None => Check {
-            id: id.into(),
-            status: "pass".into(),
-            title: i18n::render("en", &pass_title_msg),
-            detail: pass_detail_msg.as_ref().map(|m| i18n::render("en", m)).unwrap_or_default(),
-            title_msg: pass_title_msg,
-            detail_msg: pass_detail_msg,
-        },
+        None => check(id, "pass", pass_title_msg, pass_detail_msg, ""),
     }
 }
 
@@ -183,13 +170,15 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
             "tools",
             "info",
             Msg::new("check.tools.info.title").count(0),
-            Msg::new("check.tools.info.detail"),
+            Some(Msg::new("check.tools.info.detail")),
+            "",
         )
     } else {
-        check_data(
+        check(
             "tools",
             "info",
             Msg::new("check.tools.info.title").count(inv.tools.len() as i64),
+            None,
             inv.tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "),
         )
     }];
@@ -198,13 +187,15 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
             "mcp",
             "info",
             Msg::new("check.mcp.none.title"),
-            Msg::new("check.mcp.none.detail"),
+            Some(Msg::new("check.mcp.none.detail")),
+            "",
         ));
     } else {
-        setup.push(check_data(
+        setup.push(check(
             "mcp",
             "info",
             Msg::new("check.mcp.configured.title").count(inv.mcp_servers.len() as i64),
+            None,
             inv.mcp_servers.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "),
         ));
         if packaged > 0 {
@@ -243,6 +234,17 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
     }
 
     let p = &inv.permissions;
+    // Two proper variants, not one title with a titleUnset sibling: every
+    // other pair in this file registers its id.variant with both a title
+    // and a detail, and this one is no different -- pinned and unpinned are
+    // two distinct sentences, not two forms of one plural family. The
+    // detail happens to read the same either way today; it is still its
+    // own key under each variant so a translator can split it later without
+    // restructuring anything.
+    let (model_title, model_detail) = match &inv.model {
+        Some(m) => (Msg::new("check.model.pinned.title").var("model", m), Msg::new("check.model.pinned.detail")),
+        None => (Msg::new("check.model.unpinned.title"), Msg::new("check.model.unpinned.detail")),
+    };
     let guardrails = vec![
         if p.allow + p.ask + p.deny == 0 {
             from_finding(inv, "perm-none", Msg::new("check.perm-none.pass.title"), None)
@@ -251,7 +253,10 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
                 "perm-rules",
                 "pass",
                 Msg::new("check.perm-rules.pass.title"),
-                Msg::new("check.perm-rules.pass.detail").var("allow", p.allow).var("ask", p.ask).var("deny", p.deny),
+                Some(
+                    Msg::new("check.perm-rules.pass.detail").var("allow", p.allow).var("ask", p.ask).var("deny", p.deny),
+                ),
+                "",
             )
         },
         if p.deny > 0 {
@@ -259,14 +264,16 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
                 "perm-deny",
                 "pass",
                 Msg::new("check.perm-deny.pass.title").count(p.deny as i64),
-                Msg::new("check.perm-deny.pass.detail"),
+                Some(Msg::new("check.perm-deny.pass.detail")),
+                "",
             )
         } else {
             check(
                 "perm-deny",
                 "attention",
                 Msg::new("check.perm-deny.attention.title"),
-                Msg::new("check.perm-deny.attention.detail"),
+                Some(Msg::new("check.perm-deny.attention.detail")),
+                "",
             )
         },
         from_finding(
@@ -275,15 +282,7 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
             Msg::new("check.hooks-none.pass.title"),
             Some(Msg::new("check.hooks-none.pass.detail")),
         ),
-        check(
-            "model",
-            "info",
-            match &inv.model {
-                Some(m) => Msg::new("check.model.info.title").var("model", m),
-                None => Msg::new("check.model.info.titleUnset"),
-            },
-            Msg::new("check.model.info.detail"),
-        ),
+        check("model", "info", model_title, Some(model_detail), ""),
     ];
 
     let mut usage = Vec::new();
@@ -322,7 +321,8 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
             "usage-thin",
             "info",
             Msg::new("check.usage-thin.info.title"),
-            Msg::new("check.usage-thin.info.detail"),
+            Some(Msg::new("check.usage-thin.info.detail")),
+            "",
         ));
     }
     usage.push(from_finding(
@@ -339,16 +339,20 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
             "ledger",
             if inv.tools.is_empty() { "info" } else { "attention" },
             Msg::new("check.ledger.none.title"),
-            Msg::new("check.ledger.none.detail"),
+            Some(Msg::new("check.ledger.none.detail")),
+            "",
         ));
     } else {
         money.push(check(
             "ledger",
             "pass",
             Msg::new("check.ledger.tracked.title").count(l.items.len() as i64),
-            Msg::new("check.ledger.tracked.detail")
-                .var("monthly", format!("{:.0}", l.monthly))
-                .var("yearly", format!("{:.0}", l.yearly)),
+            Some(
+                Msg::new("check.ledger.tracked.detail")
+                    .var("monthly", format!("{:.0}", l.monthly))
+                    .var("yearly", format!("{:.0}", l.yearly)),
+            ),
+            "",
         ));
         let idle = l.items.iter().filter(|x| x.idle).count();
         money.push(if idle > 0 {
@@ -356,14 +360,18 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
                 "ledger-idle",
                 "attention",
                 Msg::new("check.ledger-idle.attention.title").count(idle as i64),
-                Msg::new("check.ledger-idle.attention.detail").var("idleMonthly", format!("{:.0}", l.idle_monthly)),
+                Some(
+                    Msg::new("check.ledger-idle.attention.detail").var("idleMonthly", format!("{:.0}", l.idle_monthly)),
+                ),
+                "",
             )
         } else {
             check(
                 "ledger-idle",
                 "pass",
                 Msg::new("check.ledger-idle.pass.title"),
-                Msg::new("check.ledger-idle.pass.detail"),
+                Some(Msg::new("check.ledger-idle.pass.detail")),
+                "",
             )
         });
         let undated = l.items.iter().filter(|x| x.next_renewal.is_none()).count();
@@ -372,14 +380,16 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
                 "ledger-dates",
                 "attention",
                 Msg::new("check.ledger-dates.attention.title").count(undated as i64),
-                Msg::new("check.ledger-dates.attention.detail"),
+                Some(Msg::new("check.ledger-dates.attention.detail")),
+                "",
             )
         } else {
             check(
                 "ledger-dates",
                 "pass",
                 Msg::new("check.ledger-dates.pass.title"),
-                Msg::new("check.ledger-dates.pass.detail"),
+                Some(Msg::new("check.ledger-dates.pass.detail")),
+                "",
             )
         });
     }
@@ -389,14 +399,16 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
                 "clients",
                 "attention",
                 Msg::new("check.clients.attention.title"),
-                Msg::new("check.clients.attention.detail").count(i.work_areas as i64),
+                Some(Msg::new("check.clients.attention.detail").count(i.work_areas as i64)),
+                "",
             )
         } else {
             check(
                 "clients",
                 "pass",
                 Msg::new("check.clients.pass.title").count(i.client_rules as i64),
-                Msg::new("check.clients.pass.detail"),
+                Some(Msg::new("check.clients.pass.detail")),
+                "",
             )
         });
     }
@@ -454,17 +466,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn finding(id: &str, title: &str) -> Opportunity {
-        Opportunity {
-            id: id.into(),
-            kind: "tighten".into(),
-            title: title.into(),
-            detail: format!("detail of {id}"),
-            // A placeholder Msg: these tests check the rendered title/detail
-            // strings a check carries, never the key behind them.
-            title_msg: Msg::new("finding.test.title"),
-            detail_msg: Some(Msg::new("finding.test.detail")),
-            learn_url: None,
-        }
+        Opportunity::test_only(id, "tighten", title, &format!("detail of {id}"))
     }
 
     fn server(name: &str, package: Option<&str>) -> McpServer {
@@ -495,15 +497,7 @@ mod tests {
         let inv = Inventory::default();
         assert!(super::only_if_present(&inv, "mcp-memory").is_none());
         let inv = Inventory {
-            opportunities: vec![crate::inventory::Opportunity {
-                id: "mcp-memory".into(),
-                kind: "learn".into(),
-                title: "MCP servers are holding 2115 MB".into(),
-                detail: "d".into(),
-                title_msg: Msg::new("finding.test.title"),
-                detail_msg: Some(Msg::new("finding.test.detail")),
-                learn_url: None,
-            }],
+            opportunities: vec![Opportunity::test_only("mcp-memory", "learn", "MCP servers are holding 2115 MB", "d")],
             ..Inventory::default()
         };
         let c = super::only_if_present(&inv, "mcp-memory").expect("present");
@@ -674,7 +668,32 @@ mod tests {
         );
         let thin_inputs = Inputs { inventory: &thin, ledger: &thin_ledger, spend30: 3.0, client_rules: 0, work_areas: 0 };
 
-        for inputs in [tidy_inputs, loose_inputs, thin_inputs] {
+        // `thin` above still has a tool and two subscriptions; nothing yet
+        // exercises the truly empty case (no tools at all, no MCP servers),
+        // which is the one that puts the "tools" and "mcp" checks on their
+        // own real-sentence detail branch rather than the joined-names one.
+        let empty = Inventory::default();
+        let empty_ledger = ledger(&[], &[]);
+        let empty_inputs =
+            Inputs { inventory: &empty, ledger: &empty_ledger, spend30: 0.0, client_rules: 0, work_areas: 0 };
+        let empty_ids: Vec<String> = statuses(&run(&empty_inputs, 1)).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(
+            empty_ids,
+            [
+                "tools",
+                "mcp",
+                "perm-none",
+                "perm-deny",
+                "hooks-none",
+                "model",
+                "pricing-cache-ttl",
+                "usage-thin",
+                "agents-none",
+                "ledger",
+            ]
+        );
+
+        for inputs in [tidy_inputs, loose_inputs, thin_inputs, empty_inputs] {
             let r = run(&inputs, 1);
             for s in &r.sections {
                 assert!(!s.name.starts_with("section."), "{}: raw key in section name: {}", s.name_key, s.name);

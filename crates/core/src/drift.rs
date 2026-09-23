@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use crate::i18n::{self, Msg};
+use crate::i18n::Msg;
 use crate::inventory::Opportunity;
 use crate::pricing::{self, Price};
 
@@ -178,19 +178,8 @@ pub fn compare(samples: &[ModelCost], price_of: impl Fn(&str) -> Option<Price>) 
 }
 
 /// Every finding id this module can emit (see inventory::FINDING_IDS).
-pub const FINDING_IDS: &[&str] = &["pricing-cache-ttl", "pricing-drift"];
-
-fn opportunity(id: &str, kind: &str, title_msg: Msg, detail_msg: Msg, url: &str) -> Opportunity {
-    Opportunity {
-        id: id.into(),
-        kind: kind.into(),
-        title: i18n::render("en", &title_msg),
-        detail: i18n::render("en", &detail_msg),
-        title_msg,
-        detail_msg: Some(detail_msg),
-        learn_url: Some(url.into()),
-    }
-}
+#[allow(dead_code)]
+pub(crate) const FINDING_IDS: &[&str] = &["pricing-cache-ttl", "pricing-drift"];
 
 /// What the comparison is worth telling the user. Agreement says nothing.
 pub fn opportunities(checks: &[Check]) -> Vec<Opportunity> {
@@ -208,30 +197,34 @@ pub fn opportunities(checks: &[Check]) -> Vec<Opportunity> {
     if off.iter().all(|c| c.one_hour_cache) {
         let total_ours: f64 = off.iter().map(|c| c.ours).sum::<f64>() + 0.0;
         let total_vendor: f64 = off.iter().map(|c| c.vendor).sum::<f64>() + 0.0;
-        return vec![opportunity(
+        return vec![Opportunity::from_msgs(
             "pricing-cache-ttl",
             "tighten",
             Msg::new("finding.pricing-cache-ttl.title")
                 .var("pct", format!("{:.0}", (total_vendor - total_ours) / total_vendor * 100.0)),
-            Msg::new("finding.pricing-cache-ttl.detail")
-                .var("totalVendor", format!("{total_vendor:.2}"))
-                .var("totalOurs", format!("{total_ours:.2}"))
-                .var("names", &names),
-            PRICING_LEARN,
+            Some(
+                Msg::new("finding.pricing-cache-ttl.detail")
+                    .var("totalVendor", format!("{total_vendor:.2}"))
+                    .var("totalOurs", format!("{total_ours:.2}"))
+                    .var("names", &names),
+            ),
+            Some(PRICING_LEARN),
         )];
     }
-    vec![opportunity(
+    vec![Opportunity::from_msgs(
         "pricing-drift",
         "tighten",
         Msg::new("finding.pricing-drift.title").count(off.len() as i64),
-        Msg::new("finding.pricing-drift.detail")
-            .var("ours", format!("{:.2}", worst.ours))
-            .var("vendor", format!("{:.2}", worst.vendor))
-            .var("model", &worst.model)
-            .var("pct", format!("{:.0}", worst.diff_percent.abs()))
-            .sub("direction", direction)
-            .var("names", &names),
-        PRICING_LEARN,
+        Some(
+            Msg::new("finding.pricing-drift.detail")
+                .var("ours", format!("{:.2}", worst.ours))
+                .var("vendor", format!("{:.2}", worst.vendor))
+                .var("model", &worst.model)
+                .var("pct", format!("{:.0}", worst.diff_percent.abs()))
+                .sub("direction", direction)
+                .var("names", &names),
+        ),
+        Some(PRICING_LEARN),
     )]
 }
 

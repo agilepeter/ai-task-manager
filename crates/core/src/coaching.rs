@@ -6,14 +6,15 @@
 //! when there is nothing to say. Thresholds are constants so they are easy
 //! to argue with.
 
-use crate::i18n::{self, Msg};
+use crate::i18n::Msg;
 use crate::inventory::Opportunity;
 use crate::spend::{area_top, ProviderSpend, SessionSpend};
 
 const CLASSROOM: &str = "https://staas.fund/classroom/";
 
 /// Every finding id this module can emit (see inventory::FINDING_IDS).
-pub const FINDING_IDS: &[&str] = &["mix-top-heavy", "areas-unsorted", "session-long-lived"];
+#[allow(dead_code)]
+pub(crate) const FINDING_IDS: &[&str] = &["mix-top-heavy", "areas-unsorted", "session-long-lived"];
 
 /// Below this much 30-day spend the mix is noise, not a pattern.
 const MIN_SPEND_FOR_MIX: f64 = 50.0;
@@ -86,15 +87,7 @@ pub fn sessions_to_nudge(
 pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend]) -> Vec<Opportunity> {
     let mut out = Vec::new();
     let mut push = |id: &str, kind: &str, title_msg: Msg, detail_msg: Msg| {
-        out.push(Opportunity {
-            id: id.into(),
-            kind: kind.into(),
-            title: i18n::render("en", &title_msg),
-            detail: i18n::render("en", &detail_msg),
-            title_msg,
-            detail_msg: Some(detail_msg),
-            learn_url: Some(CLASSROOM.into()),
-        });
+        out.push(Opportunity::from_msgs(id, kind, title_msg, Some(detail_msg), Some(CLASSROOM)));
     };
 
     if let Some(sp) = claude {

@@ -122,10 +122,50 @@ pub struct Opportunity {
     pub learn_url: Option<String>,
 }
 
+impl Opportunity {
+    /// The only place `render("en", …)` runs for an `Opportunity`: `title`
+    /// and `detail` are always this Msg's English rendering, never a second
+    /// literal, so the two can never disagree. Every emitting module
+    /// (`inventory.rs`, `coaching.rs`, `procs.rs`, `drift.rs`) builds its
+    /// findings through this constructor rather than each re-implementing
+    /// the same two render calls.
+    pub fn from_msgs(id: &str, kind: &str, title_msg: Msg, detail_msg: Option<Msg>, learn_url: Option<&str>) -> Self {
+        Self {
+            id: id.into(),
+            kind: kind.into(),
+            title: i18n::render("en", &title_msg),
+            detail: detail_msg.as_ref().map(|m| i18n::render("en", m)).unwrap_or_default(),
+            title_msg,
+            detail_msg,
+            learn_url: learn_url.map(str::to_string),
+        }
+    }
+
+    /// Test-only shortcut for fixtures that need a specific id/kind/title/
+    /// detail and do not care what Msg backs them (they assert against the
+    /// plain English fields, never the key) -- one place to update instead
+    /// of three when the struct gains a field.
+    #[cfg(test)]
+    pub(crate) fn test_only(id: &str, kind: &str, title: &str, detail: &str) -> Self {
+        Self {
+            id: id.into(),
+            kind: kind.into(),
+            title: title.into(),
+            detail: detail.into(),
+            title_msg: Msg::new("finding.test.title"),
+            detail_msg: Some(Msg::new("finding.test.detail")),
+            learn_url: None,
+        }
+    }
+}
+
 /// Every finding id this module can emit, so a test can walk the JSON files
 /// and confirm each one has the keys it needs, and that nothing in the JSON
-/// claims to be a finding this module never produces.
-pub const FINDING_IDS: &[&str] = &[
+/// claims to be a finding this module never produces. Only `i18n.rs`'s test
+/// module reads this -- a non-test build sees no caller at all, hence the
+/// `allow`.
+#[allow(dead_code)]
+pub(crate) const FINDING_IDS: &[&str] = &[
     "mcp-unpinned",
     "mcp-env-secrets",
     "mcp-remote",
@@ -340,19 +380,8 @@ fn is_pinned(package: &str) -> bool {
 /// capabilities not in use yet.
 pub fn opportunities_for(inv: &Inventory) -> Vec<Opportunity> {
     let mut out = Vec::new();
-    // English is produced, never duplicated: title and detail are always
-    // render("en", …) of the very Msg the popover gets, so the two can never
-    // disagree with each other.
     let mut push = |id: &str, kind: &str, title_msg: Msg, detail_msg: Msg, url: Option<&str>| {
-        out.push(Opportunity {
-            id: id.into(),
-            kind: kind.into(),
-            title: i18n::render("en", &title_msg),
-            detail: i18n::render("en", &detail_msg),
-            title_msg,
-            detail_msg: Some(detail_msg),
-            learn_url: url.map(str::to_string),
-        });
+        out.push(Opportunity::from_msgs(id, kind, title_msg, Some(detail_msg), url));
     };
 
     let unpinned: Vec<&McpServer> = inv
@@ -973,6 +1002,11 @@ mod tests {
             mcp_servers: vec![server("floaty", Some("some-mcp"), "stdio", 2), server("cloud", None, "http", 0)],
             ..Inventory::default()
         };
+        assert_eq!(
+            ids(&loose),
+            ["mcp-unpinned", "mcp-env-secrets", "mcp-remote", "perm-none", "agents-none", "hooks-none"],
+            "a silently dropped finding would otherwise still pass this test"
+        );
         let other = Inventory {
             permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 3 },
             agents: vec![Definition { name: "r".into(), scope: "user".into(), project: None, model: None }],

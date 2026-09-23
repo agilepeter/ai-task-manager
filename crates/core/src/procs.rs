@@ -15,7 +15,7 @@
 
 use serde::Serialize;
 
-use crate::i18n::{self, Msg};
+use crate::i18n::Msg;
 use crate::inventory::{McpServer, Opportunity};
 
 /// Runners that take a package directly, after optional flags ("npx -y pkg").
@@ -368,22 +368,15 @@ fn mb(bytes: u64) -> u64 {
 }
 
 /// Every finding id this module can emit (see inventory::FINDING_IDS).
-pub const FINDING_IDS: &[&str] = &["mcp-duplicate-processes", "mcp-running-unconfigured", "mcp-memory"];
+#[allow(dead_code)]
+pub(crate) const FINDING_IDS: &[&str] = &["mcp-duplicate-processes", "mcp-running-unconfigured", "mcp-memory"];
 
 /// What the running picture suggests. Same contract as the setup ones: every
 /// finding states this machine's own numbers, and a quiet machine shows none.
 pub fn opportunities(running: &[RunningServer]) -> Vec<Opportunity> {
     let mut out = Vec::new();
     let mut push = |id: &str, kind: &str, title_msg: Msg, detail_msg: Msg| {
-        out.push(Opportunity {
-            id: id.into(),
-            kind: kind.into(),
-            title: i18n::render("en", &title_msg),
-            detail: i18n::render("en", &detail_msg),
-            title_msg,
-            detail_msg: Some(detail_msg),
-            learn_url: Some(MCP_LEARN.into()),
-        });
+        out.push(Opportunity::from_msgs(id, kind, title_msg, Some(detail_msg), Some(MCP_LEARN)));
     };
 
     let mut dupes: Vec<&RunningServer> = running.iter().filter(|s| s.instances >= MANY_COPIES).collect();
