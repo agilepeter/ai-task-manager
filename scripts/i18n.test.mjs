@@ -16,80 +16,17 @@ for (const file of readdirSync(localesDir).filter((f) => f.endsWith(".json")).so
 assert.ok(dicts.en, "src/locales/en.json must exist as the reference locale");
 const otherLocales = Object.keys(dicts).filter((l) => l !== "en").sort();
 
-// Exactly the keys Russian lacks today. The set-equality test below still
-// fails on any OTHER gap (an undeclared missing key) and on any extra key
-// ru has that English doesn't. When ru's coverage improves, prune this list
-// to match — a stale entry here just hides a passing key, it can't hide a
-// real gap.
-const KNOWN_GAPS = {
-  ru: [
-    "detail.disabled",
-    "detail.exhausted",
-    "detail.expired",
-    "detail.keyQuota",
-    "detail.overdue",
-    "detail.subscription",
-    "detail.unknown",
-    "detail.unknownType",
-    "detail.wallet",
-    "footer.onenewapiDeleted",
-    "footer.onenewapiDuplicate",
-    "footer.onenewapiFailed",
-    "footer.onenewapiKeySaved",
-    "footer.onenewapiNotCompatible",
-    "footer.onenewapiProbeFailed",
-    "footer.onenewapiSaved",
-    "footer.sub2apiFailed",
-    "label.Expiry",
-    "label.Today actual cost",
-    "label.Today requests",
-    "label.Today tokens",
-    "label.Total actual cost",
-    "label.Total requests",
-    "label.Total tokens",
-    "metric.primaryQuota",
-    "settings.onenewapi",
-    "settings.onenewapiAdd",
-    "settings.onenewapiAddKey",
-    "settings.onenewapiDelete",
-    "settings.onenewapiDeleteBody",
-    "settings.onenewapiDeleteConfirm",
-    "settings.onenewapiDeleteKey",
-    "settings.onenewapiDeleteTitle",
-    "settings.onenewapiEdit",
-    "settings.onenewapiFamily",
-    "settings.onenewapiFamilyTip",
-    "settings.onenewapiKeyKeepHint",
-    "settings.onenewapiKeyLabelPh",
-    "settings.onenewapiKeySecretPh",
-    "settings.onenewapiMigrateBody",
-    "settings.onenewapiMigrateConfirm",
-    "settings.onenewapiMigrateTitle",
-    "settings.onenewapiNamePh",
-    "settings.onenewapiNoKeys",
-    "settings.onenewapiNote",
-    "settings.onenewapiSaveKey",
-    "settings.onenewapiUrlPh",
-    "settings.onenewapiUrlRequired",
-    "settings.siteInvalidUrl",
-    "settings.sub2api",
-    "settings.sub2apiFamily",
-    "settings.sub2apiNote",
-  ],
-};
-
 function tokensOf(value) {
   return new Set([...value.matchAll(/\{([a-zA-Z0-9_]+)\}/g)].map((m) => m[1]));
 }
 
 for (const locale of otherLocales) {
-  test(`${locale}: has exactly the keys English has, modulo KNOWN_GAPS`, () => {
-    const allowedMissing = new Set(KNOWN_GAPS[locale] ?? []);
+  test(`${locale}: has exactly the keys English has`, () => {
     const enKeys = new Set(Object.keys(dicts.en));
     const localeKeys = new Set(Object.keys(dicts[locale]));
-    const missing = [...enKeys].filter((k) => !localeKeys.has(k) && !allowedMissing.has(k));
+    const missing = [...enKeys].filter((k) => !localeKeys.has(k));
     const extra = [...localeKeys].filter((k) => !enKeys.has(k));
-    assert.deepEqual(missing, [], `${locale} is missing keys not covered by KNOWN_GAPS`);
+    assert.deepEqual(missing, [], `${locale} is missing keys English has`);
     assert.deepEqual(extra, [], `${locale} has keys English does not have`);
   });
 
