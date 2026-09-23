@@ -94,6 +94,9 @@ interface Snapshot {
   error: string | null;
   metrics: Metric[];
   stale: boolean;
+  /// The last fetch failed and this is the last good snapshot standing in.
+  /// Inside the grace window the card shows nothing; a manual refresh does.
+  attempt_failed?: boolean;
   warning: string | null;
   dashboard_url?: string | null;
 }
@@ -3075,9 +3078,18 @@ async function refresh(force = false, usageOnly = false): Promise<void> {
     if (firstData && !customizeOpen && !document.hidden) playReveal();
     requestTraySync();
     const time = new Date().toLocaleTimeString(localeTag(), { hour: "2-digit", minute: "2-digit" });
+    // A provider whose fetch just failed is served from its last good
+    // snapshot, and inside the grace window its card shows no Outdated chip:
+    // one hiccup should not alarm. But a refresh the user asked for must not
+    // say "Updated" over numbers that did not move — that is exactly what
+    // reads as the app being stuck (2026-09-22: a failed Claude fetch right
+    // after a weekly rollover looked like a frozen 100%).
+    const heldBack = force ? snapshots.filter((s) => s.attempt_failed).map((s) => s.name) : [];
     status.textContent = configSaveError
       ? t("footer.configSaveFailed", { err: configSaveError })
-      : t("footer.updated", { time });
+      : heldBack.length > 0
+        ? t("footer.refreshPartial", { time, names: heldBack.join(", ") })
+        : t("footer.updated", { time });
   } catch (err) {
     status.textContent = configSaveError
       ? t("footer.configSaveFailed", { err: configSaveError })

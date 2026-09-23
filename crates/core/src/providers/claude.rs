@@ -400,6 +400,16 @@ fn push_window(metrics: &mut Vec<Metric>, node: Option<&Value>, label: &str, per
 ///
 /// `disabled_reason` is server text (`org_level_disabled_until`) and is never
 /// echoed, only used to decide between two fixed phrases.
+///
+/// The cap is **monthly**, and the row says so. On the evening of 2026-09-22
+/// the weekly limits rolled over while this row stayed at 100%, and next to
+/// fresh weekly bars it read as "the limit is still full and the app is
+/// stuck". It was neither: the payload carries `monthly_limit` with `daily`
+/// and `weekly` null, and reports `spend_limit_reached` until the billing
+/// cycle turns. A row with no period and the word "limit" three times cannot
+/// be told apart from a weekly limit, so the detail names the period, calls
+/// the thing a cap, and past the cap carries the real percentage while the
+/// bar, which must stay 0–100, clamps.
 pub fn extra_usage_metric(extra: Option<&Value>) -> Option<Metric> {
     let extra = extra?;
     let enabled = extra.get("is_enabled").and_then(Value::as_bool).unwrap_or(false);
@@ -416,15 +426,20 @@ pub fn extra_usage_metric(extra: Option<&Value>) -> Option<Metric> {
     let reached = extra.get("spend_limit_reached").and_then(Value::as_bool).unwrap_or(false);
     let state = match (enabled, reached) {
         (true, _) => "",
-        (false, true) => " · off, limit reached",
+        (false, true) => " · off, cap reached",
         (false, false) => " · off",
     };
     Some(match cap {
-        Some(cap) => Metric::progress(
-            "Extra usage",
-            (used / cap * 100.0).clamp(0.0, 100.0),
-            Some(format!("${used:.2} of ${cap:.2} limit{state}")),
-        ),
+        Some(cap) => {
+            let pct = used / cap * 100.0;
+            // The bar and the tray need 0–100; the true figure goes in the words.
+            let over = if pct > 100.0 { format!(" ({pct:.0}%)") } else { String::new() };
+            Metric::progress(
+                "Extra usage",
+                pct.clamp(0.0, 100.0),
+                Some(format!("${used:.2} of ${cap:.2} monthly cap{over}{state}")),
+            )
+        }
         None if used > 0.0 => Metric::text("Extra usage", format!("${used:.2} spent{state}")),
         None => return None,
     })
@@ -631,9 +646,27 @@ mod tests {
         assert_eq!(m.label, "Extra usage");
         assert_eq!(m.used_percent, Some(100.0), "over the cap clamps to full");
         let detail = m.detail.clone().unwrap_or_default();
-        assert!(detail.contains("$21.87 of $20.00"), "{detail}");
-        assert!(detail.contains("limit reached"), "{detail}");
+        assert!(detail.contains("$21.87 of $20.00 monthly cap"), "{detail}");
+        assert!(detail.contains("(109%)"), "past the cap, the words carry the real figure: {detail}");
+        assert!(detail.contains("cap reached"), "{detail}");
+        assert!(!detail.contains("limit"), "'limit' is the weekly bars' word, not this row's: {detail}");
         assert!(!detail.contains("org_level"), "server text must never be echoed: {detail}");
+    }
+
+    #[test]
+    fn the_row_names_its_period_so_a_weekly_rollover_cannot_be_read_into_it() {
+        // 2026-09-22, 21:00: the weekly limits reset to single digits and this
+        // row stayed at 100%. With no period and no reset time of its own, the
+        // only thing that can tell the user it is monthly is the text.
+        let v = json!({
+            "is_enabled": false, "used_credits": 2187.0, "monthly_limit": 2000.0,
+            "spend_limit_reached": true, "daily": null, "weekly": null
+        });
+        let m = extra_usage_metric(Some(&v)).expect("reported");
+        assert!(m.detail.as_deref().unwrap_or("").contains("monthly"), "{:?}", m.detail);
+        assert_eq!(m.resets_at, None, "the billing cycle's turn is not in the payload; never invent one");
+        assert_eq!(m.period_ms, None);
+        assert_eq!(m.used_percent, Some(100.0), "the bar clamps; the words say 109%");
     }
 
     #[test]
@@ -651,7 +684,7 @@ mod tests {
         let m = extra_usage_metric(Some(&v)).expect("reported");
         assert_eq!(m.used_percent, Some(25.0));
         let detail = m.detail.clone().unwrap_or_default();
-        assert_eq!(detail, "$5.00 of $20.00 limit", "no state suffix while it is on");
+        assert_eq!(detail, "$5.00 of $20.00 monthly cap", "no state suffix while it is on");
     }
 
     #[test]

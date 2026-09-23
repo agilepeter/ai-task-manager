@@ -118,6 +118,8 @@ export function displayMetricDetail(text: string): string {
   if (m) return t("detail.moneyOfUsed", { a: m[1], b: m[2] });
   m = text.match(new RegExp(`^(${money}) of (${money}) limit$`, "i"));
   if (m) return t("detail.moneyOfLimit", { a: m[1], b: m[2] });
+  m = text.match(new RegExp(`^(${money}) of (${money}) monthly cap$`, "i"));
+  if (m) return t("detail.moneyOfMonthlyCap", { a: m[1], b: m[2] });
   m = text.match(new RegExp(`^(${money}) of (${money})$`, "i"));
   if (m) return t("detail.moneyOf", { a: m[1], b: m[2] });
   m = text.match(new RegExp(`^(${money}) · (\\d+) credits$`, "i"));
