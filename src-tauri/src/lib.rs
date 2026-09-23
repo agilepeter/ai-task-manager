@@ -4099,9 +4099,11 @@ mod tests {
             1_000
         ));
         assert_eq!(current.status, "ok");
-        assert!(!current.stale);
+        assert!(!current.stale, "one hiccup inside the grace window is not Outdated");
         assert!(current.attempt_failed);
-        assert_eq!(current.warning, None);
+        // The chip is gated on `stale`; the reason is kept regardless so a
+        // manual refresh can say why the numbers are held back.
+        assert_eq!(current.warning.as_deref(), Some("timeout"));
         assert_eq!(current.metrics[0].used_percent, Some(25.0));
     }
 
