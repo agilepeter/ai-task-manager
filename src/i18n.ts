@@ -146,6 +146,10 @@ export function t(key: string, vars?: Record<string, string | number>, count?: n
       lookupExact("en", key) ??
       key;
   }
+  // An explicit vars.count (rare) wins over the auto-substituted count:
+  // spread order puts vars after count, so a vars.count key overwrites it.
+  // Rust's render_core must agree on this precedence -- it does, by a
+  // different mechanism (see the comment there).
   const allVars = count === undefined ? vars : { count, ...vars };
   if (allVars) {
     for (const [k, v] of Object.entries(allVars)) {

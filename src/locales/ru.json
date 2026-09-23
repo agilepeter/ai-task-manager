@@ -418,7 +418,7 @@
   "detail.spend.axisToday": "сегодня",
   "detail.spend.axisTotal": "всего {total} · пик {peak}",
   "detail.spend.smallerAreas.one": "{n} меньшая область",
-  "detail.spend.smallerAreas.few": "{n} меньшей области",
+  "detail.spend.smallerAreas.few": "{n} меньшие области",
   "detail.spend.smallerAreas.many": "{n} меньших областей",
   "detail.spend.areaCaption": "Рабочая область — это папка верхнего уровня, в которой работала сессия: где был её терминал или файлы, которых она касалась. «(unsorted)» — расходы до того, как сессия куда-либо перешла.",
   "detail.spend.projectSingleCaption": "Проекты — это папки, в которых был запущен Claude Code. Здесь всё выполнялось из одной папки, поэтому строка всего одна.",

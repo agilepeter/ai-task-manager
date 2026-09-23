@@ -269,6 +269,12 @@ fn render_core(lookup_in: impl Fn(&str, &str) -> Option<String>, locale: &str, m
         .find_map(|cand| lookup_in(locale, cand).or_else(|| lookup_in("en", cand)))
         .unwrap_or_else(|| msg.key.to_string());
 
+    // An explicit vars["count"] (rare) wins over the derived count below:
+    // vars are listed first and substitute() fully replaces each {name}
+    // before moving to the next pair, so the vars entry consumes every
+    // {count} occurrence and the later derived one is a no-op. TS's t()
+    // must agree on this precedence -- it does, by a different mechanism
+    // (see the comment there).
     let mut pairs: Vec<(&str, &str)> = msg.vars.iter().map(|(&k, v)| (k, v.as_str())).collect();
     let count_str = msg.count.map(|n| n.to_string());
     if let Some(c) = &count_str {
