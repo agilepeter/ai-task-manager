@@ -24,7 +24,11 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
   installed copy can ever accept an update again.
 - The update feed is wired: `updater_endpoint_strings` and `tauri.conf.json` both point at
   `https://github.com/agilepeter/ai-task-manager/releases/latest/download/latest.json`, which
-  exists as soon as the first release is published.
+  has resolved since v0.1.0 was published.
+- **v0.1.0 was published on 2026-09-24** from tag `v0.1.0` (commit 99c7d84): `release.yml` built
+  both legs from the tag, the draft's assets were checked (installers, `.sig` files,
+  `latest.json` naming both platforms with non-empty signatures), then the draft was published
+  and the feed URL verified to resolve. Every later release follows "Cutting a release" below.
 
 ## Not yet on, and why
 
@@ -51,8 +55,8 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
    `CHANGELOG.md`, commit.
 2. `git tag vX.Y.Z && git push --tags`. The workflow builds both platforms and opens a draft
    release with the installers, the `.sig` files and `latest.json`.
-3. Check the draft's assets, then publish it. Installs with update checks on see it within
-   four hours or at their next launch.
+3. Check the draft's assets, then publish it. Installs with update checks on see it at their
+   next launch or popover open, or within four hours.
 
 ## Still upstream's
 

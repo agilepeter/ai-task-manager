@@ -27,20 +27,19 @@ macOS and Windows. No account, no cloud, no telemetry.
 
 ### Read this first
 
-**No release has been cut yet**, so there is nothing to download. There is
-also no code signing certificate on either platform, so builds are unsigned
-and both operating systems will say so.
-
-That leaves one path that works today: **build it yourself.** It takes about
-ten minutes the first time and needs no certificate, no account and no admin
-rights. Everything below is written for that path, with the "someone handed me
-a build" steps beside it for when that day comes.
+**Version 0.1.0 is on [GitHub Releases](https://github.com/agilepeter/ai-task-manager/releases/latest):** a universal `.dmg` for
+macOS (Intel and Apple Silicon) and a `-setup.exe` plus `.msi` for Windows 10 and
+11, built from the tagged source by `release.yml`. There is no code signing
+certificate on either platform yet, so both operating systems will say so the
+first time; the steps below show what to click. Building it yourself still
+works, takes about ten minutes the first time, and needs no certificate, no
+account and no admin rights. Everything below is written for both paths.
 
 | | State today |
 |---|---|
-| Downloadable release | None. `release.yml` builds installers for a `v*` tag but has never been run. |
-| macOS signing | None. No Apple Developer ID certificate is configured, so `spctl` reports "no usable signature" on any build. |
-| Windows signing | None. SmartScreen will warn on any installer. |
+| Downloadable release | [v0.1.0](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.0), 2026-09-24, built by `release.yml` from the tagged commit. |
+| macOS signing | None yet. Right-click the app and choose Open once, or `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`. |
+| Windows signing | None yet. SmartScreen warns: More info, then Run anyway. |
 | Auto-update | **Opt-in, off by default.** See [Updates](#updates). |
 
 ### macOS
@@ -153,11 +152,12 @@ settings, saved keys and history as well, delete `%APPDATA%\AITaskManager`.
 
 ### Releases
 
-Once a `v*` tag is pushed, `.github/workflows/release.yml` builds a macOS
-universal bundle and Windows installers and attaches them to a **draft**
-release. Until that runs and the artifacts are signed, building from source
-above is both the supported path and the better one: you can read what you are
-running.
+A `v*` tag makes `.github/workflows/release.yml` build the macOS universal
+bundle and the Windows installers and attach them, with the updater `.sig`
+files and `latest.json`, to a **draft** release, which is checked and then
+published by hand. The first one is [v0.1.0](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.0). The
+artifacts are not signed, so building from source above remains the better
+path if you want to read what you are running.
 
 ## How it works
 
@@ -331,14 +331,16 @@ including every network call the app can make and the greps that prove it, is
 **Self-update is opt-in and off by default** (Settings > Network > "Check for
 updates", the `updateChecks` config key). While it is off, nothing goes out.
 Turning it on makes exactly one kind of request -- a GET of `latest.json` from
-this project's own release feed on `github.com`, sent on launch and every 4
-hours after that, carrying nothing about you or this computer. See
+this project's own release feed on `github.com`, sent on launch, whenever the
+popover opens and every 4 hours in the background, carrying nothing about you
+or this computer. See
 [docs/privacy.md](docs/privacy.md) for the full accounting and `SHIPPING.md`
 for what each remaining distribution step needs.
 
-The feed itself does not exist yet because this repository has never cut a
-release, so turning the setting on today just means a logged 404 every 4
-hours. Until a release exists, update by pulling and rebuilding:
+The feed has been live at `https://github.com/agilepeter/ai-task-manager/releases/latest/download/latest.json`
+since 0.1.0. When a newer version answers, the footer shows an "Update
+available" button and installs it only when you click. To update by hand
+instead, download the next release, or pull and rebuild:
 
 ```sh
 git pull
@@ -368,7 +370,7 @@ it is in [UPSTREAM.md](UPSTREAM.md).
 ## Questions
 
 The [FAQ on the product page](https://staas.fund/task-manager/#faq) answers the
-ones that come up first: why there is no download, whether anything leaves the
+ones that come up first: how to install it, whether anything leaves the
 machine, why a row can sit at 100% after a weekly reset, why the spend figures
 are a floor, and whether it will delete old sessions (it will not).
 
