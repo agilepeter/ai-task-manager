@@ -223,6 +223,26 @@ const RUNNING = [
   { name: "postgres", configured: true, client: "Claude Code", package: "pg-readonly-mcp", instances: 1, rssBytes: 64 * 1048576, elapsedSecs: 3300, pids: [9120] },
 ] as const;
 
+/** Two agent hosts on the same fictional machine, covering the two shapes
+ *  describeAgent() (src/inventory.ts) has to render: one with a priced live
+ *  pace in a client-billed folder, one with only a folder and nothing else
+ *  known about it. Acme Co (see clientRules above) is this demo's own
+ *  invented client, never a real one. */
+const AGENTS = [
+  {
+    tool: "Claude Code", pid: 4821, elapsedSecs: 5400, rssBytes: 342 * 1048576, cpuPercent: 6.4,
+    cwd: "/Users/jordan/dev/acme-webapp", area: "acme-portal/web", client: "Acme Co",
+    pace: {
+      sessionId: "8f2c1e40-9b7a-4c3d-9e2f-1a2b3c4d5e6f", tokens10m: 18400, cost10m: 0.62,
+      priced: true, idleSecs: 40, model: "claude-opus-4-1", area: "acme-portal/web",
+    },
+  },
+  {
+    tool: "Codex", pid: 7710, elapsedSecs: 900, rssBytes: 210 * 1048576, cpuPercent: null,
+    cwd: "/Users/jordan/dev/lambda-notifier", area: null, client: null, pace: null,
+  },
+] as const;
+
 /** Servers the viewer has ended in this demo session. */
 const endedServers = new Set<string>();
 
@@ -285,6 +305,7 @@ export function handle(cmd: string, args: Args = {}): unknown {
     case "fetch_spend": return spend();
     case "get_inventory": return inventory();
     case "get_running": return structuredClone(RUNNING.filter((r) => !endedServers.has(r.name)));
+    case "get_running_agents": return structuredClone(AGENTS);
     case "end_task": {
       if (!RUNNING.some((r) => r.name === args.name)) throw "that server is not running any more";
       endedServers.add(String(args.name));

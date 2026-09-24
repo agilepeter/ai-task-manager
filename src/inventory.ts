@@ -33,6 +33,32 @@ interface RunningServer {
   pids: number[];
 }
 
+/** A running agent's own session, read fresh: recent pace, not history. */
+interface LivePace {
+  sessionId: string;
+  tokens10m: number;
+  cost10m: number;
+  priced: boolean;
+  idleSecs: number;
+  model: string | null;
+  area: string | null;
+}
+
+/** One agent host process running right now, folded with whatever plain
+ *  subprocesses it spawned. Never a pid on screen: there is no End task for
+ *  an agent, only for the MCP servers it starts. */
+interface RunningAgent {
+  tool: string;
+  pid: number;
+  elapsedSecs: number;
+  rssBytes: number;
+  cpuPercent: number | null;
+  cwd: string | null;
+  area: string | null;
+  client: string | null;
+  pace: LivePace | null;
+}
+
 interface Probe {
   kind: "file" | "keychain" | "folder";
   location: string;
@@ -123,6 +149,8 @@ let inventory: Inventory | null = null;
 let loadError = "";
 let running: RunningServer[] = [];
 let runningError = "";
+let runningAgents: RunningAgent[] = [];
+let runningAgentsError = "";
 let signIns: Diagnosis[] = [];
 let ending = "";
 let scopeFilter = ALL_SCOPES;
@@ -349,6 +377,107 @@ function upLabel(secs: number): string {
   return t("time.mins", { m: Math.max(1, m) });
 }
 
+/// B/M/K stay English, same house loanword rule as detail.ts's tokens().
+function tokens(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)}K`;
+  return String(Math.round(n));
+}
+
+/// Whole dollars from $10 up, cents below, same rule as ledger.ts/detail.ts's
+/// money(): $ stays a symbol, digit grouping follows the app's language.
+function money(n: number): string {
+  return n >= 10 ? `$${Math.round(n).toLocaleString(localeTag())}` : `$${n.toFixed(2)}`;
+}
+
+/// The last two path segments of a cwd ("/Users/x/dev/acme/web" -> "acme/web"),
+/// one segment when that is all there is. A display label, not a real path,
+/// so "/" reads fine even on a Windows-style cwd (which never reaches here
+/// anyway -- see RunningAgent.cwd).
+function agentFolder(cwd: string): string {
+  const parts = cwd.split(/[\\/]/).filter(Boolean);
+  return parts.slice(-2).join("/");
+}
+
+/// Where an agent's row says it is working: unknown (no cwd -- every agent on
+/// Windows, or a macOS one lsof had nothing for), a bare folder, folder plus
+/// work area, or folder plus area plus the client that area bills to. `area`
+/// implies `client` was even possible to look up, and `client` never appears
+/// without the `area` that produced it -- both come from the same live pace.
+function agentPlace(a: RunningAgent): string {
+  if (a.cwd == null) return T("running.agentFolderUnknown");
+  const folder = agentFolder(a.cwd);
+  if (a.client) return T("running.agentFolderClient", { folder, area: a.area ?? "", client: a.client });
+  if (a.area) return T("running.agentFolderArea", { folder, area: a.area });
+  return T("running.agentFolderOnly", { folder });
+}
+
+/// The one place an agent row's three strings are composed, so renderAgents()
+/// never touches a translation key directly. Pure: no DOM, no invoke -- easy
+/// to run for all nine locales in a plain node test.
+///
+/// `pace` is null exactly when `a.pace` is null (no live session was found
+/// for this folder): the row then has no third line at all, rather than a
+/// misleading "idle forever". When a pace exists but the window saw no
+/// tokens and the session has sat quiet a minute or more, that reads as idle
+/// time rather than a "0 tokens" pace line.
+export function describeAgent(a: RunningAgent): { title: string; place: string; pace: string | null; tip: string | null } {
+  const title = T("running.agentRow", { tool: a.tool, elapsed: upLabel(a.elapsedSecs) });
+  const place = agentPlace(a);
+  const p = a.pace;
+  if (!p) return { title, place, pace: null, tip: null };
+  const tip = T("running.agentPaceTip");
+  if (p.idleSecs >= 60 && p.tokens10m === 0) {
+    return { title, place, pace: T("running.agentIdle", { minutes: Math.floor(p.idleSecs / 60) }), tip };
+  }
+  const pace = p.priced
+    ? T("running.agentPace", { tokens: tokens(p.tokens10m), cost: money(p.cost10m) })
+    : T("running.agentPaceUnpriced", { tokens: tokens(p.tokens10m) });
+  return { title, place, pace, tip };
+}
+
+/// The live agents, folded above the MCP server rows inside the same Running
+/// now section (renderRunning() splices this in). Silent -- returns "" --
+/// when there is nothing to say: most opens of this tab happen with no
+/// coding agent running at all, and repeating an empty line under every
+/// server list would be noise the servers themselves never had to carry. A
+/// failed scan still surfaces the group, so a permission or lsof gap is
+/// visible rather than swallowed.
+function renderAgents(list: RunningAgent[]): string {
+  if (!list.length && !runningAgentsError) return "";
+  const head = `<div class="inv-grouphead">${esc(T("running.agentsTitle"))} <span class="inv-grouphead-n">${list.length}</span></div>`;
+  if (!list.length) {
+    return `${head}<p class="inv-empty">${esc(T("empty.runningAgents"))}</p>`;
+  }
+  const lead = `<p class="inv-note run-lead">${esc(plural("inventory.running.agentCount", list.length))}</p>`;
+  const rows = list
+    .map((a) => {
+      const d = describeAgent(a);
+      const cpu = a.cpuPercent != null
+        ? `<span class="inv-fact">${esc(T("running.agentCpu", { percent: Math.round(a.cpuPercent) }))}</span>`
+        : "";
+      const paceLine = d.pace
+        ? `<div class="inv-row-sub"${d.tip ? ` title="${esc(d.tip)}"` : ""}>${esc(d.pace)}</div>`
+        : "";
+      return `
+      <div class="inv-row run-row agent-row">
+        <div class="inv-row-main">
+          <span class="inv-name">${esc(d.title)}</span>
+          <span class="spacer"></span>
+          <div class="run-side">
+            <span class="run-mem">${mbLabel(a.rssBytes)}</span>
+            ${cpu}
+          </div>
+        </div>
+        <div class="inv-row-sub">${esc(d.place)}</div>
+        ${paceLine}
+      </div>`;
+    })
+    .join("");
+  return `${head}${lead}${rows}`;
+}
+
 /// The Task Manager view: what is in memory right now, heaviest first. The
 /// backend matches processes to configured servers and never hands over a
 /// command line, so there is nothing here to redact.
@@ -383,17 +512,17 @@ function renderRunning(): string {
       </div>`;
     })
     .join("");
-  const lead = running.length
+  const serverLead = running.length
     ? `<p class="inv-note run-lead">${esc(T("running.summary", { mem: mbLabel(total), processes: plural("inventory.running.processCount", procCount) }))}</p>`
     : "";
-  return section(
-    "running",
-    T("section.running"),
-    running.length,
-    rows,
-    runningError ? T("empty.runningError", { error: runningError }) : T("empty.running"),
-    { lead },
-  );
+  // The server list's own empty/error text is folded into `body` here
+  // (rather than passed as section()'s `hint`), so an agent-only reading (no
+  // servers running) still gets its own line instead of section() replacing
+  // the whole panel -- including the agents block above it -- with the hint.
+  const serverBody = running.length
+    ? serverLead + rows
+    : `<p class="inv-empty">${esc(runningError ? T("empty.runningError", { error: runningError }) : T("empty.running"))}</p>`;
+  return section("running", T("section.running"), running.length, renderAgents(runningAgents) + serverBody, "", { keepBody: true });
 }
 
 /// Why a card is empty. Says where the app looked, so "not signed in" and
@@ -565,6 +694,21 @@ async function loadRunning(): Promise<void> {
   }
 }
 
+/// Same cadence as loadRunning() above -- cheap, no cache, refreshed on
+/// every Inventory open and after End task -- but its own call, never
+/// throwing: a scan failure here degrades to the group's empty/error line
+/// rather than to the tab's own loadError, since these rows are a bonus view
+/// onto the same process table, not the primary promise of this tab.
+async function loadAgents(): Promise<void> {
+  try {
+    runningAgents = await invoke<RunningAgent[]>("get_running_agents");
+    runningAgentsError = "";
+  } catch (err) {
+    runningAgents = [];
+    runningAgentsError = String(err);
+  }
+}
+
 async function load(): Promise<void> {
   try {
     inventory = await invoke<Inventory>("get_inventory");
@@ -582,6 +726,7 @@ async function load(): Promise<void> {
   render();
   void loadTrust();
   void loadRunning().then(render);
+  void loadAgents().then(render);
 }
 
 function show(view: View): void {
@@ -656,6 +801,7 @@ export function setupViews(h: InventoryHost): void {
         })
         .then(() => loadRunning())
         .then(render);
+      void loadAgents().then(render);
       return;
     }
     const pinBtn = target.closest<HTMLElement>("[data-pin]");

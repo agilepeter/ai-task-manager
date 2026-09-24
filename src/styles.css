@@ -4105,6 +4105,17 @@ body.wide #detail {
   color: var(--foreground);
   flex: none;
 }
+/* An agent row's right column: memory always, CPU under it only when known.
+   .inv-row-main lays its children out in a row, so the two facts need their
+   own column to stack in rather than sitting side by side like a server
+   row's single .run-mem. */
+.run-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex: none;
+}
 .run-meter {
   height: 3px;
   border-radius: 2px;

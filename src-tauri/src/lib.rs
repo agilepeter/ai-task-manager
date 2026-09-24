@@ -222,6 +222,21 @@ async fn get_running() -> Result<Vec<procs::RunningServer>, String> {
         .map_err(|e| format!("process scan: {e}"))
 }
 
+/// Every agent host running right now (Claude Code, Codex, ...), each folded
+/// with its plain subprocesses and paired with the newest live session in its
+/// own folder. Same contract as `get_running`: no cache, cheap enough to poll
+/// on every Inventory open and after End task, so a finished session or a
+/// closed terminal drops off on the very next read.
+#[tauri::command]
+async fn get_running_agents() -> Result<Vec<aitm_core::procs::RunningAgent>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let rules = clients::load_from(&clients::path());
+        procs::agents_snapshot(&rules)
+    })
+    .await
+    .map_err(|e| format!("agent scan: {e}"))
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ClientView {
@@ -3641,6 +3656,7 @@ pub fn run() {
             fetch_usage,
             get_inventory,
             get_running,
+            get_running_agents,
             end_task,
             get_diagnosis,
             get_effort,
