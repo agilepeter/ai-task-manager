@@ -3,9 +3,10 @@
 // crates/core/src/coaching.rs's real sentences -- nothing on either side
 // checks that the two agree. A var-name typo here leaves a literal
 // "{worstName}" (or whichever var drifted) sitting in the rendered sentence,
-// in every locale, silently: this renders every synthetic row in en/zh/ru
-// and fails if any title or detail still has an unfilled {var}, or came
-// back as its own raw key (t()'s fallback for a key that resolves nowhere).
+// in every locale, silently: this renders every synthetic row in every
+// registered locale and fails if any title or detail still has an unfilled
+// {var}, or came back as its own raw key (t()'s fallback for a key that
+// resolves nowhere).
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { test } from "node:test";
@@ -34,7 +35,10 @@ async function loadSyntheticModule() {
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 
-const LOCALES = ["en", "zh", "ru"];
+// Derived from i18n.ts's own export (not hand-copied), so a newly added
+// locale is covered here automatically instead of silently getting no
+// synthetic-row coverage.
+const { LOCALES } = await loadSyntheticModule();
 
 // A fixed, self-contained fixture rather than src/demo-fixture.json, so this
 // test always exercises both builders' var wiring regardless of whether a
