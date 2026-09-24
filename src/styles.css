@@ -397,6 +397,10 @@ body.settings-open #settings {
   border-top: 1px dashed var(--border);
 }
 
+/* flex-wrap lets a label drop to its own line instead of squeezing the
+   control beside it (see #pinned below, the row this was written for).
+   German's "Globale Tastenkombination" (Global shortcut) label wraps its
+   row the same way -- harmless, seen in settings-de.png. */
 .setting-row {
   display: flex;
   flex-wrap: wrap;
@@ -4204,6 +4208,12 @@ body.wide #detail {
 .inv-chip.sig-unverified {
   color: var(--foreground);
   background: color-mix(in srgb, #eab308 24%, transparent);
+  max-width: none;
+}
+/* Off like the two above -- Russian's pin-button label ("Закрепить…") is
+   long enough that it should not depend on the chip's 110px cap to stay
+   fully readable. */
+.inv-chip.inv-pin-btn {
   max-width: none;
 }
 

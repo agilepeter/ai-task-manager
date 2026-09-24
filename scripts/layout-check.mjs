@@ -1,9 +1,14 @@
 // Layout verification at the app's real window width (380px) across every
 // locale and every view. This is the mechanical half of the nine-language
-// layout sweep; a human still has to LOOK at the screenshots this writes,
-// because ellipsis truncation and awkward (but technically non-overflowing)
-// wraps are invisible to the assertion below on purpose -- see the ALLOWLIST
-// and the ellipsis carve-out in scanOverflow().
+// layout sweep; a human still has to LOOK at the screenshots this writes.
+// Two blind spots are deliberate -- ellipsis truncation and an awkward but
+// technically non-overflowing wrap are excluded on purpose; see the
+// ALLOWLIST and the ellipsis carve-out in scanOverflow(). A third is
+// structural, not a choice: a native <select>'s own clipped, selected-option
+// text never moves its scrollWidth or clientWidth in WebKit -- forcing one
+// down to 70px and reading its own numbers back (69/68) stays clean even
+// though the label is visibly cut. Every <select> in a view is checked only
+// by the LOOK pass below; a green run is not proof for one.
 //
 // What it checks per (view, locale) cell:
 //   1. document.documentElement.scrollWidth <= 380 -- the popover itself
@@ -228,16 +233,16 @@ async function openSettings(page) {
   const open = await page.evaluate(() => document.body.classList.contains('settings-open'));
   if (open) return;
   await page.locator('#side-zone').hover();
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(250); // the rail's 0.24s slide-out, so #settings-btn is actually clickable
   await page.locator('#settings-btn').click({ force: true });
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(500); // #settings' 0.28s slide-in transition, plus its first render
 }
 
 async function closeSettings(page) {
   const open = await page.evaluate(() => document.body.classList.contains('settings-open'));
   if (!open) return;
   await page.locator('#settings-close').click();
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(300); // #settings' 0.28s slide-out transition
 }
 
 async function setLocale(page, locale) {
@@ -279,11 +284,11 @@ async function gotoUsageTab(page) {
     const open = await page.evaluate((c) => document.body.classList.contains(c), bodyClass);
     if (open) {
       await page.locator(closeBtn).click();
-      await page.waitForTimeout(250);
+      await page.waitForTimeout(250); // that panel's own slide-out transition
     }
   }
   await page.locator('[data-view="usage"]').click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(500); // the Usage tab's provider cards to render
 }
 
 /** One (view, locale) cell: prepare the view, assert, screenshot. Returns
@@ -305,27 +310,27 @@ async function runCell(page, view, locale) {
       break;
     case 'inventory':
       await page.locator('[data-view="inventory"]').click();
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(800); // Inventory's async load + render
       break;
     case 'audit':
       await page.locator('[data-view="inventory"]').click();
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(500); // Inventory rendered, so #audit-open-btn exists to click
       await page.locator('#audit-open-btn').click();
       await page.waitForSelector('#audit-body .au-head', { timeout: 5000 });
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(500); // safety margin after the score/sections paint
       break;
     case 'about':
       await page.locator('#side-zone').hover();
-      await page.waitForTimeout(250);
+      await page.waitForTimeout(250); // the rail's 0.24s slide-out, so #about-btn is actually clickable
       await page.locator('#about-btn').click({ force: true });
       await page.waitForSelector('#about-body .ab-hero', { timeout: 5000 });
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(300); // the panel's slide-in transition
       await page.mouse.move(340, 320); // let the auto-hide rail retract before the shot
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(300); // the rail's own 0.24s retract transition
       break;
     case 'subscriptions':
       await page.locator('[data-view="ledger"]').click();
-      await page.waitForTimeout(600);
+      await page.waitForTimeout(600); // the Subscriptions tab's async load + render
       break;
     default:
       throw new Error(`unknown view ${view.name}`);
@@ -339,7 +344,7 @@ async function runCell(page, view, locale) {
   // overlay (confirmed not to move docScrollWidth), but it is not what a
   // real user sees on this screen, so move away before every screenshot.
   await page.mouse.move(340, 40);
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(200); // most of the rail's own 0.24s retract transition
   await settle(page);
 
   const { docScrollWidth, offenders } = await scanOverflow(
@@ -369,7 +374,7 @@ async function main() {
 
   try {
     await page.goto(`${BASE}/demo.html`, { waitUntil: 'networkidle' });
-    await page.waitForTimeout(1800);
+    await page.waitForTimeout(1800); // the demo to boot and its fixture data to render
     await page.evaluate(() => document.fonts.ready); // text metrics settled before anything is measured
 
     for (const locale of LOCALES) {
