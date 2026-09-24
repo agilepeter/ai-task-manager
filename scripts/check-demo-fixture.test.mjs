@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { PLURAL_SUFFIXES } from "./plural-suffixes.mjs";
 
 const fixturePath = fileURLToPath(new URL("../src/demo-fixture.json", import.meta.url));
 const enPath = fileURLToPath(new URL("../src/locales/en.json", import.meta.url));
@@ -20,7 +21,6 @@ const en = JSON.parse(readFileSync(enPath, "utf8"));
 // forms ("finding.foo.one" / ".other" / ...) -- never both (src/i18n.ts's
 // own dictionary tests enforce that on every locale file already), so
 // existence here means either shape is present in English.
-const PLURAL_SUFFIXES = ["one", "few", "many", "other"];
 function keyExists(key) {
   if (key in en) return true;
   return PLURAL_SUFFIXES.some((suffix) => `${key}.${suffix}` in en);

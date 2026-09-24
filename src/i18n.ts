@@ -133,53 +133,67 @@ function lookupExact(locale: Locale, key: string): string | undefined {
   return DICTS[locale][key] || undefined;
 }
 
-export function t(key: string, vars?: Record<string, string | number>, count?: number): string {
+/// Renders a Msg in a given locale, independent of whichever locale is
+/// active -- same name and fallback order as Rust's render(locale, &msg):
+/// key.<form> -> key.other -> key, each tried in `locale` then English
+/// before falling to the next candidate. A var that is itself a Msg (Rust's
+/// `.sub()`) renders first, recursively, in this SAME locale parameter --
+/// never the active one -- before it is spliced in, so a caller can render
+/// a whole Msg tree in a locale other than what the popover is currently
+/// showing without touching any shared state. t() and tm() both delegate
+/// here, so there is exactly one candidate search, not two.
+export function render(locale: Locale, msg: Msg): string {
+  const vars: Record<string, string> = {};
+  for (const [k, v] of Object.entries(msg.vars)) {
+    vars[k] = typeof v === "string" ? v : render(locale, v);
+  }
   let s: string;
-  if (count === undefined) {
+  if (msg.count == null) {
     // `||`-equivalent (via lookupExact): translators hand-edit these files,
     // and a blank cell (present but "") must paint English rather than
     // nothing, same as an absent key does.
-    s = lookupExact(active, key) ?? lookupExact("en", key) ?? key;
+    s = lookupExact(locale, msg.key) ?? lookupExact("en", msg.key) ?? msg.key;
   } else {
-    // key.<form> -> key.other -> key, each through the active -> en -> key
-    // fallback in turn, so a locale missing just the picked form still
+    // key.<form> -> key.other -> key, each through the given locale -> en ->
+    // key fallback in turn, so a locale missing just the picked form still
     // prefers English's version of THAT form over jumping straight to
     // English's "other" or the bare key.
-    const form = pluralForm(active, count);
+    const form = pluralForm(locale, msg.count);
     s =
-      lookupExact(active, `${key}.${form}`) ??
-      lookupExact("en", `${key}.${form}`) ??
-      lookupExact(active, `${key}.other`) ??
-      lookupExact("en", `${key}.other`) ??
-      lookupExact(active, key) ??
-      lookupExact("en", key) ??
-      key;
+      lookupExact(locale, `${msg.key}.${form}`) ??
+      lookupExact("en", `${msg.key}.${form}`) ??
+      lookupExact(locale, `${msg.key}.other`) ??
+      lookupExact("en", `${msg.key}.other`) ??
+      lookupExact(locale, msg.key) ??
+      lookupExact("en", msg.key) ??
+      msg.key;
   }
   // An explicit vars.count (rare) wins over the auto-substituted count:
   // spread order puts vars after count, so a vars.count key overwrites it.
   // Rust's render_core must agree on this precedence -- it does, by a
   // different mechanism (see the comment there).
-  const allVars = count === undefined ? vars : { count, ...vars };
-  if (allVars) {
-    for (const [k, v] of Object.entries(allVars)) {
-      s = s.split(`{${k}}`).join(String(v));
-    }
+  const allVars = msg.count == null ? vars : { count: String(msg.count), ...vars };
+  for (const [k, v] of Object.entries(allVars)) {
+    s = s.split(`{${k}}`).join(v);
   }
   return s;
 }
 
-/// Renders a Msg Rust serialised over the wire. `msg.count ?? undefined`
-/// maps the wire's `null` (Rust's `Option::None`) to "no count" for t(),
-/// while a real count of 0 passes through unchanged -- `??` only catches
-/// null/undefined, never 0. A var that is itself a Msg (Rust's `.sub()`)
-/// renders first, in the same locale, through this same function -- so a
-/// nested count picks its own plural form independently of msg.count.
+export function t(key: string, vars?: Record<string, string | number>, count?: number): string {
+  const stringVars: Record<string, string> = {};
+  if (vars) for (const [k, v] of Object.entries(vars)) stringVars[k] = String(v);
+  return render(active, { key, vars: stringVars, count: count ?? null });
+}
+
+/// Renders a Msg Rust serialised over the wire, in whichever locale is
+/// currently active -- render()'s `null`-means-"no count" handles the wire's
+/// `Option::None` the same way for a nested Msg as for this outer one.
+/// tm() is "in the locale the popover is showing right now"; render() is
+/// "in the locale I name" -- a hand-built Msg that must render in a fixed
+/// locale (English for a fallback string, say) calls render() directly
+/// instead of flipping the active locale to get it out of tm().
 export function tm(msg: Msg): string {
-  const vars: Record<string, string | number> = {};
-  for (const [k, v] of Object.entries(msg.vars)) {
-    vars[k] = typeof v === "string" ? v : tm(v);
-  }
-  return t(msg.key, vars, msg.count ?? undefined);
+  return render(active, msg);
 }
 
 // Per-locale plural forms via t(key, vars, count) below; every existing call

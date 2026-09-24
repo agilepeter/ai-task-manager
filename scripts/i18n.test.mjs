@@ -14,6 +14,7 @@ import { test } from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { PLURAL_SUFFIXES } from "./plural-suffixes.mjs";
 
 const localesDir = fileURLToPath(new URL("../src/locales/", import.meta.url));
 const dicts = {};
@@ -32,11 +33,11 @@ function tokensOf(value) {
   return new Set([...value.matchAll(/\{([a-zA-Z0-9_]+)\}/g)].map((m) => m[1]));
 }
 
-// Plural-aware machinery (task 8). A count-sensitive key is stored as
-// key.one / key.few / key.many / key.other (src/i18n.ts's t(key, vars,
-// count)); English always carries exactly key.one + key.other, so that pair
-// is what marks a key as a plural family in the first place.
-const PLURAL_SUFFIXES = ["one", "few", "many", "other"];
+// Plural-aware machinery. A count-sensitive key is stored as key.one /
+// key.few / key.many / key.other (src/i18n.ts's t(key, vars, count));
+// English always carries exactly key.one + key.other, so that pair is what
+// marks a key as a plural family in the first place. PLURAL_SUFFIXES itself
+// lives in ./plural-suffixes.mjs, shared with check-demo-fixture.test.mjs.
 
 function stripPluralSuffix(key) {
   for (const suffix of PLURAL_SUFFIXES) {
@@ -150,6 +151,21 @@ test("pluralForm() picks the exact CLDR form, per locale, for every sample", asy
     });
   }
   assert.deepEqual(mismatches, [], `pluralForm() mismatches: ${mismatches.join("; ")}`);
+});
+
+// render(locale, msg) exists so a caller can render a Msg in a locale other
+// than whatever the popover is currently showing (a hand-built demo row's
+// English fallback, say) without disturbing that locale for anything else
+// that calls t()/tm() afterwards. Proven directly: set the active locale to
+// something other than the one being asked for, render in the other one,
+// and check the active locale never moved.
+test("render(locale, msg) renders in the given locale without disturbing whichever locale is active", async () => {
+  const { render, setActiveLocale, getLocale } = await loadI18nModule();
+  setActiveLocale("en");
+  const msg = { key: "unit.times", vars: {}, count: 2 };
+  const want = dicts.ru["unit.times.few"].replace("{count}", "2");
+  assert.equal(render("ru", msg), want, "render() did not pick ru's own plural form for the given locale");
+  assert.equal(getLocale(), "en", "render() must not leave the active locale changed");
 });
 
 const i18nSource = readFileSync(fileURLToPath(new URL("../src/i18n.ts", import.meta.url)), "utf8");

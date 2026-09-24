@@ -10,7 +10,7 @@
 // Nothing in the demo leaves the page: exports and config edits are pretend.
 
 import fixture from "../demo-fixture.json";
-import { getLocale, setActiveLocale, tm, type Msg } from "../i18n";
+import { buildDuplicateProcessesRow, buildUsageRows } from "./synthetic";
 
 type Args = Record<string, any>;
 const HOUR = 3_600_000;
@@ -245,36 +245,6 @@ const EFFORT = [
   { area: "blog", cost: 14, commits: null, costPerCommit: null },
 ] as const;
 
-/** A finding mock.ts authors by hand rather than reading one the engine
- *  already rendered off the fixture. titleMsg/detailMsg are required, never
- *  optional, because the demo has to translate every finding the same way
- *  the real app does, and these hand-authored rows are the only findings
- *  that do not already carry a Msg from the engine -- a future row built
- *  without one now fails to typecheck instead of silently staying English. */
-type SyntheticOpportunity = {
-  id: string;
-  kind: "tighten" | "learn";
-  title: string;
-  detail: string;
-  titleMsg: Msg;
-  detailMsg: Msg | null;
-  learnUrl: string | null;
-};
-
-/** Renders a Msg in English regardless of the viewer's current locale, by
- *  flipping the shared active-locale flag and flipping it straight back --
- *  synchronously, so nothing else observes the flip. Lets a hand-authored
- *  row's English fall out of its own Msg instead of existing twice. */
-function renderEnglish(msg: Msg): string {
-  const current = getLocale();
-  setActiveLocale("en");
-  try {
-    return tm(msg);
-  } finally {
-    setActiveLocale(current);
-  }
-}
-
 function inventory() {
   const inv = structuredClone((fixture as any).inventory);
   for (const s of inv.mcpServers) {
@@ -284,56 +254,13 @@ function inventory() {
   }
   // The app adds the usage findings to the setup ones; the audit carries
   // them, Msg and all, so they translate exactly as they do on that panel.
-  const usage: SyntheticOpportunity[] = ((fixture as any).audit.sections as any[])
-    .flatMap((sec) => sec.checks)
-    .filter((c) => c.status === "consider" && !inv.opportunities.some((o: any) => o.id === c.id))
-    .map(
-      (c): SyntheticOpportunity => ({
-        id: c.id,
-        kind: "learn",
-        title: c.title,
-        detail: c.detail,
-        titleMsg: c.titleMsg,
-        detailMsg: c.detailMsg ?? null,
-        learnUrl: "https://staas.fund/classroom/",
-      }),
-    );
-  inv.opportunities.push(...usage);
+  const existingIds = new Set<string>(inv.opportunities.map((o: any) => o.id));
+  inv.opportunities.push(...buildUsageRows((fixture as any).audit.sections, existingIds));
   // The real app computes this one from the live process list; the demo has
   // a fixed process list, so derive it the same way rather than hard-coding
-  // text -- same keys and vars as procs.rs's own opportunities(), including
-  // the nested unit.times Msg for "running N times", so it translates like
-  // every other finding instead of being the one row stuck in English.
-  const dupes = RUNNING.filter((r) => r.instances > 1)
-    .slice()
-    .sort((a, b) => b.rssBytes - a.rssBytes); // "worst" = heaviest RSS, not first configured
-  if (dupes.length) {
-    const worst = dupes[0];
-    const names = dupes.map((r) => r.name).join(", ");
-    const wasted = dupes.reduce((sum, r) => sum + (r.rssBytes - Math.floor(r.rssBytes / r.instances)), 0);
-    const titleMsg: Msg = { key: "finding.mcp-duplicate-processes.title", vars: {}, count: dupes.length };
-    const detailMsg: Msg = {
-      key: "finding.mcp-duplicate-processes.detail",
-      vars: {
-        names,
-        worstName: worst.name,
-        times: { key: "unit.times", vars: {}, count: worst.instances },
-        mb: String(Math.floor(worst.rssBytes / 1048576)),
-        wasted: String(Math.floor(wasted / 1048576)),
-      },
-      count: null,
-    };
-    const dupRow: SyntheticOpportunity = {
-      id: "mcp-duplicate-processes",
-      kind: "tighten",
-      title: renderEnglish(titleMsg),
-      detail: renderEnglish(detailMsg),
-      titleMsg,
-      detailMsg,
-      learnUrl: "https://staas.fund/mcp/",
-    };
-    inv.opportunities.unshift(dupRow);
-  }
+  // text -- see synthetic.ts for the shared keys and vars with procs.rs.
+  const dupRow = buildDuplicateProcessesRow(RUNNING);
+  if (dupRow) inv.opportunities.unshift(dupRow);
   if ([...pinned].length) {
     const left = inv.mcpServers.filter((s: any) => s.pinTo).length;
     inv.opportunities = inv.opportunities.filter((o: any) => o.id !== "mcp-unpinned" || left > 0);
