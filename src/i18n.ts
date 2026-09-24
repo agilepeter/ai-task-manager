@@ -11,14 +11,15 @@ import zh from "./locales/zh.json";
 import ru from "./locales/ru.json";
 import es from "./locales/es.json";
 import fr from "./locales/fr.json";
+import de from "./locales/de.json";
 
-export const LOCALES = ["en", "zh", "ru", "es", "fr"] as const; // later tasks append
+export const LOCALES = ["en", "zh", "ru", "es", "fr", "de"] as const; // later tasks append
 export type Locale = (typeof LOCALES)[number];
 export type LocalePref = "auto" | Locale;
 
 type Dict = Record<string, string>;
 
-const DICTS: Record<Locale, Dict> = { en, zh, ru, es, fr };
+const DICTS: Record<Locale, Dict> = { en, zh, ru, es, fr, de };
 
 const LOCALE_TAGS: Record<Locale, string> = {
   en: "en-US",
@@ -26,6 +27,7 @@ const LOCALE_TAGS: Record<Locale, string> = {
   ru: "ru-RU",
   es: "es-ES",
   fr: "fr-FR",
+  de: "de-DE",
 };
 
 let active: Locale = "en";
@@ -104,6 +106,7 @@ export const PLURAL_FORMS: Record<Locale, readonly string[]> = {
   ru: ["one", "few", "many"],
   es: ["one", "other"],
   fr: ["one", "other"],
+  de: ["one", "other"],
 };
 
 // Rule-family membership for pluralForm, written for all nine locales this
