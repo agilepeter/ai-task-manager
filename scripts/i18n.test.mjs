@@ -252,6 +252,16 @@ test("asLocale and normalizeLocalePref round-trip \"pt-BR\" from config unchange
   assert.notEqual(asLocale("pt-BR"), "pt-br");
 });
 
+// The set is complete at nine locales now that ko has landed. Pinning the
+// exact list AND its order here means a future tenth language is a
+// deliberate edit to this assertion, not a silent drift -- the per-locale
+// tests below already derive their targets from LOCALES/the locales
+// directory, so nothing else in this file needed a hand-maintained list.
+test("LOCALES is exactly the nine shipped locales, in order", async () => {
+  const { LOCALES } = await loadI18nModule();
+  assert.deepEqual(LOCALES, ["en", "zh", "ru", "es", "fr", "de", "ja", "pt-BR", "ko"]);
+});
+
 const i18nSource = readFileSync(fileURLToPath(new URL("../src/i18n.ts", import.meta.url)), "utf8");
 const PLURAL_FORMS = parsePluralForms(i18nSource);
 

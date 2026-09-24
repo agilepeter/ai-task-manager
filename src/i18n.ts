@@ -14,14 +14,23 @@ import fr from "./locales/fr.json";
 import de from "./locales/de.json";
 import ja from "./locales/ja.json";
 import ptBR from "./locales/pt-BR.json";
+import ko from "./locales/ko.json";
 
-export const LOCALES = ["en", "zh", "ru", "es", "fr", "de", "ja", "pt-BR"] as const; // later tasks append
+// The nine locales this app ships, complete as of the ko row. A tenth
+// language is a deliberate edit in exactly these places: a new
+// src/locales/<xx>.json, an import line + DICTS/LOCALE_TAGS entry + a
+// PLURAL_FORMS row here, the mirrored LOCALES/WINDOWS_LANGIDS/ENV_PREFIXES
+// rows in crates/core/src/i18n.rs, a Windows LANGID and an env prefix, the
+// <option> in index.html (then npm run build:demo), the endonym key added to
+// every other locale file, and the registration tests each of those files
+// already has (they fail loudly on a gap by design).
+export const LOCALES = ["en", "zh", "ru", "es", "fr", "de", "ja", "pt-BR", "ko"] as const;
 export type Locale = (typeof LOCALES)[number];
 export type LocalePref = "auto" | Locale;
 
 type Dict = Record<string, string>;
 
-const DICTS: Record<Locale, Dict> = { en, zh, ru, es, fr, de, ja, "pt-BR": ptBR };
+const DICTS: Record<Locale, Dict> = { en, zh, ru, es, fr, de, ja, "pt-BR": ptBR, ko };
 
 const LOCALE_TAGS: Record<Locale, string> = {
   en: "en-US",
@@ -32,6 +41,7 @@ const LOCALE_TAGS: Record<Locale, string> = {
   de: "de-DE",
   ja: "ja-JP",
   "pt-BR": "pt-BR",
+  ko: "ko-KR",
 };
 
 let active: Locale = "en";
@@ -106,12 +116,11 @@ export function localeTag(): string {
 /// (numbers too, no nesting) for TS-side callers.
 export type Msg = { key: string; vars: Record<string, string | Msg>; count?: number | null };
 
-/// CLDR cardinal-plural forms for the nine languages this app plans to ship.
+/// CLDR cardinal-plural forms for the nine languages this app ships.
 /// `Locale` is `LOCALES[number]`, so this `Record<Locale, ...>` can only be
-/// keyed by locales that already exist — only en/zh/ru are keyed below.
-/// Tasks 12-17 add a row each as they extend LOCALES, not a new rule; the
-/// full nine-language table (mirrored by `pluralForm` below and by Rust's
-/// `plural_form`, which a test keeps identical to this one) is:
+/// keyed by locales that already exist. The table (mirrored by `pluralForm`
+/// below and by Rust's `plural_form`, which a test keeps identical to this
+/// one) is:
 ///   en, es, de: ["one", "other"]
 ///   fr, pt-BR:  ["one", "other"]  (0 and 1 both resolve to "one" -- Brazilian
 ///               Portuguese, like French, uses the singular for zero (CLDR);
@@ -122,7 +131,8 @@ export type Msg = { key: string; vars: Record<string, string | Msg>; count?: num
 /// no `satisfies`, no `as const` rewrite. scripts/i18n.test.mjs and
 /// crates/core/src/i18n.rs both regex-parse this declaration straight out
 /// of this file's source text; a shape their parser doesn't expect breaks
-/// both silently.
+/// both silently. A tenth language adds a row here the same way every row
+/// below was added.
 export const PLURAL_FORMS: Record<Locale, readonly string[]> = {
   en: ["one", "other"],
   zh: ["other"],
@@ -132,15 +142,14 @@ export const PLURAL_FORMS: Record<Locale, readonly string[]> = {
   de: ["one", "other"],
   ja: ["other"],
   "pt-BR": ["one", "other"],
+  ko: ["other"],
 };
 
-// Rule-family membership for pluralForm, written for all nine locales this
-// app plans to ship (not just the three keyed in PLURAL_FORMS above) so a
-// future language task adds a locale code to the right family instead of
-// inventing new branch logic. Plain string[], not Locale[]: these families
-// intentionally list locale codes LOCALES doesn't carry yet. ru's %10/%100
-// split doesn't fit a "which family" shape and is handled directly below;
-// en/es/de are the default (n === 1 -> "one"), so they need no row.
+// Rule-family membership for pluralForm, covering all nine locales this app
+// ships. Plain string[], not Locale[]: a future tenth language's code can be
+// added here before it is wired into LOCALES elsewhere. ru's %10/%100 split
+// doesn't fit a "which family" shape and is handled directly below; en/es/de
+// are the default (n === 1 -> "one"), so they need no row.
 const PLURAL_ALWAYS_OTHER: readonly string[] = ["zh", "ja", "ko"];
 // Brazilian Portuguese, like French, uses the singular for zero (CLDR: "i = 0..1"
 // both select "one"). European Portuguese does not -- it is the plain n === 1

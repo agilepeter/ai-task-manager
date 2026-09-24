@@ -10,14 +10,15 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 
-/// The one list of locales on the Rust side. A later task adds a language by
-/// appending here, adding a row to `WINDOWS_LANGIDS` and/or `ENV_PREFIXES` if
-/// it needs one, and adding a match arm for it in `locale_source` below
-/// (`include_str!` needs a literal path, so it cannot be driven from this
-/// list directly). `locale_source` has no catch-all: forgetting that arm
-/// fails `every_locale_file_parses` loudly instead of silently degrading
-/// that locale to English.
-pub const LOCALES: &[&str] = &["en", "zh", "ru", "es", "fr", "de", "ja", "pt-BR"];
+/// The one list of locales on the Rust side, complete at nine. A tenth
+/// language is a deliberate edit in exactly these places: append here, add a
+/// row to `WINDOWS_LANGIDS` and/or `ENV_PREFIXES` if it needs one, add a
+/// match arm for it in `locale_source` below (`include_str!` needs a literal
+/// path, so it cannot be driven from this list directly), and mirror the
+/// append in `src/i18n.ts`'s own `LOCALES`. `locale_source` has no catch-all:
+/// forgetting that arm fails `every_locale_file_parses` loudly instead of
+/// silently degrading that locale to English.
+pub const LOCALES: &[&str] = &["en", "zh", "ru", "es", "fr", "de", "ja", "pt-BR", "ko"];
 
 /// Primary Windows UI language id (`langid & 0x03FF`) → locale. Only the
 /// locales that need a non-English match have a row; anything else falls
@@ -25,14 +26,30 @@ pub const LOCALES: &[&str] = &["en", "zh", "ru", "es", "fr", "de", "ja", "pt-BR"
 /// Primary id 0x16 covers both pt-BR (full langid 0x0416) and pt-PT
 /// (0x0816) — this app ships only pt-BR, so both land there.
 #[cfg(any(windows, test))]
-const WINDOWS_LANGIDS: &[(u16, &str)] =
-    &[(0x04, "zh"), (0x19, "ru"), (0x0a, "es"), (0x0c, "fr"), (0x07, "de"), (0x11, "ja"), (0x16, "pt-BR")];
+const WINDOWS_LANGIDS: &[(u16, &str)] = &[
+    (0x04, "zh"),
+    (0x19, "ru"),
+    (0x0a, "es"),
+    (0x0c, "fr"),
+    (0x07, "de"),
+    (0x11, "ja"),
+    (0x16, "pt-BR"),
+    (0x12, "ko"),
+];
 
 /// `LC_ALL` / `LC_MESSAGES` / `LANG` tag prefix (lowercased) → locale.
 /// POSIX tags use an underscore, never a hyphen ("pt_BR.UTF-8", "pt_PT.UTF-8"):
 /// the prefix "pt" covers both, the only Portuguese this app ships.
-const ENV_PREFIXES: &[(&str, &str)] =
-    &[("zh", "zh"), ("ru", "ru"), ("es", "es"), ("fr", "fr"), ("de", "de"), ("ja", "ja"), ("pt", "pt-BR")];
+const ENV_PREFIXES: &[(&str, &str)] = &[
+    ("zh", "zh"),
+    ("ru", "ru"),
+    ("es", "es"),
+    ("fr", "fr"),
+    ("de", "de"),
+    ("ja", "ja"),
+    ("pt", "pt-BR"),
+    ("ko", "ko"),
+];
 
 /// `include_str!` needs a literal path per file, so this is the one place
 /// that lists them; `LOCALES` above stays the only list of which locales
@@ -51,6 +68,7 @@ fn locale_source(locale: &str) -> Option<&'static str> {
         "de" => include_str!("../../../src/locales/de.json"),
         "ja" => include_str!("../../../src/locales/ja.json"),
         "pt-BR" => include_str!("../../../src/locales/pt-BR.json"),
+        "ko" => include_str!("../../../src/locales/ko.json"),
         _ => return None,
     })
 }
@@ -419,6 +437,19 @@ mod tests {
         assert_eq!(resolved_locale(&json!({"locale": "de"})), "de");
         assert_eq!(resolved_locale(&json!({"locale": "ja"})), "ja");
         assert_eq!(resolved_locale(&json!({"locale": "pt-BR"})), "pt-BR");
+        assert_eq!(resolved_locale(&json!({"locale": "ko"})), "ko");
+    }
+
+    /// The full list is fixed at nine now that `ko` has landed: this pins
+    /// both the exact set and the append order everywhere else in this file
+    /// (and in `src/i18n.ts`'s own `LOCALES`) follows, so a future tenth
+    /// language is a deliberate edit here rather than a silent drift.
+    #[test]
+    fn locales_is_exactly_the_nine_shipped_locales_in_order() {
+        assert_eq!(
+            LOCALES,
+            ["en", "zh", "ru", "es", "fr", "de", "ja", "pt-BR", "ko"]
+        );
     }
 
     #[test]
@@ -514,6 +545,7 @@ mod tests {
         assert_eq!(locale_for_langid(0xFFFF), "en"); // unknown
         assert_eq!(locale_for_langid(0x0416), "pt-BR"); // pt-BR
         assert_eq!(locale_for_langid(0x0816), "pt-BR"); // pt-PT: same primary id, only Portuguese shipped
+        assert_eq!(locale_for_langid(0x0412), "ko"); // ko-KR
     }
 
     #[test]
@@ -528,6 +560,7 @@ mod tests {
         assert_eq!(locale_for_env_tag(""), "en");
         assert_eq!(locale_for_env_tag("pt_BR.UTF-8"), "pt-BR");
         assert_eq!(locale_for_env_tag("pt_PT.UTF-8"), "pt-BR");
+        assert_eq!(locale_for_env_tag("ko_KR.UTF-8"), "ko");
     }
 
     #[test]
