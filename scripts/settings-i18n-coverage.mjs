@@ -8,14 +8,24 @@
 // enumerates the DOM instead of the keys, so a new row with no data-i18n* on
 // it fails loudly instead of shipping silently.
 //
+// Two passes over the same walk: element TEXT (findSettingsTextNodes /
+// checkSettingsPanelI18nCoverage) and the `title` / `aria-label` ATTRIBUTES
+// an element's opening tag can carry (findSettingsAttributeNodes /
+// checkSettingsPanelAttrI18nCoverage). A tooltip is just as user-visible as
+// the label beside it -- the renewal-reminder / session-nudge / weekly-digest
+// labels shipped their `title` text hardcoded for the same reason apiFeeds
+// did: nothing walked the DOM asking whether it had a translation attribute
+// at all, only whether an attribute already there pointed at a real key.
+//
 // Not a general HTML parser: it is exactly enough to walk this one file's
 // hand-authored, well-formed markup (a stack keyed on tag name, attributes
 // read with a simple quoted-value regex, void/self-closed elements never
-// pushed). It only inspects LEAF text -- a run of text whose immediate
-// parent has no child elements -- inside the tags a Settings row actually
-// uses for language content: label, span, p, option, button, h4. Anything
-// else in the panel (div, select, input, form, …) never carries direct text
-// here and is not checked.
+// pushed). The text pass only inspects LEAF text -- a run of text whose
+// immediate parent has no child elements -- inside the tags a Settings row
+// actually uses for language content: label, span, p, option, button, h4.
+// Anything else in the panel (div, select, input, form, …) never carries
+// direct text here and is not checked. The attribute pass looks at every
+// opening tag, since `title` and `aria-label` can land on any element.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -57,6 +67,21 @@ export const SETTINGS_I18N_EXEMPT = {
   "key-qwen": "brand name (Qwen Code), never translated",
   "spend-alert>option": "bare currency amounts ($10 … $500), no words to translate",
 };
+
+// Which data-i18n-* attribute covers which plain attribute, mirroring
+// applyStaticI18n() in src/i18n.ts (data-i18n-title -> el.title, data-i18n-aria
+// -> el.setAttribute("aria-label", …)). Checked in this order for each tag.
+const ATTR_I18N = [
+  ["title", "data-i18n-title"],
+  ["aria-label", "data-i18n-aria"],
+];
+
+// Same idea as SETTINGS_I18N_EXEMPT, for `title` / `aria-label` text instead
+// of element text. Empty today: every title/aria-label inside the panel
+// that carries real words is keyed. Kept as a named export (not inlined)
+// so a future one has one obvious place to go, with its own one-line
+// reason, rather than a bare `true` sprinkled into the walker.
+export const SETTINGS_ATTR_I18N_EXEMPT = {};
 
 function parseAttrs(tagInner) {
   const attrs = {};
@@ -139,6 +164,76 @@ export function checkSettingsPanelI18nCoverage(html, exempt = SETTINGS_I18N_EXEM
   const asideMatch = html.match(/<aside id="settings"[^>]*>([\s\S]*?)\n {4}<\/aside>/);
   if (!asideMatch) throw new Error('checkSettingsPanelI18nCoverage: no <aside id="settings">...</aside> block found');
   const nodes = findSettingsTextNodes(asideMatch[1]);
+  return nodes.filter((n) => !n.hasI18n && !(n.locator && n.locator in exempt));
+}
+
+/// Every `title` / `aria-label` attribute inside the given Settings inner
+/// HTML that carries real text, whether or not it is covered. Each entry:
+/// { attr: "title" | "aria-label", tag, locator, hasI18n, text }. Locator
+/// rules match findSettingsTextNodes (own id, a <label for="x"> falling
+/// back to x, otherwise the nearest open ancestor's id) so the same id
+/// means the same thing in both exemption tables' error messages, even
+/// though the two tables are never looked up against each other.
+export function findSettingsAttributeNodes(settingsInnerHtml) {
+  const stack = []; // { tag, attrs }
+  const found = [];
+  let m;
+  TOKEN_RE.lastIndex = 0;
+  while ((m = TOKEN_RE.exec(settingsInnerHtml))) {
+    const whole = m[0];
+    if (whole.startsWith("<!--")) continue;
+    if (whole.startsWith("</")) {
+      const name = m[1];
+      for (let i = stack.length - 1; i >= 0; i--) {
+        if (stack[i].tag === name) {
+          stack.length = i;
+          break;
+        }
+      }
+      continue;
+    }
+    if (whole.startsWith("<")) {
+      const tag = m[2];
+      const attrs = parseAttrs(m[3] || "");
+      const selfClose = m[4] === "/";
+
+      for (const [plainAttr, i18nAttr] of ATTR_I18N) {
+        const raw = attrs[plainAttr];
+        if (raw === undefined) continue;
+        const text = raw.replace(/\s+/g, " ").trim();
+        if (!text) continue;
+        const hasI18n = i18nAttr in attrs;
+
+        // Locator computed against currently-OPEN ancestors: this tag's own
+        // opening attributes are known but it has not been pushed yet.
+        let locator = attrs.id;
+        if (!locator && tag === "label" && attrs.for) locator = attrs.for;
+        if (!locator) {
+          for (let i = stack.length - 1; i >= 0; i--) {
+            if (stack[i].attrs.id) {
+              locator = `${stack[i].attrs.id}>${tag}`;
+              break;
+            }
+          }
+        }
+        found.push({ attr: plainAttr, tag, locator: locator || null, hasI18n, text });
+      }
+
+      if (!selfClose && !VOID_ELEMENTS.has(tag)) stack.push({ tag, attrs });
+      continue;
+    }
+    // Text runs are the other pass's job (findSettingsTextNodes).
+  }
+  return found;
+}
+
+/// Violations = a title/aria-label with real text, no matching data-i18n-*
+/// attribute, and no exemption. Same shape and defaulting as
+/// checkSettingsPanelI18nCoverage.
+export function checkSettingsPanelAttrI18nCoverage(html, exempt = SETTINGS_ATTR_I18N_EXEMPT) {
+  const asideMatch = html.match(/<aside id="settings"[^>]*>([\s\S]*?)\n {4}<\/aside>/);
+  if (!asideMatch) throw new Error('checkSettingsPanelAttrI18nCoverage: no <aside id="settings">...</aside> block found');
+  const nodes = findSettingsAttributeNodes(asideMatch[1]);
   return nodes.filter((n) => !n.hasI18n && !(n.locator && n.locator in exempt));
 }
 

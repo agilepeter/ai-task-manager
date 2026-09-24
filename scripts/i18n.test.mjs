@@ -16,7 +16,14 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { PLURAL_SUFFIXES } from "./plural-suffixes.mjs";
 import { inlineLocaleImports } from "./inline-locales.mjs";
-import { checkSettingsPanelI18nCoverage, findSettingsTextNodes, SETTINGS_I18N_EXEMPT } from "./settings-i18n-coverage.mjs";
+import {
+  checkSettingsPanelI18nCoverage,
+  findSettingsTextNodes,
+  SETTINGS_I18N_EXEMPT,
+  checkSettingsPanelAttrI18nCoverage,
+  findSettingsAttributeNodes,
+  SETTINGS_ATTR_I18N_EXEMPT,
+} from "./settings-i18n-coverage.mjs";
 
 const localesDir = fileURLToPath(new URL("../src/locales/", import.meta.url));
 const dicts = {};
@@ -415,6 +422,28 @@ test("every SETTINGS_I18N_EXEMPT entry still matches a real element in index.htm
   const allLocators = new Set(findSettingsTextNodes(asideMatch[1]).map((n) => n.locator));
   const stale = Object.keys(SETTINGS_I18N_EXEMPT).filter((id) => !allLocators.has(id));
   assert.deepEqual(stale, [], `SETTINGS_I18N_EXEMPT entries matching no element any more: ${stale.join(", ")}`);
+});
+
+// Same inversion as the text check above, for `title` / `aria-label`
+// instead of element text: a tooltip is just as user-visible as the label
+// beside it. This is what would have caught the renewal-reminder /
+// session-nudge / weekly-digest labels shipping their `title` hardcoded --
+// they had real English in the attribute and no data-i18n-title pointing
+// anywhere, which no key-only check can see.
+test("every title/aria-label attribute with real text inside the Settings panel has data-i18n-title/data-i18n-aria or a named exemption", () => {
+  const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+  const violations = checkSettingsPanelAttrI18nCoverage(html);
+  const detail = violations.map((v) => `[${v.tag} ${v.attr}] ${v.locator ?? "(no id in scope)"}: "${v.text}"`);
+  assert.deepEqual(detail, [], `Settings panel title/aria-label with no data-i18n-title/data-i18n-aria and no exemption:\n${detail.join("\n")}`);
+});
+
+test("every SETTINGS_ATTR_I18N_EXEMPT entry still matches a real element in index.html", () => {
+  const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+  const asideMatch = html.match(/<aside id="settings"[^>]*>([\s\S]*?)\n {4}<\/aside>/);
+  assert.ok(asideMatch, 'no <aside id="settings">...</aside> block found');
+  const allLocators = new Set(findSettingsAttributeNodes(asideMatch[1]).map((n) => n.locator));
+  const stale = Object.keys(SETTINGS_ATTR_I18N_EXEMPT).filter((id) => !allLocators.has(id));
+  assert.deepEqual(stale, [], `SETTINGS_ATTR_I18N_EXEMPT entries matching no element any more: ${stale.join(", ")}`);
 });
 
 // Each view that owns a key prefix gets one row here, not a copy of this
