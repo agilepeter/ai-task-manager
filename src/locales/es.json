@@ -87,7 +87,7 @@
   "settings.shortcut": "Atajo global",
   "settings.shortcutPh": "p. ej. Ctrl+Shift+U",
   "settings.notifications": "Notificaciones",
-  "settings.notifyNote": "Notificaciones del sistema cuando se reinicia una ventana semanal o mensual, una cuota empeora, un límite largo se consume de forma inusualmente rápida o el gasto del día supera tu marca. Cada una se activa una vez y luego se rearma.",
+  "settings.notifyNote": "Notificaciones del sistema cuando se reinicia una ventana semanal o mensual, una cuota empeora, un límite largo se consume de forma inusualmente rápida o el gasto del día supera la marca establecida. Cada una se activa una vez y luego se rearma.",
   "settings.notifyReset": "Reinicio de límite semanal (la ventana vuelve al 100%)",
   "settings.notifyAlmost": "Casi agotado (queda <10%)",
   "settings.notifyClose": "Al límite",
