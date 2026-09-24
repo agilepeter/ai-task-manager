@@ -109,6 +109,8 @@
   "settings.useProxy": "Utiliser un proxy",
   "settings.proxyUrl": "URL du proxy",
   "settings.networkNote": "S'applique après le redémarrage de l'application. L'API d'utilisation locale s'exécute toujours sur http://127.0.0.1:6736/v1/usage",
+  "settings.updateChecks": "Rechercher les mises à jour",
+  "settings.updateChecksHint": "Une requête à github.com pour latest.json au lancement et toutes les 4 heures tant que c'est activé. Rien concernant vous ou cet ordinateur n'est envoyé.",
   "settings.apiKeys": "Clés API",
   "settings.apiKeysNote": "Stockées uniquement sur cet ordinateur. Laisser vide et enregistrer pour la supprimer.",
   "settings.save": "Enregistrer",

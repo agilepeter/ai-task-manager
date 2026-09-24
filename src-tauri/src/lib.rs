@@ -117,11 +117,16 @@ fn config_with_defaults(mut cfg: Value) -> Value {
     // minutes (0 = off). Spend: dollars in one local day (0 = off; there is
     // no universal default for what a day should cost).
     obj.entry("wideMode").or_insert(json!(false));
-    // Off by default: the only request to a non-provider server.
+    // Off by default: one of two opt-in requests to a non-provider server
+    // (the other is updateChecks, below).
     obj.entry("trustLookup").or_insert(json!(false));
     // Off by default: serves spend, work areas, clients and the ledger on
     // the loopback API for the user's own dashboards.
     obj.entry("apiFeeds").or_insert(json!(false));
+    // Off by default: the other opt-in request to a non-provider server —
+    // GitHub's release feed, checked at launch and every 4 hours while on.
+    // Nothing about the machine goes with it.
+    obj.entry("updateChecks").or_insert(json!(false));
     // "off" or a weekday ("mon" … "sun").
     obj.entry("weeklyDigest").or_insert(json!("mon"));
     // Days a still-used session may stay open before one weekly nudge (0 = off).
@@ -524,6 +529,7 @@ const CONFIG_KEYS: &[&str] = &[
     "wideMode",
     "trustLookup",
     "apiFeeds",
+    "updateChecks",
     "weeklyDigest",
     "sessionNudgeDays",
     "auditSeen",
@@ -3356,16 +3362,22 @@ async fn codex_redeem_credit(
     providers::codex::redeem_credit(&pid, &credit_id, redeem_request_id).await
 }
 
-/// Self-update checks are OFF in this build. Everything the updater needs is
-/// in place: the pubkey in tauri.conf.json is this project's own minisign key
-/// (6CDFF96385CA8101, verified byte-for-byte against the key file), and the
-/// endpoint below is this project's release feed. What is missing is a user
-/// saying yes: update checks are an opt-in setting, off by default, so the
-/// app keeps its promise of making no network request nobody asked for. This
-/// constant goes away when that setting lands; until then it stays `false`.
-/// (Enabling it before a release exists would be harmless: a 404 from the
-/// feed is a logged non-event in `spawn_update_checker`.)
-const UPDATES_ENABLED: bool = false;
+/// Everything the updater needs is in place: the pubkey in tauri.conf.json is
+/// this project's own minisign key (6CDFF96385CA8101, verified byte-for-byte
+/// against the key file), and `updater_endpoint_strings` below is this
+/// project's own release feed. What decides whether any of it is ever used is
+/// this one setting: an opt-in Settings toggle (`updateChecks`), off by
+/// default, so the app keeps its promise of never making a network request
+/// nobody asked for. Read fresh from disk on every call rather than cached at
+/// startup, so flipping the toggle takes effect on the next check instead of
+/// needing a restart. A config saved before this setting existed, or one
+/// where the key holds something other than a bool, reads as off — no
+/// migration turns an existing install's checking on behind its owner's
+/// back. Checking before a release exists is harmless: a 404 from the feed
+/// is a logged non-event in `spawn_update_checker`.
+fn update_checks_enabled(cfg: &Value) -> bool {
+    cfg.get("updateChecks").and_then(Value::as_bool).unwrap_or(false)
+}
 
 /// The release feed: GitHub publishes `latest.json` with every published
 /// release of this repository. GitHub's static download URL ignores query
@@ -3412,7 +3424,7 @@ fn build_updater_with(
 /// called from the frontend banner after check_for_update announced one.
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
-    if !UPDATES_ENABLED {
+    if !update_checks_enabled(&config_with_defaults(load_config())) {
         return Err("self-update is disabled in this build".into());
     }
     let updater = build_updater_for_install(&app)?;
@@ -3432,7 +3444,7 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 async fn live_update_check(app: &tauri::AppHandle) -> Result<Option<String>, String> {
-    if !UPDATES_ENABLED {
+    if !update_checks_enabled(&config_with_defaults(load_config())) {
         return Ok(None);
     }
     Ok(build_updater(app)?
@@ -3835,7 +3847,7 @@ mod tests {
         current_credential_scoped_generations, guarded, is_credential_scoped_card,
         is_plain_api_key_provider, set_api_key_in, stored_pane_api_key,
         cached_kimi_ok_from, cached_onenewapi_id_is_configured, card_is_disabled,
-        commit_strip_state_after_apply, fail_state, load_config_from, set_config_in,
+        commit_strip_state_after_apply, config_with_defaults, fail_state, load_config_from, set_config_in,
         fold_moonshot_into_kimi, forget_onenewapi_key_ids, forget_provider_snapshot,
         is_kimi_wallet_label, last_ok, onenewapi_after_site_save,
         onenewapi_apply_zero_to_one_enable, key_card_snapshot_generations, persist_last_ok_at,
@@ -3847,7 +3859,7 @@ mod tests {
         hydrate_fetch_time, restore_last_success_after_error,
         retain_current_key_card_results, strip_entry_application_order, strip_icon_ids_to_clear,
         strip_is_active, strip_reset_ids,
-        updater_endpoint_strings, CachedSnap, FailState,
+        update_checks_enabled, updater_endpoint_strings, CachedSnap, FailState,
         KeyCardMutationGuard, StripEntry, SNAPSHOT_CACHE_MS, SNAPSHOT_CACHE_NEEDS_FLUSH,
         STALE_GRACE_MS, TEST_PERSIST_LAST_OK_FAIL,
     };
@@ -3872,6 +3884,30 @@ mod tests {
             updater_endpoint_strings(),
             ["https://github.com/agilepeter/ai-task-manager/releases/latest/download/latest.json".to_string()]
         );
+    }
+
+    #[test]
+    fn update_checks_enabled_defaults_off_and_needs_a_real_bool_true() {
+        // A config saved before this setting existed has no key at all —
+        // that must read as off, the same as an explicit false.
+        assert!(!update_checks_enabled(&json!({})));
+        assert!(!update_checks_enabled(&json!({ "updateChecks": false })));
+        // A hand-edited or corrupted config with the wrong type must not
+        // accidentally turn checking on.
+        assert!(!update_checks_enabled(&json!({ "updateChecks": "true" })));
+        assert!(!update_checks_enabled(&json!({ "updateChecks": 1 })));
+        assert!(update_checks_enabled(&json!({ "updateChecks": true })));
+    }
+
+    #[test]
+    fn update_checks_enabled_matches_config_with_defaults() {
+        // The seeded default (no config file at all) is exactly what the
+        // predicate says about an empty object, so the two cannot drift
+        // apart into "the app looks off but would actually check".
+        assert!(!update_checks_enabled(&config_with_defaults(json!({}))));
+        assert!(update_checks_enabled(&config_with_defaults(
+            json!({ "updateChecks": true })
+        )));
     }
 
     #[test]

@@ -109,6 +109,8 @@
   "settings.useProxy": "プロキシを使用",
   "settings.proxyUrl": "プロキシ URL",
   "settings.networkNote": "アプリを再起動すると反映されます。ローカル用量 API は常に http://127.0.0.1:6736/v1/usage で動作します",
+  "settings.updateChecks": "更新を確認",
+  "settings.updateChecksHint": "オンにすると、起動時と 4 時間ごとに github.com へ latest.json を 1 回リクエストします。あなたやこのコンピューターに関する情報は送信されません。",
   "settings.apiKeys": "API キー",
   "settings.apiKeysNote": "このコンピューターにのみ保存されます。空欄のまま保存すると削除されます。",
   "settings.save": "保存",

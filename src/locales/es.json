@@ -109,6 +109,8 @@
   "settings.useProxy": "Usar proxy",
   "settings.proxyUrl": "URL del proxy",
   "settings.networkNote": "Se aplica al reiniciar la aplicación. La API de uso local siempre se ejecuta en http://127.0.0.1:6736/v1/usage",
+  "settings.updateChecks": "Buscar actualizaciones",
+  "settings.updateChecksHint": "Una solicitud a github.com para latest.json al iniciar la app y cada 4 horas mientras esté activado. No se envía nada sobre este equipo.",
   "settings.apiKeys": "Claves de API",
   "settings.apiKeysNote": "Se guardan solo en este equipo. Dejar vacío y guardar para eliminarla.",
   "settings.save": "Guardar",

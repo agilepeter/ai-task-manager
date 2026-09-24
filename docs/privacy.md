@@ -24,22 +24,30 @@ This is the complete list. Anything not listed here does not happen.
 | One/New API and Sub2API origins **you configured** | Their scheduled refresh; a status probe when you save or change a site | That site's key as Bearer, **only to that origin**, with redirects disabled and no fallback endpoints |
 | `raw.githubusercontent.com` (LiteLLM), `models.dev`, `robinebers.github.io` | About daily, hourly while unknown models are around | Anonymous GET for public model price tables. Nothing identifying, no key, no usage |
 | `staas.fund/mcp/scanner/servers.json` | **Only if you switch on the MCP Trust Index** (`trustLookup`, off by default). At most once a day | One parameterless GET of a public list. Nothing about your machine, your servers or your identity is sent; the matching happens locally after the list arrives |
+| `github.com` (this project's own release feed) | **Only if you switch on Check for updates** (`updateChecks`, off by default, in Settings > Network). On launch and every 4 hours while it is on | One GET of `latest.json`. Nothing about your machine or your identity is sent -- just the request itself, with the usual HTTP headers |
 | `127.0.0.1:11434` (your own machine) | Every refresh, if Ollama is enabled | A local query of your own Ollama server |
 
 Notably absent: analytics, session recording, event streams, A/B flags,
-autocapture, crash reporting, an install counter, and an update check. None of
-it exists in the codebase.
+autocapture, crash reporting, and an install counter. None of it exists in
+the codebase.
 
-## Updates do not phone home either
+## Updates are opt-in too, and off by default
 
-**Self-update is off** (`UPDATES_ENABLED` in `src-tauri/src/lib.rs`). The
-updater is not registered, so the app makes no update request at all, not at
-launch and not in the background.
+**Self-update is off until you turn it on** (`updateChecks` in Settings >
+Network). While it is off, nothing goes out -- not at launch and not in the
+background -- the same thing this page said before this setting existed; only
+how that promise is kept has changed, from the feature being unregistered to
+a switch nobody has flipped.
 
-The endpoint strings still in the source belong to the upstream project and are
-the reason the feature stays off: pointing an updater at someone else's feed
-would replace this app with theirs. Before updates are ever switched on, those
-endpoints have to be replaced with our own. See `SHIPPING.md`.
+Turning it on makes exactly the one request the table above describes: a GET
+of `latest.json` from `github.com`, this project's own release feed, on
+launch and again every 4 hours for as long as the setting stays on. A 404
+(no release published yet) or being offline are both logged and otherwise
+ignored -- neither retries harder nor surfaces as an error.
+
+The signing key is this project's own too (see `SHIPPING.md` for exactly what
+that means and what distribution still needs before a release exists to
+check for).
 
 ## What stays on your machine
 
@@ -120,7 +128,7 @@ one of four places, and there are no others:
 - a provider module, [`crates/core/src/providers/`](../crates/core/src/providers/)
 - the pricing engine, [`crates/core/src/pricing.rs`](../crates/core/src/pricing.rs)
 - the MCP Trust Index lookup, [`crates/core/src/trust.rs`](../crates/core/src/trust.rs)
-- the updater registration, [`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs), which is switched off
+- the updater, [`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs), opt-in and off by default
 
 Useful greps:
 
@@ -133,11 +141,11 @@ grep -rhoE '"https://[a-zA-Z0-9./_-]+' --include="*.rs" \
   crates/core/src/pricing.rs crates/core/src/trust.rs src-tauri/src/lib.rs | sort -u
 ```
 
-The second command prints seven URLs: three public price tables, the Trust
-Index list and its human-readable page, and **two updater endpoints belonging
-to the upstream project**. Those last two are exactly why self-update is off,
-and they are left visible here rather than quietly deleted so that what the
-source contains and what this page says stay the same thing.
+The second command prints six URLs: three public price tables, the Trust
+Index list and its human-readable page, and this project's own updater
+endpoint. That last one is real and reachable, not a placeholder -- the
+`updateChecks` setting above is what decides whether it is ever asked
+anything, not whether the address itself is trustworthy.
 
 The enterprise half has its own boundary. The per-seat report
 ([`crates/core/src/seat.rs`](../crates/core/src/seat.rs)) has no field that can

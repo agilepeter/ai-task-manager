@@ -109,6 +109,8 @@
   "settings.useProxy": "프록시 사용",
   "settings.proxyUrl": "프록시 URL",
   "settings.networkNote": "앱을 재시작한 후 적용됩니다. 로컬 사용량 API는 항상 http://127.0.0.1:6736/v1/usage 에서 실행됩니다",
+  "settings.updateChecks": "업데이트 확인",
+  "settings.updateChecksHint": "켜져 있으면 실행 시와 이후 4시간마다 github.com에 latest.json을 한 번 요청합니다. 사용자나 이 컴퓨터에 관한 어떤 정보도 전송되지 않습니다.",
   "settings.apiKeys": "API 키",
   "settings.apiKeysNote": "이 컴퓨터에만 저장됩니다. 비워 둔 채 저장하면 삭제됩니다.",
   "settings.save": "저장",

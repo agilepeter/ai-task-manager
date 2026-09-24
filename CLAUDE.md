@@ -38,11 +38,11 @@ file under `crates/core/src/providers/` and port it by hand.
 ## Hard rules
 
 - **No telemetry, no phone-home.** Upstream's PostHog module was removed. Outbound traffic
-  is each provider's own vendor API, plus exactly one documented exception the owner approved
-  on 2026-09-21: the **Trust Index lookup** (`crates/core/src/trust.rs`). It is OFF by default
-  (`trustLookup`), and when on it sends NOTHING about the machine: one parameterless GET of
-  the public list, at most daily, matched locally. Never turn that into a per-package query.
-  Anything else that would leave the machine needs the same explicit, documented decision.
+  is each provider's own vendor API, plus two documented, owner-approved exceptions, both OFF
+  by default and both described in full below: the **Trust Index lookup** (`trustLookup`,
+  approved 2026-09-21) and **update checks** (`updateChecks`, approved 2026-09-24). Never turn
+  the Trust Index into a per-package query. Anything else that would leave the machine needs
+  the same explicit, documented decision.
 - **The local API's extra feeds are opt-in** (`apiFeeds`, Settings > Advanced): `/v1/spend`,
   `/v1/spend/areas`, `/v1/spend/clients`, `/v1/subscriptions`. Areas and clients are folder
   and customer names, so while the switch is off nothing is published at all (the paths are
@@ -57,11 +57,14 @@ file under `crates/core/src/providers/` and port it by hand.
   either: after a change under `crates/`, check the binary (`strings target/debug/ai-task-manager |
   grep <new text>`) and, if it did not rebuild, `touch src-tauri/src/lib.rs`.
 - The HTTP user-agent is `ai-task-manager/<version>`: the same for every install, never an id.
-- **Self-update is off** (`UPDATES_ENABLED` in `src-tauri/src/lib.rs`). The pubkey in
-  `tauri.conf.json` is now OURS (minisign `6CDFF96385CA8101`; private half in `~/.tauri/` and
-  repo secrets, never in the repo). The endpoints in `updater_endpoint_strings` are still
-  upstream's and must be replaced before it is ever enabled. `SHIPPING.md` lists what
-  distribution still needs.
+- **Self-update is opt-in and off by default** (`updateChecks` in config.json, a Settings >
+  Network toggle; `update_checks_enabled` in `src-tauri/src/lib.rs` is the one function every
+  call site asks, reading the config fresh each time so a toggle needs no restart). A missing or
+  malformed key reads as off, so no existing install starts checking on its own. The pubkey in
+  `tauri.conf.json` is OURS (minisign `6CDFF96385CA8101`; private half in `~/.tauri/` and repo
+  secrets, never in the repo) and `updater_endpoint_strings` already points at this project's own
+  release feed — what the setting gates is not which feed, but whether the app ever asks it
+  anything. `SHIPPING.md` lists what distribution still needs.
 - **OS credential stores are read-only.** `read_os_credential` never writes.
   On macOS the Claude provider reads the Keychain and never refreshes the
   token, because a refresh rotates it and would sign Claude Code out.

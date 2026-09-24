@@ -109,6 +109,8 @@
   "settings.useProxy": "Использовать прокси",
   "settings.proxyUrl": "Адрес прокси",
   "settings.networkNote": "Применяется после перезапуска. Локальный API всегда на http://127.0.0.1:6736/v1/usage",
+  "settings.updateChecks": "Проверять обновления",
+  "settings.updateChecksHint": "При включении: один запрос к github.com за latest.json при запуске и затем каждые 4 часа. Никакие сведения о вас или этом компьютере никуда не отправляются.",
   "settings.apiKeys": "Ключи API",
   "settings.apiKeysNote": "Хранятся только на этом компьютере. Оставьте пустым и сохраните, чтобы удалить.",
   "settings.save": "Сохранить",

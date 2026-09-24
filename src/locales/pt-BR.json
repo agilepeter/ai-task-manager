@@ -109,6 +109,8 @@
   "settings.useProxy": "Usar proxy",
   "settings.proxyUrl": "URL do proxy",
   "settings.networkNote": "Aplicado após reiniciar o app. A API de uso local sempre roda em http://127.0.0.1:6736/v1/usage",
+  "settings.updateChecks": "Verificar atualizações",
+  "settings.updateChecksHint": "Uma solicitação a github.com por latest.json ao abrir o app e a cada 4 horas enquanto estiver ativado. Nada sobre você ou este computador é enviado.",
   "settings.apiKeys": "Chaves de API",
   "settings.apiKeysNote": "Armazenadas somente neste computador. Deixe em branco e salve para remover.",
   "settings.save": "Salvar",

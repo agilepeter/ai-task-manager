@@ -109,6 +109,8 @@
   "settings.useProxy": "使用代理",
   "settings.proxyUrl": "代理地址",
   "settings.networkNote": "重启应用后生效。本机用量接口始终运行在 http://127.0.0.1:6736/v1/usage",
+  "settings.updateChecks": "检查更新",
+  "settings.updateChecksHint": "启动时以及此后每 4 小时，向 github.com 发出一次 latest.json 请求。不会发送任何关于你或这台电脑的信息。",
   "settings.apiKeys": "API 密钥",
   "settings.apiKeysNote": "只存在这台电脑上。留空再保存即可删除。",
   "settings.save": "保存",

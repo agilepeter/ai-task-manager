@@ -41,7 +41,7 @@ a build" steps beside it for when that day comes.
 | Downloadable release | None. `release.yml` builds installers for a `v*` tag but has never been run. |
 | macOS signing | None. No Apple Developer ID certificate is configured, so `spctl` reports "no usable signature" on any build. |
 | Windows signing | None. SmartScreen will warn on any installer. |
-| Auto-update | **Off.** See [Updates](#updates). |
+| Auto-update | **Opt-in, off by default.** See [Updates](#updates). |
 
 ### macOS
 
@@ -319,11 +319,17 @@ including every network call the app can make and the greps that prove it, is
 
 ## Updates
 
-**Self-update is off.** The updater's endpoints still point at the upstream
-project, so switching it on would replace this app with a different one. The
-signing key is ours, but the public feed does not exist yet because this
-repository is private. `SHIPPING.md` lists exactly what each remaining step
-needs. Until then, update by pulling and rebuilding:
+**Self-update is opt-in and off by default** (Settings > Network > "Check for
+updates", the `updateChecks` config key). While it is off, nothing goes out.
+Turning it on makes exactly one kind of request -- a GET of `latest.json` from
+this project's own release feed on `github.com`, sent on launch and every 4
+hours after that, carrying nothing about you or this computer. See
+[docs/privacy.md](docs/privacy.md) for the full accounting and `SHIPPING.md`
+for what each remaining distribution step needs.
+
+The feed itself does not exist yet because this repository has never cut a
+release, so turning the setting on today just means a logged 404 every 4
+hours. Until a release exists, update by pulling and rebuilding:
 
 ```sh
 git pull

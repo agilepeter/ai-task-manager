@@ -218,6 +218,8 @@ interface Config {
   trustLookup: boolean;
   /** Opt-in: serve spend, areas, clients and the ledger on the loopback API. */
   apiFeeds: boolean;
+  /** Opt-in: ask GitHub for a newer release at launch and every 4 hours. Off by default. */
+  updateChecks: boolean;
   /** "off" or the weekday ("mon" … "sun") the weekly digest goes out. */
   weeklyDigest: string;
   /** Days a still-used session may stay open before one weekly nudge; 0 = off. */
@@ -258,6 +260,7 @@ const FRONTEND_CONFIG_KEYS = [
   "renewalReminderDays",
   "trustLookup",
   "apiFeeds",
+  "updateChecks",
   "weeklyDigest",
   "sessionNudgeDays",
   "auditSeen",
@@ -450,6 +453,7 @@ let config: Config = {
   renewalReminderDays: 3,
   trustLookup: false,
   apiFeeds: false,
+  updateChecks: false,
   weeklyDigest: "mon",
   sessionNudgeDays: 7,
   auditSeen: false,
@@ -4603,6 +4607,20 @@ async function initSettings(): Promise<void> {
   proxyEnabled.addEventListener("change", saveProxy);
   proxyUrl.addEventListener("change", saveProxy);
 
+  const updateChecks = document.querySelector<HTMLInputElement>("#update-checks")!;
+  updateChecks.checked = config.updateChecks === true;
+  updateChecks.addEventListener("change", () => {
+    void patchConfig({ updateChecks: updateChecks.checked });
+    if (!updateChecks.checked) {
+      // Off has to win immediately, not at the next check: a button already
+      // offering a version must not survive the toggle that just promised no
+      // more requests. The 4-hourly loop and the next popover open both read
+      // the same config, so nothing will re-announce it while this is off.
+      updateVersion = null;
+      renderBuildInfo();
+    }
+  });
+
   populatePinnedOptions();
 
   document.querySelector("#reset-all-settings")!.addEventListener("click", () => {
@@ -4708,6 +4726,7 @@ function syncSettingsControls(): void {
   setNum("#shortcut", config.shortcut);
   setCheck("#proxy-enabled", config.proxy?.enabled ?? false);
   setNum("#proxy-url", config.proxy?.url ?? "");
+  setCheck("#update-checks", config.updateChecks === true);
   const autostart = document.querySelector<HTMLInputElement>("#autostart");
   if (autostart) autostart.checked = true;
   populatePinnedOptions();

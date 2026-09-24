@@ -70,6 +70,13 @@ upstream copy.
 - **MCP Trust Index lookup.** Off by default. Switched on it sends nothing
   about the machine: one parameterless GET of a public list, at most daily,
   matched locally.
+- **Opt-in update checks.** Off by default (`updateChecks` in Settings >
+  Network). Switched on, the app asks GitHub's own release feed for
+  `latest.json` on launch and every 4 hours, sending nothing about the
+  machine; a 404 (no release yet) or being offline are both logged and
+  otherwise ignored. The footer's "Update available" button only ever
+  appears from a real answer, and turning the setting off hides a pending
+  one immediately.
 - **Enterprise half.** A headless agent (`aitm-agent`) that reports a per-seat
   inventory, a self-hosted collector with a team dashboard, and a team policy
   whose conformance is computed on the collector rather than claimed by the
