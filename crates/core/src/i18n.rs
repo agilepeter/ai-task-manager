@@ -276,7 +276,7 @@ impl Msg {
     }
 }
 
-/// CLDR cardinal rule for exactly the nine locales this app plans to ship.
+/// CLDR cardinal rule for exactly the nine locales this app ships.
 /// Same rules as `pluralForm` in `src/i18n.ts`; `plural_forms_match_the_typescript_table`
 /// keeps the two identical instead of letting them drift apart by hand.
 fn plural_form(locale: &str, n: i64) -> &'static str {
