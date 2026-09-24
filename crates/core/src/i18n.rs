@@ -17,16 +17,16 @@ use std::sync::OnceLock;
 /// list directly). `locale_source` has no catch-all: forgetting that arm
 /// fails `every_locale_file_parses` loudly instead of silently degrading
 /// that locale to English.
-pub const LOCALES: &[&str] = &["en", "zh", "ru"];
+pub const LOCALES: &[&str] = &["en", "zh", "ru", "es"];
 
 /// Primary Windows UI language id (`langid & 0x03FF`) → locale. Only the
 /// locales that need a non-English match have a row; anything else falls
 /// back to "en". Used on Windows and, via `locale_for_langid`, in tests.
 #[cfg(any(windows, test))]
-const WINDOWS_LANGIDS: &[(u16, &str)] = &[(0x04, "zh"), (0x19, "ru")];
+const WINDOWS_LANGIDS: &[(u16, &str)] = &[(0x04, "zh"), (0x19, "ru"), (0x0a, "es")];
 
 /// `LC_ALL` / `LC_MESSAGES` / `LANG` tag prefix (lowercased) → locale.
-const ENV_PREFIXES: &[(&str, &str)] = &[("zh", "zh"), ("ru", "ru")];
+const ENV_PREFIXES: &[(&str, &str)] = &[("zh", "zh"), ("ru", "ru"), ("es", "es")];
 
 /// `include_str!` needs a literal path per file, so this is the one place
 /// that lists them; `LOCALES` above stays the only list of which locales
@@ -40,6 +40,7 @@ fn locale_source(locale: &str) -> Option<&'static str> {
         "en" => include_str!("../../../src/locales/en.json"),
         "zh" => include_str!("../../../src/locales/zh.json"),
         "ru" => include_str!("../../../src/locales/ru.json"),
+        "es" => include_str!("../../../src/locales/es.json"),
         _ => return None,
     })
 }
@@ -399,6 +400,7 @@ mod tests {
         assert_eq!(resolved_locale(&json!({"locale": "zh"})), "zh");
         assert_eq!(resolved_locale(&json!({"locale": "en"})), "en");
         assert_eq!(resolved_locale(&json!({"locale": "ru"})), "ru");
+        assert_eq!(resolved_locale(&json!({"locale": "es"})), "es");
     }
 
     #[test]
@@ -482,6 +484,8 @@ mod tests {
         assert_eq!(locale_for_langid(0x0404), "zh"); // zh-TW
         assert_eq!(locale_for_langid(0x0419), "ru"); // ru-RU
         assert_eq!(locale_for_langid(0x0819), "ru"); // ru-MD
+        assert_eq!(locale_for_langid(0x000A), "es"); // es (neutral)
+        assert_eq!(locale_for_langid(0x080A), "es"); // es-MX
         assert_eq!(locale_for_langid(0x0409), "en"); // en-US
         assert_eq!(locale_for_langid(0xFFFF), "en"); // unknown
     }
@@ -490,6 +494,7 @@ mod tests {
     fn env_prefixes_map_to_locales() {
         assert_eq!(locale_for_env_tag("zh_CN.UTF-8"), "zh");
         assert_eq!(locale_for_env_tag("ru_RU"), "ru");
+        assert_eq!(locale_for_env_tag("es_ES.UTF-8"), "es");
         assert_eq!(locale_for_env_tag("en_US.UTF-8"), "en");
         assert_eq!(locale_for_env_tag(""), "en");
     }
