@@ -17,16 +17,18 @@ use std::sync::OnceLock;
 /// list directly). `locale_source` has no catch-all: forgetting that arm
 /// fails `every_locale_file_parses` loudly instead of silently degrading
 /// that locale to English.
-pub const LOCALES: &[&str] = &["en", "zh", "ru", "es", "fr", "de"];
+pub const LOCALES: &[&str] = &["en", "zh", "ru", "es", "fr", "de", "ja"];
 
 /// Primary Windows UI language id (`langid & 0x03FF`) → locale. Only the
 /// locales that need a non-English match have a row; anything else falls
 /// back to "en". Used on Windows and, via `locale_for_langid`, in tests.
 #[cfg(any(windows, test))]
-const WINDOWS_LANGIDS: &[(u16, &str)] = &[(0x04, "zh"), (0x19, "ru"), (0x0a, "es"), (0x0c, "fr"), (0x07, "de")];
+const WINDOWS_LANGIDS: &[(u16, &str)] =
+    &[(0x04, "zh"), (0x19, "ru"), (0x0a, "es"), (0x0c, "fr"), (0x07, "de"), (0x11, "ja")];
 
 /// `LC_ALL` / `LC_MESSAGES` / `LANG` tag prefix (lowercased) → locale.
-const ENV_PREFIXES: &[(&str, &str)] = &[("zh", "zh"), ("ru", "ru"), ("es", "es"), ("fr", "fr"), ("de", "de")];
+const ENV_PREFIXES: &[(&str, &str)] =
+    &[("zh", "zh"), ("ru", "ru"), ("es", "es"), ("fr", "fr"), ("de", "de"), ("ja", "ja")];
 
 /// `include_str!` needs a literal path per file, so this is the one place
 /// that lists them; `LOCALES` above stays the only list of which locales
@@ -43,6 +45,7 @@ fn locale_source(locale: &str) -> Option<&'static str> {
         "es" => include_str!("../../../src/locales/es.json"),
         "fr" => include_str!("../../../src/locales/fr.json"),
         "de" => include_str!("../../../src/locales/de.json"),
+        "ja" => include_str!("../../../src/locales/ja.json"),
         _ => return None,
     })
 }
@@ -405,6 +408,7 @@ mod tests {
         assert_eq!(resolved_locale(&json!({"locale": "es"})), "es");
         assert_eq!(resolved_locale(&json!({"locale": "fr"})), "fr");
         assert_eq!(resolved_locale(&json!({"locale": "de"})), "de");
+        assert_eq!(resolved_locale(&json!({"locale": "ja"})), "ja");
     }
 
     #[test]
@@ -494,6 +498,8 @@ mod tests {
         assert_eq!(locale_for_langid(0x0C0C), "fr"); // fr-CA
         assert_eq!(locale_for_langid(0x0007), "de"); // de (neutral)
         assert_eq!(locale_for_langid(0x0C07), "de"); // de-AT
+        assert_eq!(locale_for_langid(0x0011), "ja"); // ja (neutral)
+        assert_eq!(locale_for_langid(0x0411), "ja"); // ja-JP
         assert_eq!(locale_for_langid(0x0409), "en"); // en-US
         assert_eq!(locale_for_langid(0xFFFF), "en"); // unknown
     }
@@ -505,6 +511,7 @@ mod tests {
         assert_eq!(locale_for_env_tag("es_ES.UTF-8"), "es");
         assert_eq!(locale_for_env_tag("fr_FR.UTF-8"), "fr");
         assert_eq!(locale_for_env_tag("de_DE.UTF-8"), "de");
+        assert_eq!(locale_for_env_tag("ja_JP.UTF-8"), "ja");
         assert_eq!(locale_for_env_tag("en_US.UTF-8"), "en");
         assert_eq!(locale_for_env_tag(""), "en");
     }
