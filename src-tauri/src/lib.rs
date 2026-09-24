@@ -3393,7 +3393,6 @@ fn build_updater_with(
     timeout: Option<std::time::Duration>,
 ) -> Result<tauri_plugin_updater::Updater, String> {
     use tauri_plugin_updater::UpdaterExt;
-    let version = app.package_info().version.to_string();
     let endpoints = updater_endpoint_strings()
         .into_iter()
         .map(|endpoint| endpoint.parse().map_err(|e| format!("endpoint parse: {e}")))
