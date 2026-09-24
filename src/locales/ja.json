@@ -149,7 +149,7 @@
   "settings.onenewapiDeleteKey": "キーを削除",
   "settings.onenewapiKeyKeepHint": "空欄のままにすると現在のキーを維持します",
   "tray.quit": "AI Task Manager を終了",
-  "tray.pctLeft": "{name} {label}: 残り {left}%",
+  "tray.pctLeft": "{name} {label}：残り {left}%",
   "dialog.cancel": "キャンセル",
   "dialog.gotIt": "了解",
   "card.notConnected": "未接続",
