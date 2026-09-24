@@ -17,8 +17,10 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
+use crate::clients::{self, ClientRule};
 use crate::i18n::Msg;
 use crate::inventory::{McpServer, Opportunity};
+use crate::spend::{self, LivePace};
 
 /// Runners that take a package directly, after optional flags ("npx -y pkg").
 const DIRECT_RUNNERS: [&str; 3] = ["npx", "uvx", "bunx"];
@@ -231,6 +233,14 @@ pub fn group(procs: &[RawProc], servers: &[McpServer]) -> Vec<RunningServer> {
     // A runner and the binary it spawned are one instance, not two.
     let mut roots: Vec<(String, &RawProc, Option<&McpServer>)> = Vec::new();
     for p in procs {
+        // An agent host (Claude Code, Codex, ...) is a row in the agents
+        // list, never a server here. Without this, an npm-installed host
+        // -- matched by its extracted package the same conservative way a
+        // real MCP server is -- would also show up as an "unconfigured"
+        // server sitting right next to its own agent row.
+        if agent_host_of(p).is_some() {
+            continue;
+        }
         let matched = servers.iter().find(|s| claims(s, p));
         let key = match (matched, p.package.as_ref()) {
             (Some(s), _) => s.name.clone(),
@@ -362,6 +372,17 @@ pub struct RunningAgent {
     pub cpu_percent: Option<f32>,
     /// `None` on Windows, or when `lsof` had nothing for this pid.
     pub cwd: Option<String>,
+    /// The most recent work area this agent's live session's tool calls
+    /// touched. `None` when `cwd` is unknown, there is no live session for
+    /// it, or none of its recent activity named an area.
+    pub area: Option<String>,
+    /// `clients::client_of(area, rules)` for `area` above, when a rule
+    /// matches it. Never guessed when there is no area to match against.
+    pub client: Option<String>,
+    /// Tokens, cost and idle time from the newest live session in `cwd`.
+    /// Agents that share a folder share this: it names the newest session
+    /// in that folder, not a session specific to this one process.
+    pub pace: Option<LivePace>,
 }
 
 /// The pid of the nearest agent-host ancestor `proc` folds into, or `None`
@@ -424,11 +445,11 @@ pub fn parse_lsof_cwd(out: &str) -> HashMap<u32, String> {
 /// `lsof` reporting the rest; failing to run it at all, or asking for zero
 /// pids, gives an empty map without a spawn.
 ///
-/// Only `live_agents` calls this today, the same as `snapshot_key` in
-/// `providers/onenewapi/snapshot.rs`: the live orchestration that wires it
-/// into `agents_from` for real is a later task's UI/API work, out of scope
-/// here.
-#[cfg_attr(not(test), allow(dead_code))]
+/// A pid can also be REUSED by an unrelated process in that same gap:
+/// `lsof` then reports the new process's cwd under the old pid, so a
+/// folder can name the wrong place for one refresh. Cosmetic, not acted on
+/// -- nothing here does more than display a path, and the next snapshot
+/// reads a fresh process table and corrects it.
 #[cfg(not(windows))]
 fn cwd_of_pids(pids: &[u32]) -> HashMap<u32, String> {
     if pids.is_empty() {
@@ -443,7 +464,6 @@ fn cwd_of_pids(pids: &[u32]) -> HashMap<u32, String> {
         .unwrap_or_default()
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[cfg(windows)]
 fn cwd_of_pids(_pids: &[u32]) -> HashMap<u32, String> {
     // Win32_Process carries no cwd for another process, and reading one
@@ -467,6 +487,9 @@ pub fn agents_from(raw: &[RawProc], cwds: &HashMap<u32, String>) -> Vec<RunningA
                 rss_bytes: p.rss_bytes,
                 cpu_percent: p.cpu_percent,
                 cwd: cwds.get(&p.pid).cloned(),
+                area: None,
+                client: None,
+                pace: None,
             })
         })
         .collect();
@@ -481,6 +504,38 @@ pub fn agents_from(raw: &[RawProc], cwds: &HashMap<u32, String>) -> Vec<RunningA
     }
     out.sort_by(|a, b| b.elapsed_secs.cmp(&a.elapsed_secs));
     out
+}
+
+/// Fills in each agent's area, client and live pace from its folder alone.
+/// Pure: `lookup` (a fresh read of that folder's newest session file) and
+/// the client rules both come from the caller, so this needs no I/O of its
+/// own to test. An agent with no known `cwd` is left exactly as `agents_from`
+/// built it -- there is no folder to ask a session or a client rule about.
+pub fn attach_context(agents: &mut [RunningAgent], rules: &[ClientRule], lookup: &dyn Fn(&str) -> Option<LivePace>) {
+    for agent in agents.iter_mut() {
+        let Some(cwd) = agent.cwd.as_deref() else { continue };
+        let pace = lookup(cwd);
+        agent.area = pace.as_ref().and_then(|p| p.area.clone());
+        agent.client = agent.area.as_deref().and_then(|a| clients::client_of(a, rules)).map(str::to_string);
+        agent.pace = pace;
+    }
+}
+
+/// The live picture: every running agent host, folded and sorted like
+/// `agents_from`, with its work area, client and live pace attached. Agents
+/// that share a cwd share a pace -- the newest live session in that folder.
+pub fn agents_snapshot(rules: &[ClientRule]) -> Vec<RunningAgent> {
+    let Some(table) = process_table() else { return Vec::new() };
+    let raw = parse_ps(&table);
+    let pids: Vec<u32> = raw.iter().map(|p| p.pid).collect();
+    let cwds = cwd_of_pids(&pids);
+    let mut agents = agents_from(&raw, &cwds);
+    attach_context(&mut agents, rules, &|cwd| spend::live_session_for_cwd(cwd, now_ms()));
+    agents
+}
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
 }
 
 // ---------------------------------------------------------------------------
@@ -665,7 +720,8 @@ fn live_procs() {
 /// Real snapshot from this machine. Ignored: run it once by hand
 /// (`cargo test -p aitm-core live_agents -- --ignored --nocapture`) while a
 /// real agent host is open, to read back what this machine's own `ps` prints
-/// for it and confirm -- or correct -- `AGENT_HOSTS` against it.
+/// for it and confirm -- or correct -- `AGENT_HOSTS` against it, and to see
+/// the area/client/pace fields `agents_snapshot` attaches for real.
 #[test]
 #[ignore]
 fn live_agents() {
@@ -685,6 +741,13 @@ fn live_agents() {
             a.rss_bytes / 1_048_576,
             a.cpu_percent,
             a.cwd
+        );
+    }
+    println!("--- agents_snapshot: area / client / pace ---");
+    for a in agents_snapshot(&clients::load_from(&clients::path())) {
+        println!(
+            "{:<20} pid={:<7} up {:>6}s  area={:?}  client={:?}  pace={:?}",
+            a.tool, a.pid, a.elapsed_secs, a.area, a.client, a.pace
         );
     }
 }
@@ -1024,5 +1087,73 @@ mod tests {
             assert!(!json.contains(secret), "{secret} reached the output: {json}");
         }
         assert_eq!(got[0].tool, "Claude Code");
+    }
+
+    #[test]
+    fn an_agent_host_is_never_listed_as_a_server() {
+        // An npm-installed Claude Code is launched through npx, so it also
+        // carries an extracted package -- exactly what would otherwise
+        // match it as an unconfigured MCP server sitting right next to its
+        // own agent row.
+        let table = "600 1 61440 02:00 0.4 npx @anthropic-ai/claude-code\n";
+        assert!(group(&parse_ps(table), &[]).is_empty(), "an agent host is never a server, configured or not");
+        let agents = agents_from(&parse_ps(table), &HashMap::new());
+        assert_eq!(agents.len(), 1, "it is still an agent");
+        assert_eq!(agents[0].tool, "Claude Code");
+    }
+
+    #[test]
+    fn a_cyclic_parent_chain_terminates() {
+        // A's ppid is B and B's ppid is A -- an impossible but adversarial
+        // process table. `host_ancestor_pid`'s walk is already bounded
+        // (see its own comment), so this returns None instead of hanging.
+        let raw = vec![
+            RawProc { pid: 1, ppid: 2, rss_bytes: 0, elapsed_secs: 0, package: None, binary: "sh".into(), cpu_percent: None },
+            RawProc { pid: 2, ppid: 1, rss_bytes: 0, elapsed_secs: 0, package: None, binary: "sh".into(), cpu_percent: None },
+        ];
+        let by_pid: HashMap<u32, &RawProc> = raw.iter().map(|p| (p.pid, p)).collect();
+        assert_eq!(host_ancestor_pid(&by_pid, &raw[0]), None, "a cyclic ppid chain must terminate, not hang");
+    }
+
+    #[test]
+    fn attach_context_maps_the_pace_area_to_a_client() {
+        let table = "500 1 51200 10:00 1.0 claude\n";
+        let mut cwds = HashMap::new();
+        cwds.insert(500, "/w/acme".to_string());
+        let mut agents = agents_from(&parse_ps(table), &cwds);
+        let pace = LivePace {
+            session_id: "sess-1".into(),
+            tokens_10m: 42,
+            cost_10m: 0.1,
+            priced: true,
+            idle_secs: 5,
+            model: Some("claude-sonnet-5".into()),
+            area: Some("acme".into()),
+        };
+        let rules = vec![ClientRule { client: "Acme".into(), patterns: vec!["acme".into()], monthly_budget: None }];
+        attach_context(&mut agents, &rules, &|cwd| {
+            assert_eq!(cwd, "/w/acme", "the lookup is asked about the agent's own folder");
+            Some(pace.clone())
+        });
+        assert_eq!(agents[0].area.as_deref(), Some("acme"));
+        assert_eq!(agents[0].client.as_deref(), Some("Acme"));
+        assert_eq!(agents[0].pace, Some(pace));
+    }
+
+    #[test]
+    fn an_agent_without_a_live_session_keeps_only_its_folder() {
+        let table = "500 1 51200 10:00 1.0 claude\n";
+        let mut cwds = HashMap::new();
+        cwds.insert(500, "/w/quiet".to_string());
+        let mut agents = agents_from(&parse_ps(table), &cwds);
+        // A rule that would match the bare folder name, to prove client
+        // resolution goes through the pace's own area and never the raw
+        // cwd directly.
+        let rules = vec![ClientRule { client: "Acme".into(), patterns: vec!["quiet".into()], monthly_budget: None }];
+        attach_context(&mut agents, &rules, &|_cwd| None);
+        assert_eq!(agents[0].cwd.as_deref(), Some("/w/quiet"), "the folder itself is untouched");
+        assert_eq!(agents[0].area, None, "no live session means no area to report");
+        assert_eq!(agents[0].client, None, "so no client, even though a rule would match the bare folder name");
+        assert_eq!(agents[0].pace, None);
     }
 }

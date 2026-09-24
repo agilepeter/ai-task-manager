@@ -1982,6 +1982,225 @@ pub fn claude_sessions(area: Option<&str>, day: Option<&str>, limit: usize) -> V
     out
 }
 
+// ---------------------------------------------------------------------------
+// Live pace: what a running Claude Code session is doing right now
+// ---------------------------------------------------------------------------
+
+/// Width of the "right now" window: tokens, cost, model and area all come
+/// from assistant lines inside the last 10 minutes only, so a session that
+/// has gone quiet reports nothing instead of a stale number.
+const LIVE_WINDOW_MS: i64 = 10 * 60 * 1000;
+/// A session file counts as live only when it was written inside the last
+/// 5 minutes -- half the pace window, so "live" always means the file is
+/// still being appended to, never a session that has plainly ended.
+const LIVE_FRESH_MS: i64 = 5 * 60 * 1000;
+/// How much of a live session's tail gets read. There is no persisted
+/// cursor here (unlike the day scanner's cache): every poll re-opens the
+/// file fresh, so this stays small -- comfortably a few minutes of a busy
+/// session without ever re-reading a multi-gigabyte log.
+const LIVE_TAIL_BYTES: usize = 256 * 1024;
+
+/// A running agent's own session, read fresh: recent pace, not history.
+/// Structurally incapable of carrying a prompt, a title or any other text
+/// block -- only counts, a price, a model name and a work area derived
+/// from tool-call *paths*, the same way the history scanner's areas are.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LivePace {
+    /// File stem of the newest live session file: Claude Code's session id.
+    pub session_id: String,
+    /// Input + output + cache tokens of deduplicated assistant lines inside
+    /// the last 10 minutes.
+    pub tokens_10m: u64,
+    /// Those same lines, priced like the scanner: the live catalog first,
+    /// then the static family fallback. A line whose model prices as
+    /// neither adds 0 here and turns `priced` off -- never a guessed
+    /// dollar figure.
+    pub cost_10m: f64,
+    pub priced: bool,
+    /// Seconds since the newest assistant line's own timestamp.
+    pub idle_secs: u64,
+    /// The newest assistant line's model.
+    pub model: Option<String>,
+    /// The most recent work area the window's tool calls touched: the same
+    /// `area_under` / `area_in_command` cascade `claude_area` runs for its
+    /// own tool-call signal, never the process's bare cwd, which (being the
+    /// session's own root) names no area relative to itself.
+    pub area: Option<String>,
+}
+
+/// `live_session_in` at the project folder a cwd's own session logs live
+/// under.
+pub fn live_session_for_cwd(cwd: &str, now_ms: i64) -> Option<LivePace> {
+    let dir = claude_projects_root().join(encode_project_path(cwd));
+    live_session_in(&dir, now_ms)
+}
+
+/// The newest top-level `*.jsonl` directly under `dir`, read only when it
+/// was written inside `LIVE_FRESH_MS`. Never recurses, so a subagent
+/// transcript -- one or more folders deeper, under `<session-uuid>/subagents/`
+/// -- can never be picked: it is never even listed.
+fn live_session_in(dir: &Path, now_ms: i64) -> Option<LivePace> {
+    let mut newest: Option<(PathBuf, SystemTime)> = None;
+    for entry in fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Ok(ftype) = entry.file_type() else { continue };
+        if !ftype.is_file() {
+            continue;
+        }
+        let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else { continue };
+        let better = match &newest {
+            Some((_, best)) => mtime > *best,
+            None => true,
+        };
+        if better {
+            newest = Some((path, mtime));
+        }
+    }
+    let (path, mtime) = newest?;
+    let mtime_ms = mtime.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_millis() as i64;
+    if now_ms.saturating_sub(mtime_ms) > LIVE_FRESH_MS {
+        return None;
+    }
+    let session_id = path.file_stem()?.to_str()?.to_string();
+    let lines = tail_lines(&path);
+    pace_from_lines(lines.iter().map(String::as_str), &session_id, now_ms)
+}
+
+/// The last `LIVE_TAIL_BYTES` of `path` (or the whole file when it is
+/// smaller), split into lines. A seek into the middle of a file almost
+/// never lands on a line boundary, so whenever the read did not start at
+/// byte 0 the first entry is dropped unconditionally -- simpler than the
+/// day scanner's `align_to_line_start`, and fine for a live ticker that
+/// re-reads from scratch on every poll rather than resuming a cursor.
+fn tail_lines(path: &Path) -> Vec<String> {
+    let Ok(mut file) = fs::File::open(path) else { return Vec::new() };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = len.saturating_sub(LIVE_TAIL_BYTES as u64);
+    if start > 0 && file.seek(SeekFrom::Start(start)).is_err() {
+        return Vec::new();
+    }
+    let mut buf = Vec::new();
+    if file.read_to_end(&mut buf).is_err() {
+        return Vec::new();
+    }
+    // Lossy: a seek can split a multi-byte character right at the start of
+    // the buffer, inside the partial line that is about to be dropped
+    // anyway -- a replacement character there costs nothing real.
+    let mut lines: Vec<String> = String::from_utf8_lossy(&buf).split('\n').map(str::to_string).collect();
+    if start > 0 && !lines.is_empty() {
+        lines.remove(0);
+    }
+    lines
+}
+
+/// The work area one assistant line's `tool_use` blocks name, with `root`
+/// as the folder they are measured under. Exactly `claude_area`'s own
+/// tool-call signal (`file_path` / `path` / `notebook_path` first, then the
+/// first path under `root` in a Bash `command`), reused rather than
+/// reimplemented: `area_under` and `area_in_command` are the same private
+/// helpers, scratch folders (`is_scratch_area`) are excluded the same way.
+fn live_tool_use_area(v: &Value, root: &str, home: Option<&str>) -> Option<String> {
+    let blocks = v.pointer("/message/content").and_then(Value::as_array)?;
+    blocks.iter().find_map(|block| {
+        if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+            return None;
+        }
+        let input = block.get("input")?;
+        ["file_path", "path", "notebook_path"]
+            .iter()
+            .find_map(|k| input.get(*k).and_then(Value::as_str))
+            .and_then(|p| area_under(p, root, false))
+            .filter(|a| !is_scratch_area(a))
+            .or_else(|| input.get("command").and_then(Value::as_str).and_then(|c| area_in_command(c, root, home)))
+    })
+}
+
+/// One live session's tail, already read: the last 10 minutes of assistant
+/// activity, deduplicated exactly like `claude_line`, priced exactly like
+/// the scanner. Pure -- no I/O, no clock reads beyond the `now_ms` given --
+/// so a fixture tail exercises the real logic end to end. `None` when
+/// nothing in `lines` is an in-window assistant line.
+fn pace_from_lines<'a>(lines: impl Iterator<Item = &'a str>, session_id: &str, now_ms: i64) -> Option<LivePace> {
+    let cutoff = now_ms - LIVE_WINDOW_MS;
+    let home = dirs::home_dir();
+    let home = home.as_deref().and_then(Path::to_str);
+
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut tokens_10m = 0.0f64;
+    let mut cost_10m = 0.0f64;
+    let mut priced = true;
+    let mut newest_ms: Option<i64> = None;
+    let mut model: Option<String> = None;
+    let mut area: Option<String> = None;
+
+    for line in lines {
+        // Same fast path as `claude_line`: rule out anything that plainly
+        // is not an assistant line before paying for a JSON parse.
+        if !line.contains("\"type\":\"assistant\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if v.get("type").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let Some(ts) = parse_ts(v.get("timestamp")) else { continue };
+        let ms = ts.timestamp_millis();
+        if ms < cutoff {
+            continue;
+        }
+
+        // Area and the "newest line" markers are read from every
+        // qualifying line, dedupe or not -- exactly like `claude_area` runs
+        // ahead of `claude_line`'s duplicate check, because a message's
+        // tool_use block routinely arrives on what dedupe would call a
+        // repeat of an earlier line (Claude Code logs one content block per
+        // JSONL line).
+        if let Some(cwd) = v.get("cwd").and_then(Value::as_str).filter(|c| !c.is_empty()) {
+            if let Some(found) = live_tool_use_area(&v, cwd, home) {
+                area = Some(found);
+            }
+        }
+        if newest_ms.is_none_or(|n| ms >= n) {
+            newest_ms = Some(ms);
+            model = v.pointer("/message/model").and_then(Value::as_str).map(str::to_string);
+        }
+
+        // Dedupe on (message id, request id), like `claude_line`: a
+        // resumed session can repeat the same line verbatim.
+        if let Some(mid) = v.pointer("/message/id").and_then(Value::as_str) {
+            let rid = v.get("requestId").and_then(Value::as_str).unwrap_or("");
+            if !seen.insert(format!("{mid}:{rid}")) {
+                continue;
+            }
+        }
+
+        let usage = v.pointer("/message/usage").cloned().unwrap_or(Value::Null);
+        let Some(t) = claude_tokens(&usage) else { continue };
+        tokens_10m += t.total();
+
+        let line_model = v.pointer("/message/model").and_then(Value::as_str).unwrap_or("unknown");
+        match claude_cost(line_model, &t, ts) {
+            Some(c) => cost_10m += c,
+            None => priced = false,
+        }
+    }
+
+    let newest_ms = newest_ms?;
+    Some(LivePace {
+        session_id: session_id.to_string(),
+        tokens_10m: tokens_10m.round() as u64,
+        cost_10m,
+        priced,
+        idle_secs: now_ms.saturating_sub(newest_ms).max(0) as u64 / 1000,
+        model,
+        area,
+    })
+}
+
 /// Today / yesterday / last-30-days totals for each key of a day map.
 fn windows_by_key(days: DayMap, today: i32) -> HashMap<String, ([Window; 3], Vec<f64>)> {
     let mut out: HashMap<String, ([Window; 3], Vec<f64>)> = HashMap::new();
@@ -4916,6 +5135,174 @@ mod tests {
         let data = claude_run(&[carried]);
         assert_eq!(cost_sum(&data), 0.5);
         assert!(data.days.keys().all(|(_, m)| m == "unattributed"));
+    }
+
+    // ---- Live pace: work area and cadence for a running agent ------------
+
+    /// A model that reaches `claude_price`'s static "sonnet" fallback but
+    /// matches no real catalog slug, so cost math in these tests never
+    /// depends on whatever this machine's live pricing catalog happens to
+    /// hold on disk.
+    const LIVE_PACE_MODEL: &str = "claude-sonnet-live-pace-fixture";
+
+    /// One assistant line shaped like a real Claude Code log entry, keyed
+    /// off an explicit epoch-millisecond timestamp so the window and
+    /// staleness math can be tested against real clock arithmetic. No
+    /// `costUSD`: live pace always prices through `probe_lookup` /
+    /// `claude_price`, never a vendor-carried figure.
+    fn live_line(mid: &str, cwd: &str, model: &str, ts_ms: i64, tool: Option<(&str, &str, &str)>) -> String {
+        let content = match tool {
+            Some((name, key, value)) => json!([{"type": "tool_use", "name": name, "input": {key: value}}]),
+            None => json!([{"type": "text", "text": "ok"}]),
+        };
+        json!({
+            "type": "assistant",
+            "timestamp": chrono::DateTime::from_timestamp_millis(ts_ms).unwrap().to_rfc3339(),
+            "cwd": cwd, "requestId": format!("r-{mid}"),
+            "message": {"id": mid, "model": model, "content": content,
+                        "usage": {"input_tokens": 100.0, "output_tokens": 20.0}}
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn live_pace_counts_only_the_last_ten_minutes() {
+        let now = 1_790_000_000_000i64;
+        let lines = [
+            live_line("old", "/w", LIVE_PACE_MODEL, now - LIVE_WINDOW_MS - 1_000, None),
+            live_line("new", "/w", LIVE_PACE_MODEL, now - 60_000, None),
+        ];
+        let pace = pace_from_lines(lines.iter().map(String::as_str), "sess", now).expect("one line is in window");
+        assert_eq!(pace.tokens_10m, 120, "only the in-window message's tokens count");
+        assert!(pace.priced);
+        let usage = json!({"input_tokens": 100.0, "output_tokens": 20.0});
+        let tokens = claude_tokens(&usage).unwrap();
+        let ts = chrono::DateTime::from_timestamp_millis(now - 60_000).unwrap();
+        let expect_cost = claude_cost(LIVE_PACE_MODEL, &tokens, ts).unwrap();
+        assert!((pace.cost_10m - expect_cost).abs() < 1e-9, "got {}, want {expect_cost}", pace.cost_10m);
+    }
+
+    #[test]
+    fn live_pace_deduplicates_streamed_messages() {
+        let now = 1_790_000_000_000i64;
+        // Same message id AND request id twice: a resumed session
+        // replaying the same line verbatim, like claude_line's own dedupe.
+        let line = live_line("m1", "/w", LIVE_PACE_MODEL, now - 60_000, None);
+        let pace = pace_from_lines([line.as_str(), line.as_str()].into_iter(), "sess", now).unwrap();
+        assert_eq!(pace.tokens_10m, 120, "the replay must not double the count");
+    }
+
+    #[test]
+    fn live_pace_ignores_a_stale_file() {
+        let dir = std::env::temp_dir().join(format!("pane-live-pace-stale-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        fs::write(dir.join("session-a.jsonl"), format!("{}\n", live_line("m1", "/w", LIVE_PACE_MODEL, now - 60_000, None)))
+            .unwrap();
+        // The file's own mtime is "now" (just written); asking as of a
+        // point 6 minutes later makes it stale by the 5-minute gate.
+        let got = live_session_in(&dir, now + 6 * 60_000);
+        let _ = fs::remove_dir_all(&dir);
+        assert!(got.is_none(), "a file untouched for 6 minutes must not report a live pace");
+    }
+
+    #[test]
+    fn live_pace_skips_subagent_transcripts() {
+        let dir = std::env::temp_dir().join(format!("pane-live-pace-subagents-{}", std::process::id()));
+        let sub = dir.join("11111111-1111-1111-1111-111111111111").join("subagents");
+        let _ = fs::create_dir_all(&sub);
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        fs::write(
+            dir.join("real-session.jsonl"),
+            format!("{}\n", live_line("m1", "/w", LIVE_PACE_MODEL, now - 5_000, None)),
+        )
+        .unwrap();
+        // A subagent transcript sitting a folder deeper, with its own
+        // in-window line: if the walk ever recursed, this file would be
+        // found (and would win on content) instead of the real session.
+        fs::write(
+            sub.join("subagent.jsonl"),
+            format!("{}\n", live_line("m2", "/w", LIVE_PACE_MODEL, now - 1_000, None)),
+        )
+        .unwrap();
+        let got = live_session_in(&dir, now).expect("the top-level session is live");
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(got.session_id, "real-session");
+    }
+
+    #[test]
+    fn live_pace_derives_the_area_from_tool_use_paths_not_text() {
+        let now = 1_790_000_000_000i64;
+        let root = "/w";
+        let lines = [
+            live_line("m1", root, LIVE_PACE_MODEL, now - 180_000, None), // text only: no area signal
+            live_line("m2", root, LIVE_PACE_MODEL, now - 120_000, Some(("Read", "file_path", "/w/acme/src/main.rs"))),
+            live_line("m3", root, LIVE_PACE_MODEL, now - 60_000, None), // sticky: still acme/src
+        ];
+        let pace = pace_from_lines(lines.iter().map(String::as_str), "sess", now).unwrap();
+        assert_eq!(pace.area.as_deref(), Some("acme/src"));
+    }
+
+    #[test]
+    fn live_pace_never_carries_prompt_text_or_titles() {
+        let now = 1_790_000_000_000i64;
+        let root = "/w";
+        let planted_prompt = "PLANTED_PROMPT_ABOUT_A_SECRET_PROJECT";
+        let text_line = json!({
+            "type": "assistant",
+            "timestamp": chrono::DateTime::from_timestamp_millis(now - 120_000).unwrap().to_rfc3339(),
+            "cwd": root, "requestId": "r-t1",
+            "message": {"id": "t1", "model": LIVE_PACE_MODEL,
+                        "content": [{"type": "text", "text": planted_prompt}],
+                        "usage": {"input_tokens": 10.0, "output_tokens": 5.0}}
+        })
+        .to_string();
+        // Real Claude Code shapes for the conversation titles `SessionSpend`
+        // also deliberately never reads.
+        let title_line = json!({"type": "custom-title", "customTitle": "PLANTED_CUSTOM_TITLE", "sessionId": "sess"}).to_string();
+        let ai_title_line = json!({"type": "ai-title", "aiTitle": "PLANTED_AI_TITLE", "sessionId": "sess"}).to_string();
+        let tool_line = live_line("t2", root, LIVE_PACE_MODEL, now - 60_000, Some(("Read", "file_path", "/w/acme/notes.md")));
+        let lines = [text_line.as_str(), title_line.as_str(), ai_title_line.as_str(), tool_line.as_str()];
+        let pace = pace_from_lines(lines.into_iter(), "sess", now).expect("the tool-use line is in window");
+        let json = serde_json::to_string(&pace).unwrap();
+        for planted in [planted_prompt, "PLANTED_CUSTOM_TITLE", "PLANTED_AI_TITLE"] {
+            assert!(!json.contains(planted), "{planted} reached LivePace: {json}");
+        }
+        assert_eq!(pace.area.as_deref(), Some("acme"), "the real signal still comes through");
+    }
+
+    #[test]
+    fn live_pace_tail_drops_the_partial_first_line() {
+        let dir = std::env::temp_dir().join(format!("pane-live-pace-tail-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("big-session.jsonl");
+        // Filler lines pad the file well past the tail window; a real
+        // assistant line closes it out.
+        let filler = json!({"type": "filler", "pad": "x".repeat(500)}).to_string();
+        let mut body = String::new();
+        for _ in 0..(LIVE_TAIL_BYTES / filler.len() + 20) {
+            body.push_str(&filler);
+            body.push('\n');
+        }
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        let real_line = live_line("real", "/w", LIVE_PACE_MODEL, now - 30_000, None);
+        body.push_str(&real_line);
+        body.push('\n');
+        let total_lines = body.matches('\n').count();
+        fs::write(&path, &body).unwrap();
+        let lines = tail_lines(&path);
+        let _ = fs::remove_dir_all(&dir);
+        assert!(lines.len() < total_lines, "the tail must be shorter than the whole file");
+        for l in &lines {
+            if l.trim().is_empty() {
+                continue;
+            }
+            assert!(
+                serde_json::from_str::<Value>(l).is_ok(),
+                "a kept line must be complete JSON, never a dropped partial fragment: {l:?}"
+            );
+        }
+        assert!(lines.iter().any(|l| l == &real_line), "the real, complete final line must survive the tail");
     }
 
     #[test]
