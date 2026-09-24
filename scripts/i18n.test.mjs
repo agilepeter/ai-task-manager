@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { PLURAL_SUFFIXES } from "./plural-suffixes.mjs";
 import { inlineLocaleImports } from "./inline-locales.mjs";
+import { checkSettingsPanelI18nCoverage, findSettingsTextNodes, SETTINGS_I18N_EXEMPT } from "./settings-i18n-coverage.mjs";
 
 const localesDir = fileURLToPath(new URL("../src/locales/", import.meta.url));
 const dicts = {};
@@ -385,6 +386,35 @@ test("every data-i18n* key referenced in index.html exists in en.json", () => {
   const referenced = new Set([...html.matchAll(pattern)].map((m) => m[1]));
   const missing = [...referenced].filter((k) => !(k in dicts.en));
   assert.deepEqual(missing, [], "index.html: referenced data-i18n* keys missing from en.json");
+});
+
+// The check above only ever looks at an attribute that is already there --
+// it would not have caught the apiFeeds row shipping with no data-i18n at
+// all, because nothing referenced a key for it to check. This one inverts
+// the direction: walk every label, hint, option, button and heading inside
+// the Settings panel and fail on the first one with no data-i18n* and no
+// entry on SETTINGS_I18N_EXEMPT (scripts/settings-i18n-coverage.mjs), so a
+// future hardcoded row fails npm test instead of shipping silently in
+// English.
+test("every text-bearing element inside the Settings panel has data-i18n* or a named exemption", () => {
+  const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+  const violations = checkSettingsPanelI18nCoverage(html);
+  const detail = violations.map((v) => `[${v.tag}] ${v.locator ?? "(no id in scope)"}: "${v.text}"`);
+  assert.deepEqual(detail, [], `Settings panel text with no data-i18n* and no exemption:\n${detail.join("\n")}`);
+});
+
+test("every SETTINGS_I18N_EXEMPT entry still matches a real element in index.html", () => {
+  // The reverse check: an exemption that stops matching anything (the row
+  // was fixed, renamed, or removed) should be deleted, not left to quietly
+  // exempt nothing. Recomputes the unfiltered node list so a name that
+  // matches an already-translated element (not a violation, so invisible to
+  // the test above) still counts as "seen" here.
+  const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+  const asideMatch = html.match(/<aside id="settings"[^>]*>([\s\S]*?)\n {4}<\/aside>/);
+  assert.ok(asideMatch, 'no <aside id="settings">...</aside> block found');
+  const allLocators = new Set(findSettingsTextNodes(asideMatch[1]).map((n) => n.locator));
+  const stale = Object.keys(SETTINGS_I18N_EXEMPT).filter((id) => !allLocators.has(id));
+  assert.deepEqual(stale, [], `SETTINGS_I18N_EXEMPT entries matching no element any more: ${stale.join(", ")}`);
 });
 
 // Each view that owns a key prefix gets one row here, not a copy of this

@@ -111,6 +111,8 @@
   "settings.networkNote": "S'applique après le redémarrage de l'application. L'API d'utilisation locale s'exécute toujours sur http://127.0.0.1:6736/v1/usage",
   "settings.updateChecks": "Rechercher les mises à jour",
   "settings.updateChecksHint": "Une requête à github.com pour latest.json au lancement et toutes les 4 heures tant que c'est activé. Rien concernant vous ou cet ordinateur n'est envoyé.",
+  "settings.apiFeeds": "Proposer les dépenses et abonnements sur l'API locale",
+  "settings.apiFeedsHint": "Pour vos propres tableaux de bord. Ajoute /v1/spend, /v1/spend/areas, /v1/spend/clients et /v1/subscriptions à http://127.0.0.1:6736, accessible uniquement depuis cet ordinateur. Les zones et les clients correspondent à des noms de dossiers et de clients, donc c'est désactivé tant que vous ne l'activez pas.",
   "settings.apiKeys": "Clés API",
   "settings.apiKeysNote": "Stockées uniquement sur cet ordinateur. Laisser vide et enregistrer pour la supprimer.",
   "settings.save": "Enregistrer",

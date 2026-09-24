@@ -111,6 +111,8 @@
   "settings.networkNote": "重启应用后生效。本机用量接口始终运行在 http://127.0.0.1:6736/v1/usage",
   "settings.updateChecks": "检查更新",
   "settings.updateChecksHint": "启动时以及此后每 4 小时，向 github.com 发出一次 latest.json 请求。不会发送任何关于你或这台电脑的信息。",
+  "settings.apiFeeds": "在本机接口提供花费和订阅数据",
+  "settings.apiFeedsHint": "供你自己的控制台使用。为 http://127.0.0.1:6736 添加 /v1/spend、/v1/spend/areas、/v1/spend/clients 和 /v1/subscriptions，仅限本机访问。工作区和客户分别是文件夹名称和真实客户名称，因此该开关默认关闭，直到你手动开启。",
   "settings.apiKeys": "API 密钥",
   "settings.apiKeysNote": "只存在这台电脑上。留空再保存即可删除。",
   "settings.save": "保存",

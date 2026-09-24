@@ -111,6 +111,8 @@
   "settings.networkNote": "Gilt nach einem Neustart der App. Die lokale Nutzungs-API läuft immer unter http://127.0.0.1:6736/v1/usage",
   "settings.updateChecks": "Nach Updates suchen",
   "settings.updateChecksHint": "Eine Anfrage an github.com nach latest.json, beim Start und danach alle 4 Stunden, solange das eingeschaltet ist. Nichts über diesen Computer wird gesendet.",
+  "settings.apiFeeds": "Ausgaben und Abonnements über die lokale API bereitstellen",
+  "settings.apiFeedsHint": "Für eigene Dashboards. Fügt /v1/spend, /v1/spend/areas, /v1/spend/clients und /v1/subscriptions zu http://127.0.0.1:6736 hinzu, nur von diesem Computer aus erreichbar. Bereiche und Kunden sind Ordner- und Kundennamen, daher ist das standardmäßig aus, bis es eingeschaltet wird.",
   "settings.apiKeys": "API-Schlüssel",
   "settings.apiKeysNote": "Nur auf diesem Computer gespeichert. Zum Entfernen leer lassen und speichern.",
   "settings.save": "Speichern",
