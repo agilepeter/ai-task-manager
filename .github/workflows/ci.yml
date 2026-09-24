@@ -1,7 +1,8 @@
 # Windows is the platform the dev machine cannot build, so CI covers it.
-# macOS is built and tested locally: a macOS runner bills at 10x on a private
-# repo, and a Tauri build is about ten minutes. Add a macOS job only if Mac
-# stops being the daily driver.
+# macOS is the daily driver: it is built and tested locally on every change (a
+# Tauri build is about ten minutes), and release.yml already builds a macOS
+# bundle for tagged releases. Add a macOS job here only if Mac stops being
+# the daily driver.
 name: CI
 
 on:

@@ -351,8 +351,8 @@ npm run tauri build -- --bundles app,dmg   # or: npm run tauri build   (Windows)
 ```sh
 npm install
 npm run tauri dev      # run with hot reload
-cargo test --workspace # 617 Rust tests
-npm test               # 12 frontend tests
+cargo test --workspace # prints its own total at the end
+npm test               # prints its own total at the end
 ```
 
 `npm run tauri dev` only watches `src-tauri/`. A change under `crates/` needs

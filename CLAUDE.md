@@ -383,8 +383,9 @@ would let this app and upstream Pane overwrite each other.
 Needs Rust (rustup, official installer: Homebrew has no bottle for Intel macOS 26 and
 builds LLVM from source) and Node. `npm install`, then `npm run tauri dev`.
 Local API for checking real numbers: `curl http://127.0.0.1:6736/v1/usage`.
-Rust tests: `cargo test --workspace` from the repo root (649 on macOS).
-Frontend tests: `npm test` (`node --test scripts/*.test.mjs`, 133 today), also run by CI.
+Rust tests: `cargo test --workspace` from the repo root; read the total off the run's own
+summary line rather than off this file, which will not track it going forward.
+Frontend tests: `npm test` (`node --test scripts/*.test.mjs`), also run by CI; same.
 
 ## Tests share process-wide state: serialize, never assume order
 
@@ -396,9 +397,10 @@ suite 20 to 30 times before calling a concurrency fix done.
 
 ## CI
 
-`.github/workflows/ci.yml` has no macOS job, on purpose: macOS runners bill at 10x on
-private repos and Mac is built locally. A small `changes` job routes each push: Rust or
-manifest changes run the Windows build and tests (about 15 minutes, 2x billing); UI changes
-run a one-minute Linux type-check, build and `npm test`. Do not widen the Windows job to UI
-paths. `scripts/**` routes to the frontend job, because the frontend tests live there and
-went unrun for weeks when nothing referenced them.
+`.github/workflows/ci.yml` has no macOS job, on purpose: macOS is the daily driver, built
+and tested locally on every change, and `release.yml` already builds a macOS bundle for
+tagged releases -- a per-push job here would duplicate both. A small `changes` job routes
+each push: Rust or manifest changes run the Windows build and tests (about 15 minutes, 2x
+billing); UI changes run a one-minute Linux type-check, build and `npm test`. Do not widen
+the Windows job to UI paths. `scripts/**` routes to the frontend job, because the frontend
+tests live there and went unrun for weeks when nothing referenced them.
