@@ -657,7 +657,7 @@
   "finding.pricing-drift.title.one": "Os preços deste app divergem dos do provedor em 1 modelo",
   "finding.pricing-drift.title.other": "Os preços deste app divergem dos do provedor em {count} modelos",
   "finding.pricing-drift.detail": "O Claude Code registra o que foi cobrado. Para os mesmos tokens, a tabela de preços deste app diz ${ours} onde o provedor registrou ${vendor} em {model}: {pct}% {direction}. Afetados: {names}. Ou a tabela de preços está desatualizada ou os dois contam tokens de forma diferente, então trate cada valor em dólares aqui como aproximado até ser verificado. Tudo o mais no app mede tokens, que são fatos; somente os preços estão em questão.",
-  "check.tools.info.title.one": "1 ferramenta de IA encontrada",
+  "check.tools.info.title.one": "{count} ferramenta de IA encontrada",
   "check.tools.info.title.other": "{count} ferramentas de IA encontradas",
   "check.tools.info.detail": "Nenhuma das ferramentas de IA que este app conhece foi encontrada.",
   "check.mcp.none.title": "Nenhum servidor MCP configurado",

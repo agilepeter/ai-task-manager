@@ -112,10 +112,12 @@ export type Msg = { key: string; vars: Record<string, string | Msg>; count?: num
 /// Tasks 12-17 add a row each as they extend LOCALES, not a new rule; the
 /// full nine-language table (mirrored by `pluralForm` below and by Rust's
 /// `plural_form`, which a test keeps identical to this one) is:
-///   en, es, de, pt-BR: ["one", "other"]
-///   fr:                ["one", "other"]  (0 and 1 both resolve to "one")
-///   ru:                ["one", "few", "many"]
-///   zh, ja, ko:        ["other"]
+///   en, es, de: ["one", "other"]
+///   fr, pt-BR:  ["one", "other"]  (0 and 1 both resolve to "one" -- Brazilian
+///               Portuguese, like French, uses the singular for zero (CLDR);
+///               European Portuguese does not and is not shipped here)
+///   ru:         ["one", "few", "many"]
+///   zh, ja, ko: ["other"]
 /// MUST stay a plain object literal, one row per line, exactly as below --
 /// no `satisfies`, no `as const` rewrite. scripts/i18n.test.mjs and
 /// crates/core/src/i18n.rs both regex-parse this declaration straight out
@@ -138,9 +140,13 @@ export const PLURAL_FORMS: Record<Locale, readonly string[]> = {
 // inventing new branch logic. Plain string[], not Locale[]: these families
 // intentionally list locale codes LOCALES doesn't carry yet. ru's %10/%100
 // split doesn't fit a "which family" shape and is handled directly below;
-// en/es/de/pt-BR are the default (n === 1 -> "one"), so they need no row.
+// en/es/de are the default (n === 1 -> "one"), so they need no row.
 const PLURAL_ALWAYS_OTHER: readonly string[] = ["zh", "ja", "ko"];
-const PLURAL_ONE_IF_0_OR_1: readonly string[] = ["fr"];
+// Brazilian Portuguese, like French, uses the singular for zero (CLDR: "i = 0..1"
+// both select "one"). European Portuguese does not -- it is the plain n === 1
+// default below -- but this app ships only pt-BR, so there is no pt-PT row to
+// confuse this with.
+const PLURAL_ONE_IF_0_OR_1: readonly string[] = ["fr", "pt-BR"];
 
 /// CLDR cardinal rule for exactly those nine locales. Same rules as Rust's
 /// `plural_form`; `scripts/i18n.test.mjs`/the Rust test suite keep the two
@@ -155,7 +161,7 @@ export function pluralForm(locale: Locale, n: number): string {
   }
   if (PLURAL_ALWAYS_OTHER.includes(locale)) return "other";
   if (PLURAL_ONE_IF_0_OR_1.includes(locale)) return n === 0 || n === 1 ? "one" : "other";
-  return n === 1 ? "one" : "other"; // en, es, de, pt-BR, and the default for anything else
+  return n === 1 ? "one" : "other"; // en, es, de, and the default for anything else
 }
 
 /// `dict[key]`, empty string treated as absent -- same convention as t()'s

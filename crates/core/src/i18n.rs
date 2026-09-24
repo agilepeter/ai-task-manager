@@ -275,14 +275,18 @@ fn plural_form(locale: &str, n: i64) -> &'static str {
             }
         }
         "zh" | "ja" | "ko" => "other",
-        "fr" => {
+        // Brazilian Portuguese, like French, uses the singular for zero (CLDR).
+        // European Portuguese does not -- it would fall to the plain n == 1
+        // default below -- but this app ships only pt-BR, so there is no pt-PT
+        // arm to confuse this with.
+        "fr" | "pt-BR" => {
             if n == 0 || n == 1 {
                 "one"
             } else {
                 "other"
             }
         }
-        // en, es, de, pt-BR, and the default for anything else.
+        // en, es, de, and the default for anything else.
         _ => {
             if n == 1 {
                 "one"
@@ -578,6 +582,30 @@ mod tests {
         assert_eq!(render_with(&dicts, "ja", &msg(2)), "2 個");
         assert_eq!(render_with(&dicts, "en", &msg(1)), "1 thing");
         assert_eq!(render_with(&dicts, "en", &msg(2)), "2 things");
+    }
+
+    #[test]
+    fn pt_br_plural_form_uses_the_singular_for_zero_like_french() {
+        // Brazilian Portuguese, like French, uses the singular for zero (CLDR).
+        assert_eq!(plural_form("pt-BR", 0), "one");
+        assert_eq!(plural_form("pt-BR", 1), "one");
+        assert_eq!(plural_form("pt-BR", 2), "other");
+    }
+
+    #[test]
+    fn check_tools_info_title_renders_correctly_in_pt_br_at_zero_one_and_several() {
+        // audit.rs calls this key with count(0) when no AI tools are found --
+        // the one spot in the app that actually reaches a locale's "one" form
+        // with a count of zero, so it is the one hardcoded-singular title
+        // that had to become a real {count} sentence instead of a bare "1".
+        // Against the real pt-BR.json (via the production `render`, not a
+        // scratch dict), so a translator hand-editing the file back to a
+        // bare "1" fails this test instead of shipping "1 ferramenta de IA
+        // encontrada" when the true count is zero.
+        let msg = |n: i64| Msg::new("check.tools.info.title").count(n);
+        assert_eq!(render("pt-BR", &msg(0)), "0 ferramenta de IA encontrada");
+        assert_eq!(render("pt-BR", &msg(1)), "1 ferramenta de IA encontrada");
+        assert_eq!(render("pt-BR", &msg(3)), "3 ferramentas de IA encontradas");
     }
 
     #[test]

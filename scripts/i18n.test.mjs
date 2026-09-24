@@ -156,20 +156,12 @@ const EXPECTED_PLURAL_FORMS = {
   en: ["other", "one", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
   es: ["other", "one", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
   de: ["other", "one", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
-  "pt-BR": [
-    "other",
-    "one",
-    "other",
-    "other",
-    "other",
-    "other",
-    "other",
-    "other",
-    "other",
-    "other",
-    "other",
-    "other",
-  ],
+  // Brazilian Portuguese, like French, uses the singular for zero (CLDR),
+  // so its row is 0 -> "one" too, not the plain-default 0 -> "other" every
+  // other alphabetic locale in this table uses. The app only ever calls
+  // pluralForm() with an integer, so a half sample (0.5, 1.5) is never
+  // relevant here.
+  "pt-BR": ["one", "one", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
   fr: ["one", "one", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
   zh: ["other", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
   ja: ["other", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
@@ -187,6 +179,26 @@ test("pluralForm() picks the exact CLDR form, per locale, for every sample", asy
     });
   }
   assert.deepEqual(mismatches, [], `pluralForm() mismatches: ${mismatches.join("; ")}`);
+});
+
+test("pluralForm(pt-BR, n) uses the singular for both zero and one, like French", async () => {
+  // Brazilian Portuguese, like French, uses the singular for zero (CLDR).
+  const { pluralForm } = await loadI18nModule();
+  assert.equal(pluralForm("pt-BR", 0), "one");
+  assert.equal(pluralForm("pt-BR", 1), "one");
+  assert.equal(pluralForm("pt-BR", 2), "other");
+});
+
+test("check.tools.info.title renders correctly in pt-BR at zero, one and several", async () => {
+  // audit.rs calls this key with count(0) when no AI tools are found -- the
+  // one spot in the app that actually reaches a locale's ".one" form with a
+  // count of zero, so it is the one hardcoded-singular title that had to
+  // become a real {count} sentence instead of a bare "1".
+  const { render } = await loadI18nModule();
+  const msg = (n) => ({ key: "check.tools.info.title", vars: {}, count: n });
+  assert.equal(render("pt-BR", msg(0)), "0 ferramenta de IA encontrada");
+  assert.equal(render("pt-BR", msg(1)), "1 ferramenta de IA encontrada");
+  assert.equal(render("pt-BR", msg(3)), "3 ferramentas de IA encontradas");
 });
 
 // render(locale, msg) exists so a caller can render a Msg in a locale other
