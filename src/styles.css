@@ -399,6 +399,7 @@ body.settings-open #settings {
 
 .setting-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 7px;
   margin-bottom: 8px;
@@ -435,6 +436,21 @@ select:focus-visible {
   flex: 1;
   min-width: 0;
   background: var(--background);
+}
+
+/* "Tray icon shows" lists every provider x metric plus a long "Auto (...)"
+   default option -- the widest select content in the panel. In several
+   locales that default no longer fits beside this row's label at 380px
+   (its own selected value would clip). .setting-row's flex-wrap (above)
+   only engages once something cannot fit on one line, so a floor here is
+   what makes it actually trigger: label keeps its own line, the select
+   gets the row's full width on the next one, which is comfortably enough
+   for any translated option in the glossary. 180px (not just enough for the
+   narrowest observed case) because the panel is up to ~42px wider still
+   when the auto-hide rail isn't pushing it in -- verified against that
+   wider width too, not just the one first tried. */
+#pinned {
+  min-width: 180px;
 }
 
 .unit {
@@ -2809,6 +2825,7 @@ body.no-glass #star-box {
 
 .inv-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -2826,6 +2843,20 @@ body.no-glass #star-box {
   min-width: 0;
   max-width: 210px;
   font-size: 11.5px;
+}
+
+/* #inv-scope is one of four selects sharing .inv-filter (this one, the
+   Opportunities "Show" filter, the Trust-ratings on/off toggle, the MCP
+   "App" filter), but the only one whose options run as long as "User (all
+   projects)" translated -- a blanket floor on .inv-filter select forced the
+   short on/off Trust toggle wide enough to overflow its own row in German.
+   Scoped to just this select: enough room that the native control stops
+   silently clipping its selected value mid-word (pt-BR "Todos os escopos"
+   was cut to "Todos os esco" at 380px before this); still under the shared
+   210px cap, and .inv-toolbar's flex-wrap (above) is what actually gives it
+   the room, so English's short "All scopes" renders unaffected on one line. */
+#inv-scope {
+  min-width: 160px;
 }
 .card-panel > .inv-filter {
   padding: 8px 0 4px;
