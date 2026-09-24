@@ -3356,23 +3356,23 @@ async fn codex_redeem_credit(
     providers::codex::redeem_credit(&pid, &credit_id, redeem_request_id).await
 }
 
-/// Self-update is OFF in this fork. The endpoints and the signing pubkey in
-/// tauri.conf.json still belong to upstream Pane, so an enabled updater would
-/// replace this app with Pane. Before flipping this on: point
-/// `updater_endpoint_strings` at our own release feed AND replace the pubkey
-/// in tauri.conf.json with our own minisign key.
+/// Self-update checks are OFF in this build. Everything the updater needs is
+/// in place: the pubkey in tauri.conf.json is this project's own minisign key
+/// (6CDFF96385CA8101, verified byte-for-byte against the key file), and the
+/// endpoint below is this project's release feed. What is missing is a user
+/// saying yes: update checks are an opt-in setting, off by default, so the
+/// app keeps its promise of making no network request nobody asked for. This
+/// constant goes away when that setting lands; until then it stays `false`.
+/// (Enabling it before a release exists would be harmless: a 404 from the
+/// feed is a logged non-event in `spawn_update_checker`.)
 const UPDATES_ENABLED: bool = false;
 
-/// Updater with the app version stamped into the endpoint by us. Tauri's
-/// `{{current_version}}` template arrives percent-encoded and never gets
-/// substituted in query strings, so 0.4.17 installs literally reported
-/// "?v={{current_version}}" — the version is now formatted in Rust.
-/// GitHub stays as the automatic fallback; the pubkey comes from config.
-fn updater_endpoint_strings(version: &str) -> [String; 2] {
-    [
-        format!("https://trypane.xyz/api/update?v={version}"),
-        "https://github.com/ItsJazii/pane/releases/latest/download/latest.json".into(),
-    ]
+/// The release feed: GitHub publishes `latest.json` with every published
+/// release of this repository. GitHub's static download URL ignores query
+/// strings, so the app version is not appended; the updater already sends
+/// it in the request headers.
+fn updater_endpoint_strings() -> [String; 1] {
+    ["https://github.com/agilepeter/ai-task-manager/releases/latest/download/latest.json".into()]
 }
 
 fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
@@ -3394,7 +3394,7 @@ fn build_updater_with(
 ) -> Result<tauri_plugin_updater::Updater, String> {
     use tauri_plugin_updater::UpdaterExt;
     let version = app.package_info().version.to_string();
-    let endpoints = updater_endpoint_strings(&version)
+    let endpoints = updater_endpoint_strings()
         .into_iter()
         .map(|endpoint| endpoint.parse().map_err(|e| format!("endpoint parse: {e}")))
         .collect::<Result<Vec<_>, _>>()?;
@@ -3868,13 +3868,10 @@ mod tests {
     }
 
     #[test]
-    fn updater_prefers_trypane_then_github() {
+    fn updater_points_at_this_projects_release_feed() {
         assert_eq!(
-            updater_endpoint_strings("0.4.46"),
-            [
-                "https://trypane.xyz/api/update?v=0.4.46".to_string(),
-                "https://github.com/ItsJazii/pane/releases/latest/download/latest.json".to_string(),
-            ]
+            updater_endpoint_strings(),
+            ["https://github.com/agilepeter/ai-task-manager/releases/latest/download/latest.json".to_string()]
         );
     }
 

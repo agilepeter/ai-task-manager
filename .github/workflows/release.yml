@@ -1,10 +1,11 @@
-# Builds installers for a version tag. NOT run on ordinary pushes: a macOS
-# runner bills at 10x on a private repo, so this costs real minutes each time.
-# Manual runs are for rehearsing a release without tagging.
+# Builds installers for a version tag and attaches them, with the updater
+# artifacts (.sig files and latest.json), to a DRAFT release. NOT run on
+# ordinary pushes. A manual run (workflow_dispatch, no tag) builds without
+# creating a release; that is how to rehearse. The repository is public,
+# so these runners cost nothing.
 #
-# What it can and cannot do today is in SHIPPING.md. In short: it builds and
-# attaches unsigned installers to a DRAFT release. Signing, notarization and
-# auto-update each switch on by adding the secrets listed there; no step here
+# What it can and cannot do today is in SHIPPING.md. In short: signing and
+# notarization switch on by adding the secrets listed there; no step here
 # needs editing.
 name: Release
 
