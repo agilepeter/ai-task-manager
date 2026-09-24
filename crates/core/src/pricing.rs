@@ -319,7 +319,7 @@ fn dir() -> PathBuf {
     providers::config_dir().join("pricing")
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 

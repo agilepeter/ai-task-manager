@@ -543,12 +543,8 @@ pub fn agents_snapshot(rules: &[ClientRule]) -> Vec<RunningAgent> {
     let pids = agent_host_pids(&raw);
     let cwds = cwd_of_pids(&pids);
     let mut agents = agents_from(&raw, &cwds);
-    attach_context(&mut agents, rules, &|cwd| spend::live_session_for_cwd(cwd, now_ms()));
+    attach_context(&mut agents, rules, &|cwd| spend::live_session_for_cwd(cwd, crate::pricing::now_ms()));
     agents
-}
-
-fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
 }
 
 // ---------------------------------------------------------------------------
