@@ -72,8 +72,8 @@ upstream copy.
   matched locally.
 - **Opt-in update checks.** Off by default (`updateChecks` in Settings >
   Network). Switched on, the app asks GitHub's own release feed for
-  `latest.json` on launch and every 4 hours, sending nothing about the
-  machine; a 404 (no release yet) or being offline are both logged and
+  `latest.json` on launch, whenever the popover opens, and every 4 hours in
+  the background, sending nothing about the machine; a 404 (no release yet) or being offline are both logged and
   otherwise ignored. The footer's "Update available" button only ever
   appears from a real answer, and turning the setting off hides a pending
   one immediately.
@@ -149,8 +149,10 @@ upstream copy.
 - **Telemetry.** Upstream's PostHog module is gone rather than disabled: no
   analytics SDK, no daily statistic, no random install id.
 - **Growth machinery.** The GitHub star prompt and its five config keys.
-- **Self-update is off.** The updater is not registered; its endpoints still
-  belong to upstream and must be replaced before it is ever switched on.
+- **Always-on self-update.** Upstream checked its own feed on every launch
+  with no way to say no. The updater now points at this project's release
+  feed and stays off until you switch it on (see "Opt-in update checks"
+  above).
 - **Upstream's release, winget and installer automation**, and the legacy
   OpenUsage directory migration.
 - **Share cards**, which published card contents to the clipboard.
