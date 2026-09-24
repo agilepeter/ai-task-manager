@@ -26,18 +26,23 @@ const CHECKED_TAGS = new Set(["label", "span", "p", "option", "button", "h4"]);
 const I18N_ATTRS = ["data-i18n", "data-i18n-html"];
 
 // Elements whose static text intentionally carries no data-i18n* key, each
-// for its own stated reason -- not a grab-bag, and not all "dynamic data":
+// for its own stated reason. Both categories here are the same kind of
+// exemption: the text is not language content, so there is nothing in it
+// FOR a translator to change.
 //
 // - The eleven key-row labels are brand names (OpenRouter, Z.ai, …); a
 //   product name is never translated, same rule as a URL.
 // - spend-alert's six options are bare currency amounts ("$10" … "$500") --
 //   no natural-language word sits in any of them, so there is nothing in
 //   them TO translate, again like a URL or a version number.
-// - The rest are pre-existing gaps this same check newly exposes: hardcoded
-//   English in rows that this change does not touch. They are exempted here
-//   by id, on purpose, rather than silently caught by a looser check, so
-//   they read as a visible to-do instead of disappearing -- see the
-//   engineering-notes callout wherever this list is reported on.
+//
+// This list used to also carry eight entries for hardcoded English that
+// this check exposed but an earlier change had not yet keyed (the
+// renewal-reminder / session-nudge / weekly-digest rows and the
+// api-keys-reveal button + note). Those are now keyed in all nine locale
+// files like everything else in the panel, so they were removed from here
+// rather than left as permanent exemptions -- an exemption that stops being
+// true is a bug in this list, not a style choice.
 export const SETTINGS_I18N_EXEMPT = {
   "key-openrouter": "brand name (OpenRouter), never translated",
   "key-zai": "brand name (Z.ai / GLM), never translated",
@@ -51,19 +56,6 @@ export const SETTINGS_I18N_EXEMPT = {
   "key-aihubmix": "brand name (AihubMix), never translated",
   "key-qwen": "brand name (Qwen Code), never translated",
   "spend-alert>option": "bare currency amounts ($10 … $500), no words to translate",
-
-  // Pre-existing gaps: hardcoded English, same bug class as apiFeeds was,
-  // left as-is because fixing them belongs to whatever change actually
-  // touches these rows. Not "dynamic data" -- static English this check
-  // would otherwise fail HEAD on.
-  "renewal-reminder": "pre-existing gap: label hardcoded English, out of scope here",
-  "renewal-reminder>option": "pre-existing gap: option text hardcoded English, out of scope here",
-  "session-nudge": "pre-existing gap: label hardcoded English, out of scope here",
-  "session-nudge>option": "pre-existing gap: option text hardcoded English, out of scope here",
-  "weekly-digest": "pre-existing gap: label hardcoded English, out of scope here",
-  "weekly-digest>option": "pre-existing gap: option text hardcoded English, out of scope here",
-  "api-keys-reveal": "pre-existing gap: button text hardcoded English, out of scope here",
-  "api-keys-reveal-row>span": "pre-existing gap: note text hardcoded English, out of scope here",
 };
 
 function parseAttrs(tagInner) {

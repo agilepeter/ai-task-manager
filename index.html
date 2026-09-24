@@ -245,32 +245,32 @@
             </select>
           </div>
           <div class="setting-row">
-            <label for="renewal-reminder" title="One reminder before each renewal in the Subscriptions tab.">Renewal reminder</label>
+            <label for="renewal-reminder" title="One reminder before each renewal in the Subscriptions tab." data-i18n="settings.renewalReminder">Renewal reminder</label>
             <select id="renewal-reminder">
               <option value="0" data-i18n="settings.alertOff">Off</option>
-              <option value="1">1 day before</option>
-              <option value="3">3 days before</option>
-              <option value="7">7 days before</option>
+              <option value="1" data-i18n="settings.renewalReminder1">1 day before</option>
+              <option value="3" data-i18n="settings.renewalReminder3">3 days before</option>
+              <option value="7" data-i18n="settings.renewalReminder7">7 days before</option>
             </select>
           </div>
           <div class="setting-row">
-            <label for="session-nudge" title="One nudge a week about a session you are still using that has stayed open this long and cost real money. Old sessions re-send a long history on every turn.">Long sessions</label>
+            <label for="session-nudge" title="One nudge a week about a session you are still using that has stayed open this long and cost real money. Old sessions re-send a long history on every turn." data-i18n="settings.sessionNudge">Long sessions</label>
             <select id="session-nudge">
               <option value="0" data-i18n="settings.alertOff">Off</option>
-              <option value="3">Open 3 days</option>
-              <option value="7">Open 7 days</option>
-              <option value="14">Open 14 days</option>
-              <option value="30">Open 30 days</option>
+              <option value="3" data-i18n="settings.sessionNudge3">Open 3 days</option>
+              <option value="7" data-i18n="settings.sessionNudge7">Open 7 days</option>
+              <option value="14" data-i18n="settings.sessionNudge14">Open 14 days</option>
+              <option value="30" data-i18n="settings.sessionNudge30">Open 30 days</option>
             </select>
           </div>
           <div class="setting-row">
-            <label for="weekly-digest" title="One notification a week: what the week cost, where it went, what renews next.">Weekly digest</label>
+            <label for="weekly-digest" title="One notification a week: what the week cost, where it went, what renews next." data-i18n="settings.weeklyDigest">Weekly digest</label>
             <select id="weekly-digest">
               <option value="off" data-i18n="settings.alertOff">Off</option>
-              <option value="mon">Monday</option>
-              <option value="wed">Wednesday</option>
-              <option value="fri">Friday</option>
-              <option value="sun">Sunday</option>
+              <option value="mon" data-i18n="settings.weeklyDigestMon">Monday</option>
+              <option value="wed" data-i18n="settings.weeklyDigestWed">Wednesday</option>
+              <option value="fri" data-i18n="settings.weeklyDigestFri">Friday</option>
+              <option value="sun" data-i18n="settings.weeklyDigestSun">Sunday</option>
             </select>
           </div>
           <div class="setting-row">
@@ -320,8 +320,8 @@
             <label class="toggle"><input id="api-feeds" type="checkbox" /> <span data-i18n="settings.apiFeeds">Serve spend and subscriptions on the local API</span></label>
           </div>
           <div class="setting-row" id="api-keys-reveal-row">
-            <button class="mini-btn" id="api-keys-reveal">Show API key fields</button>
-            <span class="settings-note">Only needed for tools that cannot sign you in themselves.</span>
+            <button class="mini-btn" id="api-keys-reveal" data-i18n="settings.apiKeysReveal">Show API key fields</button>
+            <span class="settings-note" data-i18n="settings.apiKeysRevealNote">Only needed for tools that cannot sign you in themselves.</span>
           </div>
           <p class="settings-note" data-i18n="settings.apiFeedsHint">
             For your own dashboards. Adds /v1/spend, /v1/spend/areas, /v1/spend/clients and
