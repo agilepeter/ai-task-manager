@@ -1606,24 +1606,7 @@ fn claude_area(st: &mut ClaudeFileState, v: &Value, data: &FileData) {
     if found.is_none() {
         let home = dirs::home_dir();
         let home = home.as_deref().and_then(Path::to_str);
-        let blocks = v.pointer("/message/content").and_then(Value::as_array);
-        found = blocks.into_iter().flatten().find_map(|block| {
-            if block.get("type").and_then(Value::as_str) != Some("tool_use") {
-                return None;
-            }
-            let input = block.get("input")?;
-            ["file_path", "path", "notebook_path"]
-                .iter()
-                .find_map(|k| input.get(*k).and_then(Value::as_str))
-                .and_then(|p| area_under(p, &root, false))
-                .filter(|a| !is_scratch_area(a))
-                .or_else(|| {
-                    input
-                        .get("command")
-                        .and_then(Value::as_str)
-                        .and_then(|c| area_in_command(c, &root, home))
-                })
-        });
+        found = tool_use_area(v, &root, home);
     }
     let Some(found) = found else { return };
     // Names come from the log: bound their length and their number.
@@ -2015,7 +1998,9 @@ pub struct LivePace {
     /// Those same lines, priced like the scanner: the live catalog first,
     /// then the static family fallback. A line whose model prices as
     /// neither adds 0 here and turns `priced` off -- never a guessed
-    /// dollar figure.
+    /// dollar figure. Always priced from the catalog, never a carried
+    /// `costUSD`: when the log later has one for the same line, the history
+    /// scanner's own figure can end up differing from what this reported live.
     pub cost_10m: f64,
     pub priced: bool,
     /// Seconds since the newest assistant line's own timestamp.
@@ -2098,12 +2083,13 @@ fn tail_lines(path: &Path) -> Vec<String> {
 }
 
 /// The work area one assistant line's `tool_use` blocks name, with `root`
-/// as the folder they are measured under. Exactly `claude_area`'s own
-/// tool-call signal (`file_path` / `path` / `notebook_path` first, then the
-/// first path under `root` in a Bash `command`), reused rather than
-/// reimplemented: `area_under` and `area_in_command` are the same private
-/// helpers, scratch folders (`is_scratch_area`) are excluded the same way.
-fn live_tool_use_area(v: &Value, root: &str, home: Option<&str>) -> Option<String> {
+/// as the folder they are measured under: `file_path` / `path` /
+/// `notebook_path` first, then the first path under `root` in a Bash
+/// `command`. The one implementation of that signal -- `claude_area` (the
+/// history scanner) and `pace_from_lines` (the live ticker) both call this
+/// rather than each walking `tool_use` blocks itself; `area_under`,
+/// `is_scratch_area` and `area_in_command` do the actual path matching.
+fn tool_use_area(v: &Value, root: &str, home: Option<&str>) -> Option<String> {
     let blocks = v.pointer("/message/content").and_then(Value::as_array)?;
     blocks.iter().find_map(|block| {
         if block.get("type").and_then(Value::as_str) != Some("tool_use") {
@@ -2130,6 +2116,7 @@ fn pace_from_lines<'a>(lines: impl Iterator<Item = &'a str>, session_id: &str, n
     let home = home.as_deref().and_then(Path::to_str);
 
     let mut seen: HashSet<String> = HashSet::new();
+    let mut seen_mids: HashMap<String, bool> = HashMap::new();
     let mut tokens_10m = 0.0f64;
     let mut cost_10m = 0.0f64;
     let mut priced = true;
@@ -2160,7 +2147,7 @@ fn pace_from_lines<'a>(lines: impl Iterator<Item = &'a str>, session_id: &str, n
         // repeat of an earlier line (Claude Code logs one content block per
         // JSONL line).
         if let Some(cwd) = v.get("cwd").and_then(Value::as_str).filter(|c| !c.is_empty()) {
-            if let Some(found) = live_tool_use_area(&v, cwd, home) {
+            if let Some(found) = tool_use_area(&v, cwd, home) {
                 area = Some(found);
             }
         }
@@ -2170,12 +2157,23 @@ fn pace_from_lines<'a>(lines: impl Iterator<Item = &'a str>, session_id: &str, n
         }
 
         // Dedupe on (message id, request id), like `claude_line`: a
-        // resumed session can repeat the same line verbatim.
+        // resumed session can repeat the same line verbatim. Same guard as
+        // `claude_line`'s own `seen_mids`: a sidechain log replays the
+        // parent's message under a fresh request id, which slips past the
+        // check above on its own, so a message id whose first sighting (this
+        // line or an earlier one) was a sidechain counts once, not twice.
+        let sidechain = v.get("isSidechain").and_then(Value::as_bool).unwrap_or(false);
         if let Some(mid) = v.pointer("/message/id").and_then(Value::as_str) {
             let rid = v.get("requestId").and_then(Value::as_str).unwrap_or("");
             if !seen.insert(format!("{mid}:{rid}")) {
                 continue;
             }
+            if let Some(&first_was_sidechain) = seen_mids.get(mid) {
+                if sidechain || first_was_sidechain {
+                    continue;
+                }
+            }
+            seen_mids.entry(mid.to_string()).or_insert(sidechain);
         }
 
         let usage = v.pointer("/message/usage").cloned().unwrap_or(Value::Null);
@@ -5190,6 +5188,30 @@ mod tests {
         let line = live_line("m1", "/w", LIVE_PACE_MODEL, now - 60_000, None);
         let pace = pace_from_lines([line.as_str(), line.as_str()].into_iter(), "sess", now).unwrap();
         assert_eq!(pace.tokens_10m, 120, "the replay must not double the count");
+    }
+
+    #[test]
+    fn live_pace_does_not_double_count_a_sidechain_replay() {
+        let now = 1_790_000_000_000i64;
+        let ts = chrono::DateTime::from_timestamp_millis(now - 60_000).unwrap().to_rfc3339();
+        // Same shape `claude_sidechain_replay_is_deduped` exercises against
+        // `claude_line`: a sidechain log replays the parent's message under
+        // a fresh request id, which slips past the plain mid:rid dedupe
+        // above on its own.
+        let parent = json!({
+            "type": "assistant", "timestamp": ts, "cwd": "/w", "requestId": "r-1",
+            "message": {"id": "msg_1", "model": LIVE_PACE_MODEL,
+                        "usage": {"input_tokens": 100.0, "output_tokens": 20.0}}
+        })
+        .to_string();
+        let replay = json!({
+            "type": "assistant", "timestamp": ts, "cwd": "/w", "requestId": "r-2", "isSidechain": true,
+            "message": {"id": "msg_1", "model": LIVE_PACE_MODEL,
+                        "usage": {"input_tokens": 100.0, "output_tokens": 20.0}}
+        })
+        .to_string();
+        let pace = pace_from_lines([parent.as_str(), replay.as_str()].into_iter(), "sess", now).unwrap();
+        assert_eq!(pace.tokens_10m, 120, "the sidechain replay must not double the count");
     }
 
     #[test]

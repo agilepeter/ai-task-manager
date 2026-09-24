@@ -511,14 +511,27 @@ pub fn agents_from(raw: &[RawProc], cwds: &HashMap<u32, String>) -> Vec<RunningA
 /// the client rules both come from the caller, so this needs no I/O of its
 /// own to test. An agent with no known `cwd` is left exactly as `agents_from`
 /// built it -- there is no folder to ask a session or a client rule about.
+/// Agents that share a `cwd` share one `lookup` call: the result is cached
+/// by folder for this pass, so two hosts backed by the same session file
+/// never make `lookup` read it twice.
 pub fn attach_context(agents: &mut [RunningAgent], rules: &[ClientRule], lookup: &dyn Fn(&str) -> Option<LivePace>) {
+    let mut cache: HashMap<String, Option<LivePace>> = HashMap::new();
     for agent in agents.iter_mut() {
         let Some(cwd) = agent.cwd.as_deref() else { continue };
-        let pace = lookup(cwd);
+        let pace = cache.entry(cwd.to_string()).or_insert_with(|| lookup(cwd)).clone();
         agent.area = pace.as_ref().and_then(|p| p.area.clone());
         agent.client = agent.area.as_deref().and_then(|a| clients::client_of(a, rules)).map(str::to_string);
         agent.pace = pace;
     }
+}
+
+/// The pids worth asking `lsof` for a cwd: agent hosts only. `agents_from`
+/// gives its own `RunningAgent` row to a host alone -- a plain child folds
+/// into its host's totals and an MCP server's own tree belongs to `group`
+/// instead -- so a cwd fetched for any other pid would sit unread: nothing
+/// in the output ever looks it up.
+fn agent_host_pids(raw: &[RawProc]) -> Vec<u32> {
+    raw.iter().filter(|p| agent_host_of(p).is_some()).map(|p| p.pid).collect()
 }
 
 /// The live picture: every running agent host, folded and sorted like
@@ -527,7 +540,7 @@ pub fn attach_context(agents: &mut [RunningAgent], rules: &[ClientRule], lookup:
 pub fn agents_snapshot(rules: &[ClientRule]) -> Vec<RunningAgent> {
     let Some(table) = process_table() else { return Vec::new() };
     let raw = parse_ps(&table);
-    let pids: Vec<u32> = raw.iter().map(|p| p.pid).collect();
+    let pids = agent_host_pids(&raw);
     let cwds = cwd_of_pids(&pids);
     let mut agents = agents_from(&raw, &cwds);
     attach_context(&mut agents, rules, &|cwd| spend::live_session_for_cwd(cwd, now_ms()));
@@ -1116,6 +1129,25 @@ mod tests {
     }
 
     #[test]
+    fn agent_host_pids_excludes_folded_children_and_mcp_servers() {
+        // claude (500) with a plain folded child (600); an mcp server's
+        // runner and its own binary (700, 800), never folded into an agent
+        // and never a host themselves; and an npm-installed host (900)
+        // matched by package rather than binary.
+        let table = "500 1 51200 10:00 1.0 claude\n\
+                     600 500 10240 09:59 0.5 /bin/zsh -c some-helper\n\
+                     700 1 8192 09:59 0.1 npx some-mcp@latest\n\
+                     800 700 4096 09:58 0.1 some-mcp\n\
+                     900 1 61440 02:00 0.4 npx @anthropic-ai/claude-code\n";
+        let raw = parse_ps(table);
+        assert_eq!(
+            agent_host_pids(&raw),
+            vec![500, 900],
+            "lsof is asked about agent hosts only -- never a folded child or an mcp server's own tree"
+        );
+    }
+
+    #[test]
     fn attach_context_maps_the_pace_area_to_a_client() {
         let table = "500 1 51200 10:00 1.0 claude\n";
         let mut cwds = HashMap::new();
@@ -1155,5 +1187,34 @@ mod tests {
         assert_eq!(agents[0].area, None, "no live session means no area to report");
         assert_eq!(agents[0].client, None, "so no client, even though a rule would match the bare folder name");
         assert_eq!(agents[0].pace, None);
+    }
+
+    #[test]
+    fn attach_context_memoises_the_lookup_per_folder() {
+        // Two different hosts, same cwd: the folder's live session should be
+        // read once and shared, not re-read per agent.
+        let table = "500 1 51200 10:00 1.0 claude\n600 1 20480 09:00 0.5 codex\n";
+        let mut cwds = HashMap::new();
+        cwds.insert(500, "/w/acme".to_string());
+        cwds.insert(600, "/w/acme".to_string());
+        let mut agents = agents_from(&parse_ps(table), &cwds);
+        assert_eq!(agents.len(), 2, "both hosts get their own row");
+        let calls = std::cell::Cell::new(0u32);
+        let pace = LivePace {
+            session_id: "sess-1".into(),
+            tokens_10m: 1,
+            cost_10m: 0.0,
+            priced: true,
+            idle_secs: 0,
+            model: None,
+            area: Some("acme".into()),
+        };
+        attach_context(&mut agents, &[], &|cwd| {
+            calls.set(calls.get() + 1);
+            assert_eq!(cwd, "/w/acme");
+            Some(pace.clone())
+        });
+        assert_eq!(calls.get(), 1, "two agents sharing a folder must trigger one lookup");
+        assert!(agents.iter().all(|a| a.pace == Some(pace.clone())), "both still get the shared result");
     }
 }
