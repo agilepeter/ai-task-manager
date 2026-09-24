@@ -13,6 +13,8 @@
 //! `--api-key sk-…` and `--vault /Users/…` can never be mistaken for one.
 //! `never_leaks_*` plants those in the input and asserts they never appear.
 
+use std::collections::HashMap;
+
 use serde::Serialize;
 
 use crate::i18n::Msg;
@@ -60,6 +62,9 @@ pub struct RawProc {
     pub package: Option<String>,
     /// The executable's file name. Never a path, never an argument.
     pub binary: String,
+    /// Percent CPU, when the `ps` line carried a column for it that parsed as
+    /// a number. Always `None` on Windows: `Win32_Process` has no such field.
+    pub cpu_percent: Option<f32>,
 }
 
 /// `DD-HH:MM:SS`, `HH:MM:SS` or `MM:SS`, which is what `ps -o etime` prints.
@@ -140,7 +145,14 @@ pub fn package_in(args: &str) -> Option<String> {
     None
 }
 
-/// Parse `ps -axo pid=,ppid=,rss=,etime=,args=`. `rss` is in kilobytes.
+/// Parse `ps -axo pid=,ppid=,rss=,etime=,pcpu=,args=`. `rss` is in kilobytes.
+/// `pcpu` is peeked rather than required: the token right after `etime` is
+/// taken as it only when it parses as a number, so a `ps` build with no such
+/// column -- or with something unreadable in its place, such as a zombie's
+/// blank field -- leaves `cpu_percent: None` and that token starts `args`
+/// instead of being silently dropped. This is also how Windows, whose
+/// process table never carries a %cpu column at all, ends up with `None`
+/// through the same, single, unbranched parser.
 pub fn parse_ps(output: &str) -> Vec<RawProc> {
     let mut out = Vec::new();
     for line in output.lines() {
@@ -158,6 +170,13 @@ pub fn parse_ps(output: &str) -> Vec<RawProc> {
             (Ok(a), Ok(b), Ok(c)) => (a, b, c),
             _ => continue,
         };
+        // Try the next token as %cpu; only consume it from `words` if it is
+        // actually numeric, so a command line's own first word is never eaten.
+        let mut after_cpu = words.clone();
+        let cpu_percent = after_cpu.next().and_then(|t| t.parse::<f32>().ok());
+        if cpu_percent.is_some() {
+            words = after_cpu;
+        }
         let args = words.collect::<Vec<_>>().join(" ");
         if args.is_empty() {
             continue;
@@ -169,6 +188,7 @@ pub fn parse_ps(output: &str) -> Vec<RawProc> {
             elapsed_secs: parse_etime(etime),
             package: package_in(&args),
             binary: binary_of(&args),
+            cpu_percent,
         });
     }
     out
@@ -261,7 +281,7 @@ pub fn group(procs: &[RawProc], servers: &[McpServer]) -> Vec<RunningServer> {
 #[cfg(not(windows))]
 fn process_table() -> Option<String> {
     let out = std::process::Command::new("/bin/ps")
-        .args(["-axo", "pid=,ppid=,rss=,etime=,args="])
+        .args(["-axo", "pid=,ppid=,rss=,etime=,pcpu=,args="])
         .output()
         .ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
@@ -288,6 +308,179 @@ pub fn snapshot(servers: &[McpServer]) -> Vec<RunningServer> {
         Some(table) => group(&parse_ps(&table), servers),
         None => Vec::new(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Agent hosts
+// ---------------------------------------------------------------------------
+
+/// CLIs that host an AI coding session directly, rather than an MCP server
+/// one of them might spawn. Each entry is (display name, binary file names,
+/// npm package names). Presence in the process table is matched on
+/// `RawProc.binary` or `RawProc.package`, the same conservative fields
+/// `claims` uses for MCP servers -- never on argv text -- which is how an
+/// npm-installed host run through a runner (`npx @anthropic-ai/claude-code`)
+/// is still recognised even though its binary is `npx`.
+const AGENT_HOSTS: &[(&str, &[&str], &[&str])] = &[
+    ("Claude Code", &["claude"], &["@anthropic-ai/claude-code"]),
+    ("Codex", &["codex"], &["@openai/codex"]),
+    ("Gemini CLI", &["gemini"], &["@google/gemini-cli"]),
+    ("Cursor Agent", &["cursor-agent"], &[]),
+    ("Aider", &["aider"], &[]),
+    ("OpenCode", &["opencode"], &[]),
+    ("Goose", &["goose"], &[]),
+    ("GitHub Copilot CLI", &["copilot"], &["@github/copilot"]),
+];
+
+/// Which agent host, if any, this process is.
+fn agent_host_of(proc: &RawProc) -> Option<&'static str> {
+    AGENT_HOSTS.iter().find_map(|entry| {
+        let (name, bins, pkgs) = *entry;
+        let matched = bins.contains(&proc.binary.as_str())
+            || proc.package.as_deref().is_some_and(|p| pkgs.contains(&p));
+        matched.then_some(name)
+    })
+}
+
+/// One agent host process running right now, folded together with whatever
+/// plain subprocesses it spawned.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningAgent {
+    /// The `AGENT_HOSTS` display name.
+    pub tool: String,
+    /// Never shown in the UI: there is no End task for an agent, only for
+    /// the MCP servers it starts.
+    pub pid: u32,
+    /// The host process's own uptime. Folding a child never changes this.
+    pub elapsed_secs: u64,
+    /// The host plus every folded child.
+    pub rss_bytes: u64,
+    /// The host plus every folded child whose own reading was known; `None`
+    /// only when nothing in the group ever reported one (which is every
+    /// group on Windows, where `RawProc::cpu_percent` is always `None`).
+    pub cpu_percent: Option<f32>,
+    /// `None` on Windows, or when `lsof` had nothing for this pid.
+    pub cwd: Option<String>,
+}
+
+/// The pid of the nearest agent-host ancestor `proc` folds into, or `None`
+/// when it does not fold at all.
+///
+/// A process folds only when it is not itself an agent host -- a host whose
+/// own parent chain reaches another host, such as `claude` running
+/// `claude -p`, is always its own row, never folded -- and it carries no
+/// extracted package of its own: a process with a package is an MCP
+/// server's root and belongs to `group`'s output instead, so the walk up
+/// also stops the moment it meets one, and that subtree's memory is never
+/// folded into the agent and counted twice.
+fn host_ancestor_pid<'a>(by_pid: &HashMap<u32, &'a RawProc>, proc: &'a RawProc) -> Option<u32> {
+    if agent_host_of(proc).is_some() || proc.package.is_some() {
+        return None;
+    }
+    let mut current = proc;
+    // A generous bound against a cyclic ppid chain in adversarial input;
+    // real process trees on either platform are nowhere near this deep.
+    for _ in 0..256 {
+        let parent: &RawProc = *by_pid.get(&current.ppid)?;
+        if agent_host_of(parent).is_some() {
+            return Some(parent.pid);
+        }
+        if parent.package.is_some() {
+            return None;
+        }
+        current = parent;
+    }
+    None
+}
+
+/// Parse `lsof -a -p <pids> -d cwd -Fn`: one field per line. `p<pid>` opens a
+/// process; the `n<path>` that follows (with `-d cwd` there is at most one
+/// per process) is its cwd. Every other prefix (`f`, `t`, ...) is ignored,
+/// and a line that is neither is skipped rather than guessed at.
+pub fn parse_lsof_cwd(out: &str) -> HashMap<u32, String> {
+    let mut map = HashMap::new();
+    let mut current: Option<u32> = None;
+    for line in out.lines() {
+        let mut chars = line.trim_end().chars();
+        let Some(tag) = chars.next() else { continue };
+        let rest = chars.as_str();
+        match tag {
+            'p' => current = rest.parse::<u32>().ok(),
+            'n' if !rest.is_empty() => {
+                if let Some(pid) = current {
+                    map.insert(pid, rest.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    map
+}
+
+/// Working directories for these pids, one `lsof` call for the whole batch.
+/// Stdout is parsed and stderr ignored, so a pid that exited between the
+/// snapshot and this call, or one owned by another user, does not stop
+/// `lsof` reporting the rest; failing to run it at all, or asking for zero
+/// pids, gives an empty map without a spawn.
+///
+/// Only `live_agents` calls this today, the same as `snapshot_key` in
+/// `providers/onenewapi/snapshot.rs`: the live orchestration that wires it
+/// into `agents_from` for real is a later task's UI/API work, out of scope
+/// here.
+#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(not(windows))]
+fn cwd_of_pids(pids: &[u32]) -> HashMap<u32, String> {
+    if pids.is_empty() {
+        return HashMap::new();
+    }
+    let list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+    std::process::Command::new("/usr/sbin/lsof")
+        .args(["-a", "-p", &list, "-d", "cwd", "-Fn"])
+        .output()
+        .ok()
+        .map(|out| parse_lsof_cwd(&String::from_utf8_lossy(&out.stdout)))
+        .unwrap_or_default()
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(windows)]
+fn cwd_of_pids(_pids: &[u32]) -> HashMap<u32, String> {
+    // Win32_Process carries no cwd for another process, and reading one
+    // through its PEB needs native calls this app does not make yet -- a gap,
+    // not a guess.
+    HashMap::new()
+}
+
+/// Every agent host running right now, its plain subprocesses folded in and
+/// sorted by how long the host itself has been up. Pure and tested; the live
+/// process table and cwd map are read by `live_agents` below.
+pub fn agents_from(raw: &[RawProc], cwds: &HashMap<u32, String>) -> Vec<RunningAgent> {
+    let by_pid: HashMap<u32, &RawProc> = raw.iter().map(|p| (p.pid, p)).collect();
+    let mut out: Vec<RunningAgent> = raw
+        .iter()
+        .filter_map(|p| {
+            agent_host_of(p).map(|tool| RunningAgent {
+                tool: tool.to_string(),
+                pid: p.pid,
+                elapsed_secs: p.elapsed_secs,
+                rss_bytes: p.rss_bytes,
+                cpu_percent: p.cpu_percent,
+                cwd: cwds.get(&p.pid).cloned(),
+            })
+        })
+        .collect();
+    for p in raw {
+        let Some(host_pid) = host_ancestor_pid(&by_pid, p) else { continue };
+        let Some(row) = out.iter_mut().find(|a| a.pid == host_pid) else { continue };
+        row.rss_bytes += p.rss_bytes;
+        row.cpu_percent = match (row.cpu_percent, p.cpu_percent) {
+            (None, None) => None,
+            (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
+        };
+    }
+    out.sort_by(|a, b| b.elapsed_secs.cmp(&a.elapsed_secs));
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +660,33 @@ fn live_procs() {
         );
     }
     println!("total resident: {} MB", got.iter().map(|s| s.rss_bytes).sum::<u64>() / 1_048_576);
+}
+
+/// Real snapshot from this machine. Ignored: run it once by hand
+/// (`cargo test -p aitm-core live_agents -- --ignored --nocapture`) while a
+/// real agent host is open, to read back what this machine's own `ps` prints
+/// for it and confirm -- or correct -- `AGENT_HOSTS` against it.
+#[test]
+#[ignore]
+fn live_agents() {
+    let Some(table) = process_table() else {
+        println!("no process table available");
+        return;
+    };
+    let raw = parse_ps(&table);
+    let pids: Vec<u32> = raw.iter().map(|p| p.pid).collect();
+    let cwds = cwd_of_pids(&pids);
+    for a in agents_from(&raw, &cwds) {
+        println!(
+            "{:<20} pid={:<7} up {:>6}s  {:>6} MB  cpu={:?}  cwd={:?}",
+            a.tool,
+            a.pid,
+            a.elapsed_secs,
+            a.rss_bytes / 1_048_576,
+            a.cpu_percent,
+            a.cwd
+        );
+    }
 }
 
 #[cfg(test)]
@@ -692,5 +912,117 @@ mod tests {
         let table = "1 0 1000 01:00 npx small-mcp\n2 0 9000 01:00 npx big-mcp\n";
         let got = group(&parse_ps(table), &[]);
         assert_eq!(got[0].name, "big-mcp");
+    }
+
+    #[test]
+    fn cpu_column_is_optional() {
+        // The column is there and numeric.
+        let with_cpu = parse_ps("100 1 2048 05:00 12.3 npx claude\n");
+        assert_eq!(with_cpu[0].cpu_percent, Some(12.3));
+        assert_eq!(with_cpu[0].binary, "npx", "the real command is untouched");
+
+        // No %cpu column at all -- an older `ps`, or the Windows table,
+        // which never has one: the token that would have been it is simply
+        // the start of the command instead of being dropped.
+        let without_cpu = parse_ps("100 1 2048 05:00 npx claude\n");
+        assert_eq!(without_cpu[0].cpu_percent, None);
+        assert_eq!(without_cpu[0].binary, "npx");
+
+        // Present but not a number (e.g. a zombie's blank field rendered as
+        // something unreadable): same result, nothing panics or is dropped.
+        let garbled = parse_ps("100 1 2048 05:00 -- npx claude\n");
+        assert_eq!(garbled[0].cpu_percent, None);
+    }
+
+    #[test]
+    fn parse_lsof_reads_pid_then_cwd_records() {
+        let out = "p500\nfcwd\ntDIR\nn/Users/dana/project\n\
+                   pnot-a-pid\nn/should/not/be/kept\n\
+                   p600\nfcwd\nn/Users/dana/other\n";
+        let got = parse_lsof_cwd(out);
+        assert_eq!(got.len(), 2, "the malformed pid record contributes nothing");
+        assert_eq!(got.get(&500).map(String::as_str), Some("/Users/dana/project"));
+        assert_eq!(got.get(&600).map(String::as_str), Some("/Users/dana/other"));
+    }
+
+    #[test]
+    fn a_bare_claude_binary_is_an_agent_not_a_server() {
+        let table = "500 1 51200 10:00 1.2 claude\n";
+        let got = agents_from(&parse_ps(table), &HashMap::new());
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].tool, "Claude Code");
+        assert_eq!(got[0].pid, 500);
+        assert_eq!(got[0].cpu_percent, Some(1.2));
+        assert_eq!(got[0].cwd, None, "no lsof data was supplied");
+    }
+
+    #[test]
+    fn an_npm_installed_claude_is_matched_by_package() {
+        // Launched via a runner, so the binary is "npx", not "claude"; only
+        // the extracted package identifies it.
+        let table = "600 1 61440 02:00 0.4 npx @anthropic-ai/claude-code\n";
+        let got = agents_from(&parse_ps(table), &HashMap::new());
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].tool, "Claude Code");
+        assert_eq!(got[0].pid, 600);
+    }
+
+    #[test]
+    fn an_agent_hosts_child_is_folded_into_the_parent_row() {
+        // claude (500) spawns a plain subshell (600) with no package of its
+        // own: it folds in rather than becoming a second row.
+        let table = "500 1 51200 10:00 1.0 claude\n\
+                     600 500 10240 09:59 0.5 /bin/zsh -c some-helper\n";
+        let got = agents_from(&parse_ps(table), &HashMap::new());
+        assert_eq!(got.len(), 1, "the child is folded, not a row of its own");
+        assert_eq!(got[0].tool, "Claude Code");
+        assert_eq!(got[0].pid, 500, "the pid shown is the host's own");
+        assert_eq!(got[0].elapsed_secs, 600, "the host's own uptime, untouched by folding");
+        assert_eq!(got[0].rss_bytes, (51200 + 10240) * 1024, "host plus the folded child");
+        assert_eq!(got[0].cpu_percent, Some(1.5), "summed while both readings are known");
+    }
+
+    #[test]
+    fn an_mcp_servers_child_is_never_folded_into_the_agent() {
+        // claude (500) spawns an MCP server via npx (600), which spawns the
+        // server's own binary (700). Neither belongs to the agent's memory:
+        // that subtree is `group`'s to count, never counted twice here.
+        let table = "500 1 51200 10:00 1.0 claude\n\
+                     600 500 8192 09:59 0.1 npx some-mcp@latest\n\
+                     700 600 4096 09:58 0.1 some-mcp\n";
+        let got = agents_from(&parse_ps(table), &HashMap::new());
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].rss_bytes, 51200 * 1024, "the MCP server subtree is excluded");
+    }
+
+    #[test]
+    fn a_host_spawned_by_another_host_is_its_own_row() {
+        // claude (500) runs `claude -p` (600): still its own row, never
+        // folded into its parent, however deep an agent's own chain goes.
+        let table = "500 1 51200 10:00 1.0 claude\n\
+                     600 500 20480 05:00 0.3 claude -p do-a-thing\n";
+        let got = agents_from(&parse_ps(table), &HashMap::new());
+        assert_eq!(got.len(), 2);
+        assert!(got.iter().any(|a| a.pid == 500 && a.rss_bytes == 51200 * 1024));
+        assert!(got.iter().any(|a| a.pid == 600 && a.rss_bytes == 20480 * 1024));
+    }
+
+    #[test]
+    fn agents_are_sorted_by_elapsed_descending() {
+        let table = "100 1 1024 01:00 0.1 aider\n200 1 1024 10:00 0.1 goose\n300 1 1024 05:00 0.1 codex\n";
+        let got = agents_from(&parse_ps(table), &HashMap::new());
+        assert_eq!(got.iter().map(|a| a.tool.as_str()).collect::<Vec<_>>(), ["Goose", "Codex", "Aider"]);
+    }
+
+    #[test]
+    fn command_lines_never_reach_running_agent() {
+        let table = "700 1 20480 03:00 2.0 claude --api-key sk-ant-PLANTED-SECRET \
+                     --vault /Users/dana/Secret Plans\n";
+        let got = agents_from(&parse_ps(table), &HashMap::new());
+        let json = serde_json::to_string(&got).expect("serializes");
+        for secret in ["sk-ant-PLANTED-SECRET", "/Users/dana/Secret", "Plans", "--vault"] {
+            assert!(!json.contains(secret), "{secret} reached the output: {json}");
+        }
+        assert_eq!(got[0].tool, "Claude Code");
     }
 }
