@@ -9,12 +9,13 @@
 // will be guarded by this same file.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { PLURAL_SUFFIXES } from "./plural-suffixes.mjs";
+import { inlineLocaleImports } from "./inline-locales.mjs";
 
 const localesDir = fileURLToPath(new URL("../src/locales/", import.meta.url));
 const dicts = {};
@@ -101,33 +102,16 @@ test("parsePluralForms reads a quoted, hyphenated locale row", () => {
   assert.deepEqual(parsePluralForms(source), { en: ["one", "other"], "pt-BR": ["one", "other"] });
 });
 
-// Mirrors loadI18nModule in scripts/sub2api-display.test.mjs and
-// scripts/demo-synthetic.test.mjs (same problem: ts.transpileModule doesn't
-// bundle the JSON dictionary imports, so they are inlined as plain object
-// literals before transpiling) rather than inventing a second loader for the
-// same shape of problem.
+// ts.transpileModule doesn't bundle src/i18n.ts's JSON dictionary imports
+// (it transpiles one file at a time), so inlineLocaleImports()
+// (scripts/inline-locales.mjs) turns them into plain object literals first;
+// the same helper backs the loaders in scripts/sub2api-display.test.mjs and
+// scripts/demo-synthetic.test.mjs, which have their own module-assembly
+// steps on top of it.
 async function loadI18nModule() {
   const source = await readFile(new URL("../src/i18n.ts", import.meta.url), "utf8");
   const localesDir = new URL("../src/locales/", import.meta.url);
-  const files = (await readdir(localesDir)).filter((f) => f.endsWith(".json"));
-  let inlined = source;
-  for (const file of files) {
-    // The import identifier is read off the real `import <name> from
-    // "./locales/<file>";` line, never assumed from the file's own basename:
-    // a locale code with a hyphen (pt-BR) is not a legal JS identifier, so
-    // i18n.ts spells its import with the hyphen stripped (ptBR). Deriving
-    // "ptBR" from "pt-BR.json" by string surgery here would just be a second
-    // place that has to agree with i18n.ts's naming choice; reading the
-    // source's own import line can never disagree with it. A file with no
-    // matching import line (none today) is left un-inlined rather than
-    // guessed at.
-    const escapedFile = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const importLine = source.match(new RegExp(`import\\s+([A-Za-z_$][\\w$]*)\\s+from\\s+"\\./locales/${escapedFile}";`));
-    if (!importLine) continue;
-    const name = importLine[1];
-    const json = await readFile(new URL(file, localesDir), "utf8");
-    inlined = inlined.replace(`import ${name} from "./locales/${file}";`, `const ${name} = ${json};`);
-  }
+  const inlined = await inlineLocaleImports(source, localesDir);
   const code = ts.transpileModule(inlined, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }

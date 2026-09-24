@@ -8,35 +8,23 @@
 // {var}, or came back as its own raw key (t()'s fallback for a key that
 // resolves nowhere).
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import ts from "typescript";
+import { inlineLocaleImports } from "./inline-locales.mjs";
 
-// Mirrors scripts/i18n.test.mjs's loader for src/i18n.ts (dictionaries
-// inlined as object literals, since ts.transpileModule handles one file at
-// a time and Node's loader cannot resolve a relative specifier off a data:
-// URL), extended to also load src/demo/synthetic.ts: its own
-// `import { render, type Msg } from "../i18n"` is stripped and the file is
-// appended after i18n's already-inlined source, so the combined text
-// transpiles as a single self-contained module with both files' exports.
+// inlineLocaleImports() (scripts/inline-locales.mjs) inlines src/i18n.ts's
+// dictionary imports as object literals, since ts.transpileModule handles
+// one file at a time and Node's loader cannot resolve a relative specifier
+// off a data: URL; this extends that to also load src/demo/synthetic.ts:
+// its own `import { render, type Msg } from "../i18n"` is stripped and the
+// file is appended after i18n's already-inlined source, so the combined
+// text transpiles as a single self-contained module with both files'
+// exports.
 async function loadSyntheticModule() {
   const i18nSource = await readFile(new URL("../src/i18n.ts", import.meta.url), "utf8");
   const localesDir = new URL("../src/locales/", import.meta.url);
-  const files = (await readdir(localesDir)).filter((f) => f.endsWith(".json"));
-  let inlined = i18nSource;
-  for (const file of files) {
-    // Read the import identifier off the real `import <name> from
-    // "./locales/<file>";` line rather than assuming it from the file's own
-    // basename: a hyphenated locale code (pt-BR) is not a legal JS
-    // identifier, so i18n.ts imports it under a name with the hyphen
-    // stripped (ptBR), which this has to match rather than guess.
-    const escapedFile = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const importLine = i18nSource.match(new RegExp(`import\\s+([A-Za-z_$][\\w$]*)\\s+from\\s+"\\./locales/${escapedFile}";`));
-    if (!importLine) continue;
-    const name = importLine[1];
-    const json = await readFile(new URL(file, localesDir), "utf8");
-    inlined = inlined.replace(`import ${name} from "./locales/${file}";`, `const ${name} = ${json};`);
-  }
+  const inlined = await inlineLocaleImports(i18nSource, localesDir);
   const syntheticSource = await readFile(new URL("../src/demo/synthetic.ts", import.meta.url), "utf8");
   const withoutI18nImport = syntheticSource.replace(/^import\s*\{[^}]*\}\s*from\s*["']\.\.\/i18n["'];\s*$/m, "");
   const code = ts.transpileModule(`${inlined}\n${withoutI18nImport}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
