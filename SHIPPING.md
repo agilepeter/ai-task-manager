@@ -11,8 +11,9 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
   and `latest.json`) now that `createUpdaterArtifacts` is on. The repository is public, so the
   runners cost nothing; a `workflow_dispatch` run builds without creating a release and is the
   way to rehearse.
-  The first rehearsal (2026-09-24) built the Windows installer; the macOS leg needed the
-  ad-hoc fallback the workflow now has for when no Apple secrets are set.
+  Both legs have been rehearsed green (2026-09-24). macOS produces `AI Task Manager_0.1.0_universal.dmg`
+  plus the updater pair `AI Task Manager.app.tar.gz` / `.sig`; Windows produces the `.msi` and the
+  NSIS `-setup.exe`, each with its `.sig`. `latest.json` is written when a tag creates the draft release.
 - Update signing key: ours (`minisign 6CDFF96385CA8101`). The public half is in
   `src-tauri/tauri.conf.json` (verified byte-for-byte against the key file). The private half is
   password-encrypted and lives in `~/.tauri/` on the build Mac and in the repository secrets
