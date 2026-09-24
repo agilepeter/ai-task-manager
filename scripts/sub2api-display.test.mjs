@@ -124,7 +124,11 @@ test("strip tooltip includes valid restriction status separately from percentage
 // way it was before they moved out. The locale list is read from the
 // directory (like scripts/i18n.test.mjs already does), not hardcoded: a new
 // locales/xx.json — and the `import xx from "./locales/xx.json"` it comes
-// with — must not need this loader edited too.
+// with — must not need this loader edited, PROVIDED its import identifier is
+// read off the real import line below rather than assumed from the file's
+// own basename: a hyphenated locale code (pt-BR) is not a legal JS
+// identifier, so i18n.ts imports it under a name with the hyphen stripped
+// (ptBR), and only reading the source's own line can ever agree with that.
 // `extraSource`, when given, is appended after the inlined dictionaries and
 // before transpiling — a way for a test to plant a synthetic dict entry
 // without depending on anything the real locale files happen to contain.
@@ -134,7 +138,10 @@ async function loadI18nModule(extraSource = "") {
   const files = (await readdir(localesDir)).filter((f) => f.endsWith(".json"));
   let inlined = source;
   for (const file of files) {
-    const name = file.slice(0, -".json".length);
+    const escapedFile = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const importLine = source.match(new RegExp(`import\\s+([A-Za-z_$][\\w$]*)\\s+from\\s+"\\./locales/${escapedFile}";`));
+    if (!importLine) continue;
+    const name = importLine[1];
     const json = await readFile(new URL(file, localesDir), "utf8");
     inlined = inlined.replace(`import ${name} from "./locales/${file}";`, `const ${name} = ${json};`);
   }

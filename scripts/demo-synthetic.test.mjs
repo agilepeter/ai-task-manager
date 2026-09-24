@@ -25,7 +25,15 @@ async function loadSyntheticModule() {
   const files = (await readdir(localesDir)).filter((f) => f.endsWith(".json"));
   let inlined = i18nSource;
   for (const file of files) {
-    const name = file.slice(0, -".json".length);
+    // Read the import identifier off the real `import <name> from
+    // "./locales/<file>";` line rather than assuming it from the file's own
+    // basename: a hyphenated locale code (pt-BR) is not a legal JS
+    // identifier, so i18n.ts imports it under a name with the hyphen
+    // stripped (ptBR), which this has to match rather than guess.
+    const escapedFile = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const importLine = i18nSource.match(new RegExp(`import\\s+([A-Za-z_$][\\w$]*)\\s+from\\s+"\\./locales/${escapedFile}";`));
+    if (!importLine) continue;
+    const name = importLine[1];
     const json = await readFile(new URL(file, localesDir), "utf8");
     inlined = inlined.replace(`import ${name} from "./locales/${file}";`, `const ${name} = ${json};`);
   }

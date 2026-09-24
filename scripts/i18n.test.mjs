@@ -68,7 +68,7 @@ function parsePluralForms(source) {
   const block = source.match(/\bPLURAL_FORMS\b[^=]*=\s*\{([\s\S]*?)\n\};/);
   assert.ok(block, "could not find a `PLURAL_FORMS = { ... };` block in src/i18n.ts");
   const table = {};
-  for (const row of block[1].matchAll(/([\w-]+):\s*\[([^\]]*)\]/g)) {
+  for (const row of block[1].matchAll(/"?([\w-]+)"?:\s*\[([^\]]*)\]/g)) {
     table[row[1]] = [...row[2].matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
   }
   return table;
@@ -88,23 +88,59 @@ test("parsePluralForms is not fooled by an earlier PLURAL_FORMS_BY_ROOT decoy", 
   assert.deepEqual(parsePluralForms(decoySource), { en: ["one", "other"], ru: ["one", "few", "many"] });
 });
 
-// Mirrors loadI18nModule in scripts/sub2api-display.test.mjs (same problem:
-// ts.transpileModule doesn't bundle the JSON dictionary imports, so they
-// are inlined as plain object literals before transpiling) rather than
-// inventing a second loader for the same shape of problem.
+test("parsePluralForms reads a quoted, hyphenated locale row", () => {
+  // A locale code with a hyphen needs object-literal quoting ("pt-BR": [...]),
+  // unlike every bare-identifier row before it -- the row regex has to accept
+  // both an optional leading/trailing quote and the hyphen itself.
+  const source = [
+    "export const PLURAL_FORMS: Record<Locale, readonly string[]> = {",
+    '  en: ["one", "other"],',
+    '  "pt-BR": ["one", "other"],',
+    "};",
+  ].join("\n");
+  assert.deepEqual(parsePluralForms(source), { en: ["one", "other"], "pt-BR": ["one", "other"] });
+});
+
+// Mirrors loadI18nModule in scripts/sub2api-display.test.mjs and
+// scripts/demo-synthetic.test.mjs (same problem: ts.transpileModule doesn't
+// bundle the JSON dictionary imports, so they are inlined as plain object
+// literals before transpiling) rather than inventing a second loader for the
+// same shape of problem.
 async function loadI18nModule() {
   const source = await readFile(new URL("../src/i18n.ts", import.meta.url), "utf8");
   const localesDir = new URL("../src/locales/", import.meta.url);
   const files = (await readdir(localesDir)).filter((f) => f.endsWith(".json"));
   let inlined = source;
   for (const file of files) {
-    const name = file.slice(0, -".json".length);
+    // The import identifier is read off the real `import <name> from
+    // "./locales/<file>";` line, never assumed from the file's own basename:
+    // a locale code with a hyphen (pt-BR) is not a legal JS identifier, so
+    // i18n.ts spells its import with the hyphen stripped (ptBR). Deriving
+    // "ptBR" from "pt-BR.json" by string surgery here would just be a second
+    // place that has to agree with i18n.ts's naming choice; reading the
+    // source's own import line can never disagree with it. A file with no
+    // matching import line (none today) is left un-inlined rather than
+    // guessed at.
+    const escapedFile = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const importLine = source.match(new RegExp(`import\\s+([A-Za-z_$][\\w$]*)\\s+from\\s+"\\./locales/${escapedFile}";`));
+    if (!importLine) continue;
+    const name = importLine[1];
     const json = await readFile(new URL(file, localesDir), "utf8");
     inlined = inlined.replace(`import ${name} from "./locales/${file}";`, `const ${name} = ${json};`);
   }
   const code = ts.transpileModule(inlined, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
+
+test("loadI18nModule inlines a hyphenated locale file under its non-hyphenated import name", async () => {
+  const { LOCALES, t, setActiveLocale } = await loadI18nModule();
+  assert.ok(LOCALES.includes("pt-BR"), "pt-BR must be registered in LOCALES for this test to mean anything");
+  setActiveLocale("pt-BR");
+  // tray.quit resolves through the inlined pt-BR dictionary, not the English
+  // fallback -- proves the "pt-BR.json" -> "ptBR" import line was actually
+  // matched and replaced, not silently skipped.
+  assert.equal(t("tray.quit"), "Sair do AI Task Manager");
+});
 
 // Same 12 values as crates/core/src/i18n.rs's plural_forms_match_the_typescript_table
 // samples array, kept textually identical by hand so the two lists read as
@@ -166,6 +202,58 @@ test("render(locale, msg) renders in the given locale without disturbing whichev
   const want = dicts.ru["unit.times.few"].replace("{count}", "2");
   assert.equal(render("ru", msg), want, "render() did not pick ru's own plural form for the given locale");
   assert.equal(getLocale(), "en", "render() must not leave the active locale changed");
+});
+
+// navigator.language is read-only on the prototype but configurable, so a
+// plain own-property override on the shared `navigator` object shadows it
+// for the length of one test; deleting the override restores the prototype
+// getter afterwards no matter how the test finishes.
+async function withNavigatorLanguage(language, fn) {
+  const original = Object.getOwnPropertyDescriptor(navigator, "language");
+  Object.defineProperty(navigator, "language", { value: language, configurable: true });
+  try {
+    await fn();
+  } finally {
+    if (original) Object.defineProperty(navigator, "language", original);
+    else delete navigator.language;
+  }
+}
+
+test("detectSystemLocale maps every casing of pt-BR, plus bare pt and pt-PT, to pt-BR", async () => {
+  const { detectSystemLocale, LOCALES } = await loadI18nModule();
+  assert.ok(LOCALES.includes("pt-BR"), "pt-BR must be registered in LOCALES for this test to mean anything");
+  const cases = {
+    "pt-BR": "pt-BR",
+    "pt-br": "pt-BR",
+    "PT-BR": "pt-BR",
+    "pt-PT": "pt-BR", // the only Portuguese this app ships; any region falls to it
+    pt: "pt-BR", // a bare language tag with no region at all
+  };
+  for (const [language, want] of Object.entries(cases)) {
+    await withNavigatorLanguage(language, async () => {
+      assert.equal(detectSystemLocale(), want, `navigator.language "${language}" should resolve to "${want}"`);
+    });
+  }
+});
+
+test("detectSystemLocale still matches single-subtag locales case-insensitively (no pt-BR regression)", async () => {
+  const { detectSystemLocale } = await loadI18nModule();
+  await withNavigatorLanguage("DE-AT", async () => {
+    assert.equal(detectSystemLocale(), "de");
+  });
+  await withNavigatorLanguage("ja", async () => {
+    assert.equal(detectSystemLocale(), "ja");
+  });
+});
+
+test("asLocale and normalizeLocalePref round-trip \"pt-BR\" from config unchanged", async () => {
+  const { asLocale, normalizeLocalePref } = await loadI18nModule();
+  assert.equal(asLocale("pt-BR"), "pt-BR");
+  assert.equal(normalizeLocalePref("pt-BR"), "pt-BR");
+  // Neither helper is supposed to lowercase its input today, but if one ever
+  // did, it must still hand back the canonical LOCALES casing, not the
+  // lowercased string -- a lowercased "pt-br" is not a valid Locale.
+  assert.notEqual(asLocale("pt-BR"), "pt-br");
 });
 
 const i18nSource = readFileSync(fileURLToPath(new URL("../src/i18n.ts", import.meta.url)), "utf8");

@@ -17,18 +17,22 @@ use std::sync::OnceLock;
 /// list directly). `locale_source` has no catch-all: forgetting that arm
 /// fails `every_locale_file_parses` loudly instead of silently degrading
 /// that locale to English.
-pub const LOCALES: &[&str] = &["en", "zh", "ru", "es", "fr", "de", "ja"];
+pub const LOCALES: &[&str] = &["en", "zh", "ru", "es", "fr", "de", "ja", "pt-BR"];
 
 /// Primary Windows UI language id (`langid & 0x03FF`) → locale. Only the
 /// locales that need a non-English match have a row; anything else falls
 /// back to "en". Used on Windows and, via `locale_for_langid`, in tests.
+/// Primary id 0x16 covers both pt-BR (full langid 0x0416) and pt-PT
+/// (0x0816) — this app ships only pt-BR, so both land there.
 #[cfg(any(windows, test))]
 const WINDOWS_LANGIDS: &[(u16, &str)] =
-    &[(0x04, "zh"), (0x19, "ru"), (0x0a, "es"), (0x0c, "fr"), (0x07, "de"), (0x11, "ja")];
+    &[(0x04, "zh"), (0x19, "ru"), (0x0a, "es"), (0x0c, "fr"), (0x07, "de"), (0x11, "ja"), (0x16, "pt-BR")];
 
 /// `LC_ALL` / `LC_MESSAGES` / `LANG` tag prefix (lowercased) → locale.
+/// POSIX tags use an underscore, never a hyphen ("pt_BR.UTF-8", "pt_PT.UTF-8"):
+/// the prefix "pt" covers both, the only Portuguese this app ships.
 const ENV_PREFIXES: &[(&str, &str)] =
-    &[("zh", "zh"), ("ru", "ru"), ("es", "es"), ("fr", "fr"), ("de", "de"), ("ja", "ja")];
+    &[("zh", "zh"), ("ru", "ru"), ("es", "es"), ("fr", "fr"), ("de", "de"), ("ja", "ja"), ("pt", "pt-BR")];
 
 /// `include_str!` needs a literal path per file, so this is the one place
 /// that lists them; `LOCALES` above stays the only list of which locales
@@ -46,6 +50,7 @@ fn locale_source(locale: &str) -> Option<&'static str> {
         "fr" => include_str!("../../../src/locales/fr.json"),
         "de" => include_str!("../../../src/locales/de.json"),
         "ja" => include_str!("../../../src/locales/ja.json"),
+        "pt-BR" => include_str!("../../../src/locales/pt-BR.json"),
         _ => return None,
     })
 }
@@ -409,6 +414,7 @@ mod tests {
         assert_eq!(resolved_locale(&json!({"locale": "fr"})), "fr");
         assert_eq!(resolved_locale(&json!({"locale": "de"})), "de");
         assert_eq!(resolved_locale(&json!({"locale": "ja"})), "ja");
+        assert_eq!(resolved_locale(&json!({"locale": "pt-BR"})), "pt-BR");
     }
 
     #[test]
@@ -502,6 +508,8 @@ mod tests {
         assert_eq!(locale_for_langid(0x0411), "ja"); // ja-JP
         assert_eq!(locale_for_langid(0x0409), "en"); // en-US
         assert_eq!(locale_for_langid(0xFFFF), "en"); // unknown
+        assert_eq!(locale_for_langid(0x0416), "pt-BR"); // pt-BR
+        assert_eq!(locale_for_langid(0x0816), "pt-BR"); // pt-PT: same primary id, only Portuguese shipped
     }
 
     #[test]
@@ -514,6 +522,8 @@ mod tests {
         assert_eq!(locale_for_env_tag("ja_JP.UTF-8"), "ja");
         assert_eq!(locale_for_env_tag("en_US.UTF-8"), "en");
         assert_eq!(locale_for_env_tag(""), "en");
+        assert_eq!(locale_for_env_tag("pt_BR.UTF-8"), "pt-BR");
+        assert_eq!(locale_for_env_tag("pt_PT.UTF-8"), "pt-BR");
     }
 
     #[test]
@@ -765,7 +775,7 @@ mod tests {
             .get(1)
             .unwrap()
             .as_str();
-        let row_re = regex::Regex::new(r#"([\w-]+):\s*\[([^\]]*)\]"#).expect("valid regex");
+        let row_re = regex::Regex::new(r#""?([\w-]+)"?:\s*\[([^\]]*)\]"#).expect("valid regex");
         let form_re = regex::Regex::new(r#""([a-z]+)""#).expect("valid regex");
         let table: HashMap<String, Vec<String>> = row_re
             .captures_iter(block)
@@ -795,6 +805,24 @@ mod tests {
         expected.insert("en".to_string(), vec!["one".to_string(), "other".to_string()]);
         expected.insert("ru".to_string(), vec!["one".to_string(), "few".to_string(), "many".to_string()]);
         assert_eq!(parse_plural_forms_table(decoy_source), expected);
+    }
+
+    #[test]
+    fn parse_plural_forms_table_reads_a_quoted_hyphenated_row() {
+        // A locale code with a hyphen needs object-literal quoting
+        // ("pt-BR": [...]) unlike every bare-identifier row before it --
+        // the row regex has to accept an optional surrounding quote on top
+        // of the hyphen it already allowed.
+        let source = concat!(
+            "export const PLURAL_FORMS: Record<Locale, readonly string[]> = {\n",
+            "  en: [\"one\", \"other\"],\n",
+            "  \"pt-BR\": [\"one\", \"other\"],\n",
+            "};\n",
+        );
+        let mut expected: HashMap<String, Vec<String>> = HashMap::new();
+        expected.insert("en".to_string(), vec!["one".to_string(), "other".to_string()]);
+        expected.insert("pt-BR".to_string(), vec!["one".to_string(), "other".to_string()]);
+        assert_eq!(parse_plural_forms_table(source), expected);
     }
 
     #[test]

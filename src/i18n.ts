@@ -13,14 +13,15 @@ import es from "./locales/es.json";
 import fr from "./locales/fr.json";
 import de from "./locales/de.json";
 import ja from "./locales/ja.json";
+import ptBR from "./locales/pt-BR.json";
 
-export const LOCALES = ["en", "zh", "ru", "es", "fr", "de", "ja"] as const; // later tasks append
+export const LOCALES = ["en", "zh", "ru", "es", "fr", "de", "ja", "pt-BR"] as const; // later tasks append
 export type Locale = (typeof LOCALES)[number];
 export type LocalePref = "auto" | Locale;
 
 type Dict = Record<string, string>;
 
-const DICTS: Record<Locale, Dict> = { en, zh, ru, es, fr, de, ja };
+const DICTS: Record<Locale, Dict> = { en, zh, ru, es, fr, de, ja, "pt-BR": ptBR };
 
 const LOCALE_TAGS: Record<Locale, string> = {
   en: "en-US",
@@ -30,15 +31,33 @@ const LOCALE_TAGS: Record<Locale, string> = {
   fr: "fr-FR",
   de: "de-DE",
   ja: "ja-JP",
+  "pt-BR": "pt-BR",
 };
 
 let active: Locale = "en";
 /// Filled from Rust `system_ui_locale` so Auto matches tray/toasts.
 let systemLocale: Locale | null = null;
 
+/// Matches on the LOWERCASED primary language subtag of each LOCALES entry
+/// (the part before its first "-"), never the entry's own mixed casing: a
+/// hyphenated code ("pt-BR") is a full language+region tag, not a language
+/// prefix, so a browser reporting a bare "pt" or a region variant like
+/// "pt-PT" this app doesn't ship (navigator.language, lowercased either
+/// way) still needs to land on it -- there is only ever one shipped variant
+/// per primary subtag. `lang === primary` catches the bare-subtag case;
+/// `lang.startsWith(primary + "-")` catches any region variant, matching on
+/// a full subtag boundary so "es" can never accidentally match a
+/// hypothetical "esx" tag. The match is returned from LOCALES itself, never
+/// reconstructed, so the result always carries that entry's canonical
+/// casing ("pt-BR", not "pt-br").
 export function detectSystemLocale(): Locale {
   const lang = (navigator.language || "").toLowerCase();
-  return LOCALES.find((l) => lang.startsWith(l)) ?? "en";
+  return (
+    LOCALES.find((l) => {
+      const primary = l.toLowerCase().split("-")[0];
+      return lang === primary || lang.startsWith(`${primary}-`);
+    }) ?? "en"
+  );
 }
 
 export function setSystemLocale(locale: Locale): void {
@@ -110,6 +129,7 @@ export const PLURAL_FORMS: Record<Locale, readonly string[]> = {
   fr: ["one", "other"],
   de: ["one", "other"],
   ja: ["other"],
+  "pt-BR": ["one", "other"],
 };
 
 // Rule-family membership for pluralForm, written for all nine locales this
