@@ -42,13 +42,40 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The bundler treats an EMPTY Apple variable as a set one and tries to
+      # import a certificate that is not there, so the Apple variables must be
+      # absent, not blank, until the owner adds the secrets. GitHub cannot omit
+      # an env key conditionally; a flag step picks one of two otherwise
+      # identical build steps instead.
+      - id: signing
+        shell: bash
+        env:
+          HAVE_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
+        run: echo "apple=$HAVE_APPLE" >> "$GITHUB_OUTPUT"
+
+      # Without Apple secrets: an ad-hoc signature ("-"), the same thing a
+      # local `tauri build` produces. Gatekeeper still needs right-click > Open.
       - uses: tauri-apps/tauri-action@v0
+        if: steps.signing.outputs.apple != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Update signing (present): signs updater artifacts once they are enabled.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS code signing + notarization (absent until the owner adds them).
+          APPLE_SIGNING_IDENTITY: "-"
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: "AI Task Manager ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      # With Apple secrets: Developer ID signing and notarization, no edits needed.
+      - uses: tauri-apps/tauri-action@v0
+        if: steps.signing.outputs.apple == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
