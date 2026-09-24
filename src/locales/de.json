@@ -109,7 +109,7 @@
   "settings.renewalReminder3": "3 Tage vorher",
   "settings.renewalReminder7": "7 Tage vorher",
   "settings.sessionNudge": "Lange Sitzungen",
-  "settings.sessionNudgeTip": "Einmal pro Woche ein Hinweis zu einer noch genutzten Sitzung, die schon so lange offen ist und echtes Geld kostet. Alte Sitzungen senden bei jedem Zug erneut einen langen Verlauf.",
+  "settings.sessionNudgeTip": "Einmal pro Woche ein Hinweis zu einer noch genutzten Sitzung, die schon so lange offen ist und echtes Geld kostet. Alte Sitzungen senden bei jeder Runde erneut einen langen Verlauf.",
   "settings.sessionNudge3": "3 Tage geöffnet",
   "settings.sessionNudge7": "7 Tage geöffnet",
   "settings.sessionNudge14": "14 Tage geöffnet",
