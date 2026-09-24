@@ -143,7 +143,7 @@ const PLURAL_FORM_SAMPLES = [0, 1, 2, 3, 5, 11, 12, 21, 22, 25, 100, 101];
 // against the CLDR rule -- not by re-running pluralForm()'s own logic back
 // at itself, which would only prove the function agrees with itself. Covers
 // every locale code pluralForm()'s rule families recognise today, not just
-// the three keyed in PLURAL_FORMS/LOCALES.
+// the nine keyed in PLURAL_FORMS/LOCALES.
 const EXPECTED_PLURAL_FORMS = {
   en: ["other", "one", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],
   es: ["other", "one", "other", "other", "other", "other", "other", "other", "other", "other", "other", "other"],

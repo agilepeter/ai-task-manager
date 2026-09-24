@@ -278,7 +278,9 @@ impl Msg {
 
 /// CLDR cardinal rule for exactly the nine locales this app ships.
 /// Same rules as `pluralForm` in `src/i18n.ts`; `plural_forms_match_the_typescript_table`
-/// keeps the two identical instead of letting them drift apart by hand.
+/// keeps the two identical instead of letting them drift apart by hand. A locale that
+/// needs a new rule family gets its own match arm below, addable here before it is
+/// wired into `LOCALES` elsewhere (mirrors `PLURAL_ALWAYS_OTHER`'s note in `src/i18n.ts`).
 fn plural_form(locale: &str, n: i64) -> &'static str {
     match locale {
         "ru" => {

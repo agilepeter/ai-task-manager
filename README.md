@@ -27,9 +27,9 @@ macOS and Windows. No account, no cloud, no telemetry.
 
 ### Read this first
 
-This is a private repository and **no release has been cut yet**, so there is
-nothing to download. There is also no code signing certificate on either
-platform, so builds are unsigned and both operating systems will say so.
+**No release has been cut yet**, so there is nothing to download. There is
+also no code signing certificate on either platform, so builds are unsigned
+and both operating systems will say so.
 
 That leaves one path that works today: **build it yourself.** It takes about
 ten minutes the first time and needs no certificate, no account and no admin
@@ -277,9 +277,18 @@ which copies are live.
 
 Also: work areas and client attribution with CSV export, budget alerts per
 client, an optional weekly digest, a read-only [local HTTP
-API](docs/local-http-api.md) on `127.0.0.1:6736`, English / Chinese / Russian,
-light and dark themes, a global shortcut, and a wide mode that grows the same
-window rather than opening a second one.
+API](docs/local-http-api.md) on `127.0.0.1:6736`, light and dark themes, a
+global shortcut, and a wide mode that grows the same window rather than
+opening a second one.
+
+**Languages.** English, 中文, Русский, Español, Français, Deutsch, 日本語,
+Português (Brasil) and 한국어 -- nine in total. The app follows the system
+language by default, and any of the nine can be chosen instead in Settings.
+Translation reaches every view, including findings, audit checks,
+notifications and the tray tooltip; model ids, area and client names, and
+`$`/`%` figures stay as data rather than prose. CSV headers translate too,
+but the numbers inside an export keep the app's own plain formatting rather
+than switching to the active locale's.
 
 ## Privacy and security
 

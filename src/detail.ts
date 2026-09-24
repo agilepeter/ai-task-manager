@@ -214,7 +214,8 @@ function money(n: number): string {
 }
 
 /// B/M/K stay English: format tokens, not prose, like money()'s $ and fileSize()'s
-/// MB/KB — "tokens" itself is this codebase's house loanword in every zh/ru string.
+/// MB/KB — "tokens" itself is this codebase's house loanword in every non-English
+/// locale's strings.
 function tokens(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;

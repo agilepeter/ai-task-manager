@@ -1,9 +1,9 @@
-// Frontend locale: Settings stores auto / en / zh / ru. Metric row labels from
-// Rust stay English in config.layout (stars, pins, Customize keys); only
-// the painted text switches.
+// Frontend locale: Settings stores "auto" or one of the nine codes in LOCALES
+// below. Metric row labels from Rust stay English in config.layout (stars,
+// pins, Customize keys); only the painted text switches.
 //
 // Dictionaries live in src/locales/*.json — one flat file per language, the
-// single source both this popover and the Rust tray (task 3) read from.
+// single source both this popover and the Rust tray read from.
 // This file is logic only.
 
 import en from "./locales/en.json";
@@ -246,8 +246,8 @@ export function tm(msg: Msg): string {
 // Per-locale plural forms via t(key, vars, count) below; every existing call
 // site keeps working unchanged since plural()'s own signature does not
 // move -- an English-active n=1 still resolves the same `.one` form as
-// before, and zh/ru now resolve their own real forms instead of English's
-// one/other split.
+// before, and every non-English locale now resolves its own real forms
+// instead of English's one/other split.
 export function plural(key: string, n: number, vars: Record<string, string | number> = {}): string {
   return t(key, { n, ...vars }, n);
 }

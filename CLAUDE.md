@@ -105,6 +105,51 @@ One product, tabs at the top: **Usage** (default; limits, pace, spend), **Subscr
 (`src/inventory.ts` + `src-tauri/src/inventory.rs`: MCP servers, agents, skills, guardrails,
 and computed Opportunities). Usage stays the default view.
 
+- **Nine languages, one JSON per locale** (`src/locales/{en,zh,ru,es,fr,de,ja,pt-BR,ko}.json`):
+  flat files, the single source for both halves -- TypeScript imports them directly, Rust reads
+  the identical bytes via `include_str!`. `src/i18n.ts` is logic only; no dictionary lives inline
+  in code. Adding a language is a fixed checklist, not a judgment call: a new
+  `src/locales/<xx>.json`, one line each in TS's `LOCALES` / `DICTS` / `LOCALE_TAGS` /
+  `PLURAL_FORMS` and Rust's `LOCALES` / `locale_source` / `WINDOWS_LANGIDS` (only if it needs a
+  non-English Windows mapping) / `ENV_PREFIXES`, a Windows LANGID, an env prefix, the `<option>`
+  in `index.html` (then `npm run build:demo`), and the endonym key added to every other locale
+  file. The comments on `LOCALES` in `src/i18n.ts` and `crates/core/src/i18n.rs` spell out the
+  exact list; both sides are deliberately loud on a gap (`locale_source` has no catch-all) rather
+  than silently falling back to English.
+- **Metric labels key under `label.*`** (`label.<English label>`, e.g. `label.Session`), read by
+  `displayMetricLabel` with an English fall-through like every `t()` call; `label.weeklySuffix` is
+  the "{model} weekly" pattern. The Rust tray paints the same keys through `i18n::metric_label`,
+  so a card's label and its tray line can never drift onto two different words for the same thing.
+- **Rust-authored prose stays data until something paints it.** A sentence a Rust module produces
+  -- a finding, an audit check, a sign-in hint, a pin-preview note, an alert -- leaves Rust as a
+  `Msg` (a key plus vars plus an optional count), never a rendered string: the popover paints it in
+  the active language, notifications render at fire time, the seat report keeps the English.
+  Concretely: the popover calls `tm()` on a painted `titleMsg`/`detailMsg`; a notification renders
+  in Rust the moment it fires, in whatever locale is configured then rather than whenever the app
+  started; the seat report, the collector and the local HTTP API keep the English render
+  (`title`/`detail` beside `title_msg`/`detail_msg`), so an enterprise consumer never sees a
+  translated string. `render` (mirrored on both sides) is the one candidate search everything
+  funnels through: `key.<plural form>` -> `key.other` -> `key`, each tried in the target locale
+  then English before falling to the literal key.
+- **Plural forms are a hand-rolled CLDR subset for exactly the nine shipped locales**, mirrored by
+  a test that keeps Rust's `plural_form` and TypeScript's `pluralForm` identical: en/es/de and
+  fr/pt-BR use one/other (fr and pt-BR both resolve 0 *and* 1 to "one" -- CLDR, not a typo; only
+  European Portuguese, not shipped here, would need a third row); ru uses one/few/many; zh/ja/ko
+  use other only. **A base key is either a bare value or a set of plural forms, never both** -- a
+  sentence with a zero-count variant gets its own key (`…detail` vs `…detailOthers.<forms>`),
+  chosen in Rust by which branch applies, so the forms-completeness test can't wave a stray bare
+  key through.
+- **Two checks to run after touching `index.html`.** `npm test` includes the Settings panel
+  coverage test (`scripts/settings-i18n-coverage.mjs`), which walks the Settings DOM itself rather
+  than the key list, so a label or hint that ships with no `data-i18n*` fails loudly instead of
+  silently staying English; its exemption list is short and commented, and holds only brand names
+  and bare currency options. Separately -- not part of `npm test`, since it needs a browser --
+  `scripts/layout-check.mjs` is the 380 px layout harness: Playwright WebKit against the demo
+  build, all nine locales across all seven views, asserting no container overflows its own window.
+  A native `<select>`'s own clipped, selected-option text does not move its
+  `scrollWidth`/`clientWidth` in WebKit, so the harness cannot see that one class of clipping; the
+  human screenshot pass stays the real check for a `<select>`. Run it per the comment at the top of
+  the file (`npm run build:demo`, serve `dist-demo`, then `node scripts/layout-check.mjs`).
 - **Detail view** (`src/detail.ts`): click a card's name. Same window, slide-in page like
   Settings; Esc backs out before it hides the window. Limits over time come from
   `crates/core/src/history.rs` (local SQLite, readings only, 90 days); spend groups by
@@ -338,8 +383,8 @@ would let this app and upstream Pane overwrite each other.
 Needs Rust (rustup, official installer: Homebrew has no bottle for Intel macOS 26 and
 builds LLVM from source) and Node. `npm install`, then `npm run tauri dev`.
 Local API for checking real numbers: `curl http://127.0.0.1:6736/v1/usage`.
-Rust tests: `cargo test --workspace` from the repo root (617 on macOS).
-Frontend tests: `npm test` (`node --test scripts/*.test.mjs`), also run by CI.
+Rust tests: `cargo test --workspace` from the repo root (649 on macOS).
+Frontend tests: `npm test` (`node --test scripts/*.test.mjs`, 133 today), also run by CI.
 
 ## Tests share process-wide state: serialize, never assume order
 
