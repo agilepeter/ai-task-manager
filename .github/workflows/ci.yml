@@ -102,3 +102,10 @@ jobs:
         run: cargo check -p aitm-core
       - name: Tests
         run: cargo test --workspace --locked
+      # Lint findings do not depend on the OS, so running this on both
+      # platforms would just double the wait for the same answer. This job
+      # already pays for the toolchain and the frontend build a Tauri
+      # compile needs, so the check rides along here instead of adding a
+      # second job just to lint.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
