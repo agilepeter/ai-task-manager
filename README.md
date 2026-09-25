@@ -37,7 +37,7 @@ account and no admin rights. Everything below is written for both paths.
 
 | | State today |
 |---|---|
-| Downloadable release | [v0.1.0](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.0), 2026-09-24, built by `release.yml` from the tagged commit. |
+| Downloadable release | [v0.1.1](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.1), 2026-09-25 (v0.1.0 on 2026-09-24), built by `release.yml` from the tagged commit. |
 | macOS signing | None yet. Right-click the app and choose Open once, or `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`. |
 | Windows signing | None yet. SmartScreen warns: More info, then Run anyway. |
 | Auto-update | **Opt-in, off by default.** See [Updates](#updates). |
@@ -155,7 +155,8 @@ settings, saved keys and history as well, delete `%APPDATA%\AITaskManager`.
 A `v*` tag makes `.github/workflows/release.yml` build the macOS universal
 bundle and the Windows installers and attach them, with the updater `.sig`
 files and `latest.json`, to a **draft** release, which is checked and then
-published by hand. The first one is [v0.1.0](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.0). The
+published by hand. The first one was [v0.1.0](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.0); the latest is
+[v0.1.1](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.1). The
 artifacts are not signed, so building from source above remains the better
 path if you want to read what you are running.
 

@@ -29,6 +29,9 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
   both legs from the tag, the draft's assets were checked (installers, `.sig` files,
   `latest.json` naming both platforms with non-empty signatures), then the draft was published
   and the feed URL verified to resolve. Every later release follows "Cutting a release" below.
+- **v0.1.1 was published on 2026-09-25** from tag `v0.1.1` (commit ae37786, run 36189989082) by the
+  same recipe, and the site's embedded demo and llms rows were refreshed with
+  `scripts/sync-demo-to-site.sh` in the same pass (the step 0.1.0 had skipped).
 
 ## Not yet on, and why
 
