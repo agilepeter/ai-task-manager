@@ -4,7 +4,13 @@
 //!
 //! A `policy.json` in the data folder (see `aitm_core::policy`) turns the
 //! dashboard into a conformance view. It is read on each request, so editing
-//! the file is all it takes; seats never receive it.
+//! the file is all it takes; seats never receive it. Three of its rules are
+//! guardrail checks rather than package rules: `requireAgentTools` flags a
+//! seat that has a custom agent with no tools allowlist
+//! ("agent-unrestricted"), `requireShellDeny` flags a seat with no deny rule
+//! covering the shell ("shell-deny"), and `requireHooks` (a list of hook
+//! event names) flags any of them missing from a seat's report
+//! ("hook-missing").
 //!
 //! Self-hosted and small on purpose: one process, one folder of JSON files
 //! (the latest report per seat), no database, no accounts. Every request
@@ -158,6 +164,12 @@ pub fn dashboard_with(reports: &[SeatReport], policy: Option<&Policy>, now: i64)
             let spend: f64 = r.spend.iter().map(|s| s.last30).sum();
             let loose = r.servers.iter().filter(|s| s.pinned == Some(false)).count();
             let rules = r.allow_rules + r.ask_rules + r.deny_rules;
+            let guardrails = format!(
+                "{} unrestricted · shell deny: {} · hooks: {}",
+                r.agents_unrestricted,
+                if r.deny_covers_shell { "yes" } else { "no" },
+                if r.hook_events.is_empty() { "none".to_string() } else { r.hook_events.join(", ") },
+            );
             let verdict = match policy.map(|p| policy::check(r, p)) {
                 None => "–".to_string(),
                 Some(v) if v.is_empty() => "Conforms".to_string(),
@@ -169,7 +181,7 @@ pub fn dashboard_with(reports: &[SeatReport], policy: Option<&Policy>, now: i64)
                 ),
             };
             format!(
-                "<tr{}><td>{}</td><td>{}</td><td>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                "<tr{}><td>{}</td><td>{}</td><td>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td class=n>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
                 if stale { " class=stale" } else { "" },
                 esc(&r.label),
                 esc(&seen),
@@ -180,6 +192,7 @@ pub fn dashboard_with(reports: &[SeatReport], policy: Option<&Policy>, now: i64)
                 dollars(spend),
                 top_tier_share(r).map_or("–".to_string(), |s| format!("{:.0}%", s * 100.0)),
                 esc(&tightest(r).unwrap_or_else(|| "–".to_string())),
+                esc(&guardrails),
                 verdict,
                 esc(&r.findings.iter().map(|f| f.title.as_str()).collect::<Vec<_>>().join(" · ")),
             )
@@ -223,7 +236,7 @@ footer{{margin-top:28px;color:var(--mut);font-size:12px}}
 <div class="tile"><b>{}</b><span>{}</span></div>
 <div class="tile"><b>{}</b><span>API-equivalent usage, 30 days</span></div>
 </div>
-<h2>Seats</h2><div class="scroll"><table><thead><tr><th>Seat</th><th>Last report</th><th>AI tools</th><th class=n>MCP servers</th><th class=n>Unpinned</th><th class=n>Permission rules</th><th class=n>30-day usage</th><th class=n>Largest models</th><th>Tightest limit</th><th>Policy</th><th>Findings</th></tr></thead><tbody>{}</tbody></table></div>
+<h2>Seats</h2><div class="scroll"><table><thead><tr><th>Seat</th><th>Last report</th><th>AI tools</th><th class=n>MCP servers</th><th class=n>Unpinned</th><th class=n>Permission rules</th><th class=n>30-day usage</th><th class=n>Largest models</th><th>Tightest limit</th><th>Guardrails</th><th>Policy</th><th>Findings</th></tr></thead><tbody>{}</tbody></table></div>
 <h2>MCP servers across the team</h2><div class="scroll"><table><thead><tr><th>Server</th><th class=n>Seats</th><th></th></tr></thead><tbody>{}</tbody></table></div>
 <footer>Usage is priced at API rates from each seat's local logs: on flat-rate plans it is equivalent value, not a charge. A greyed seat has not reported in over a week.</footer>
 </main></body></html>"#,
@@ -236,7 +249,7 @@ footer{{margin-top:28px;color:var(--mut);font-size:12px}}
         out_of_policy.map_or("–".to_string(), |n| n.to_string()),
         if policy.is_some() { "seats out of policy" } else { "no policy.json set" },
         dollars(spend),
-        if seat_rows.is_empty() { "<tr><td colspan=11>No seat has reported yet.</td></tr>".to_string() } else { seat_rows },
+        if seat_rows.is_empty() { "<tr><td colspan=12>No seat has reported yet.</td></tr>".to_string() } else { seat_rows },
         if fleet_rows.is_empty() { "<tr><td colspan=3>None yet.</td></tr>".to_string() } else { fleet_rows },
     )
 }
@@ -362,6 +375,7 @@ mod tests {
                 seat::SeatLimit { provider: "claude".into(), plan: Some("max".into()), metric: "Session".into(), used_percent: 12.0, resets_at: None },
                 seat::SeatLimit { provider: "claude".into(), plan: Some("max".into()), metric: "Weekly".into(), used_percent: 91.0, resets_at: None },
             ],
+            agents_unrestricted: 0, agents_model_unset: 0, deny_covers_shell: false, hook_events: vec![],
         }
     }
 
@@ -419,6 +433,29 @@ mod tests {
         assert!(data.contains("\"rule\":\"unpinned\"") && data.contains("\"rule\":\"deny-rules\""));
         assert_eq!(handle("GET", "/v1/conformance", None, "", &dir, TOKEN, 1).status, 401);
 
+        // A policy that turns on all three guardrail rules names each gap;
+        // re-reporting the same seat replaces its stored file.
+        let mut guardless = report("seat-aaaaaaaa", "Dana", 1);
+        guardless.agents_unrestricted = 2;
+        guardless.deny_covers_shell = false;
+        guardless.hook_events = vec!["PreToolUse".into()];
+        let body = serde_json::to_string(&guardless).unwrap();
+        assert_eq!(handle("POST", "/v1/report", auth, &body, &dir, TOKEN, 1).status, 200);
+        std::fs::write(
+            dir.join("policy.json"),
+            r#"{"requireAgentTools": true, "requireShellDeny": true, "requireHooks": ["PreToolUse", "Stop"]}"#,
+        )
+        .unwrap();
+        let html = handle("GET", "/", auth, "", &dir, TOKEN, 1).body;
+        assert!(html.contains("3 issues"));
+        assert!(html.contains("2 agents can use every tool"));
+        assert!(html.contains("no deny rule limits the shell"));
+        assert!(html.contains("no Stop hook"));
+        let data = handle("GET", "/v1/conformance", auth, "", &dir, TOKEN, 1).body;
+        assert!(data.contains("\"rule\":\"agent-unrestricted\""));
+        assert!(data.contains("\"rule\":\"shell-deny\""));
+        assert!(data.contains("\"rule\":\"hook-missing\""));
+
         std::fs::write(dir.join("policy.json"), "{broken").unwrap();
         assert!(handle("GET", "/", auth, "", &dir, TOKEN, 1).body.contains("no policy.json set"), "a broken file is no policy, not an error page");
         let _ = std::fs::remove_dir_all(&dir);
@@ -454,5 +491,22 @@ mod tests {
         assert!(html.contains("class=stale"), "nine days without a report greys the seat");
         assert!(html.contains("80%"), "200 of 250 on the largest models");
         assert!(dashboard(&[], now).contains("No seat has reported yet."));
+    }
+
+    #[test]
+    fn the_guardrails_column_is_escaped() {
+        let mut r = report("seat-aaaaaaaa", "Dana", 1);
+        r.agents_unrestricted = 2;
+        r.deny_covers_shell = false;
+        r.hook_events = vec!["<img onerror=alert(1)>".into(), "Stop".into()];
+        let html = dashboard(&[r], 1);
+        assert!(!html.contains("<img onerror=alert(1)>"), "an event name is not trusted markup");
+        assert!(html.contains("&lt;img onerror=alert(1)&gt;"));
+        assert!(html.contains("2 unrestricted"));
+        assert!(html.contains("shell deny: no"));
+
+        // The safe default reads plainly too.
+        let quiet = report("seat-bbbbbbbb", "Eli", 1);
+        assert!(dashboard(&[quiet], 1).contains("0 unrestricted · shell deny: no · hooks: none"));
     }
 }

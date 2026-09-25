@@ -23,13 +23,22 @@ pub struct Policy {
     pub min_deny_rules: usize,
     /// If not empty, only these AI tools may be present.
     pub allowed_tools: Vec<String>,
+    /// Every custom agent must carry a `tools` allowlist: none may be left
+    /// to use every tool the parent has, shell included.
+    pub require_agent_tools: bool,
+    /// At least one deny rule must target the shell.
+    pub require_shell_deny: bool,
+    /// Every one of these hook events must be present on a seat. Event
+    /// names, case-sensitive ("PreToolUse", "Stop", …).
+    pub require_hooks: Vec<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Violation {
     /// Stable id: "blocked-package", "unlisted-package", "unpinned",
-    /// "remote-server", "deny-rules", "unlisted-tool".
+    /// "remote-server", "deny-rules", "unlisted-tool", "agent-unrestricted",
+    /// "shell-deny", "hook-missing".
     pub rule: String,
     pub detail: String,
 }
@@ -66,6 +75,17 @@ pub fn check(report: &SeatReport, policy: &Policy) -> Vec<Violation> {
             push("unlisted-tool", format!("{tool} is not an approved AI tool"));
         }
     }
+    if policy.require_agent_tools && report.agents_unrestricted > 0 {
+        push("agent-unrestricted", format!("{} agents can use every tool", report.agents_unrestricted));
+    }
+    if policy.require_shell_deny && !report.deny_covers_shell {
+        push("shell-deny", "no deny rule limits the shell".to_string());
+    }
+    for event in &policy.require_hooks {
+        if !report.hook_events.contains(event) {
+            push("hook-missing", format!("no {event} hook"));
+        }
+    }
     out
 }
 
@@ -94,6 +114,7 @@ mod tests {
             agent_version: "0".into(), os: "macos".into(), tools: tools.iter().map(|t| t.to_string()).collect(),
             servers, agents: 0, skills: 0, hooks: 0, permission_mode: None, allow_rules: 0, ask_rules: 0,
             deny_rules: deny, spend: vec![], findings: vec![], limits: vec![],
+            agents_unrestricted: 0, agents_model_unset: 0, deny_covers_shell: false, hook_events: vec![],
         }
     }
 
@@ -141,5 +162,31 @@ mod tests {
         let policy = Policy { blocked_packages: vec!["evil-mcp".into()], ..Policy::default() };
         let r = report(vec![server("x", Some("evil-mcp@9.9.9"), Some(true), "stdio")], 0, &[]);
         assert_eq!(rules(&check(&r, &policy)), ["blocked-package"]);
+    }
+
+    #[test]
+    fn agent_rules_name_the_missing_hook_and_count_unrestricted_agents() {
+        let mut r = report(vec![], 0, &[]);
+        r.agents_unrestricted = 2;
+        r.deny_covers_shell = false;
+        r.hook_events = vec!["PreToolUse".into()];
+        let policy = Policy {
+            require_agent_tools: true,
+            require_shell_deny: true,
+            require_hooks: vec!["PreToolUse".into(), "Stop".into()],
+            ..Policy::default()
+        };
+        let found = check(&r, &policy);
+        assert_eq!(rules(&found), ["agent-unrestricted", "shell-deny", "hook-missing"]);
+        assert_eq!(found[0].detail, "2 agents can use every tool");
+        assert_eq!(found[1].detail, "no deny rule limits the shell");
+        assert_eq!(found[2].detail, "no Stop hook", "case-sensitive and names the missing event");
+
+        // A satisfied guardrail names nothing, and matching is case-sensitive.
+        r.agents_unrestricted = 0;
+        r.deny_covers_shell = true;
+        r.hook_events = vec!["pretoolonly".into()];
+        let policy = Policy { require_hooks: vec!["PreToolUse".into()], ..policy };
+        assert_eq!(rules(&check(&r, &policy)), ["hook-missing"], "a differently-cased or unrelated event never satisfies the rule");
     }
 }

