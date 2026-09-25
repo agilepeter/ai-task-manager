@@ -40,6 +40,10 @@ const WINDOWS_LANGIDS: &[(u16, &str)] = &[
 /// `LC_ALL` / `LC_MESSAGES` / `LANG` tag prefix (lowercased) → locale.
 /// POSIX tags use an underscore, never a hyphen ("pt_BR.UTF-8", "pt_PT.UTF-8"):
 /// the prefix "pt" covers both, the only Portuguese this app ships.
+/// Gated like its only reader below: Windows reads the UI language id
+/// instead, and a table nothing consults there is dead weight the compiler
+/// is right to complain about.
+#[cfg(any(not(windows), test))]
 const ENV_PREFIXES: &[(&str, &str)] = &[
     ("zh", "zh"),
     ("ru", "ru"),
@@ -170,12 +174,14 @@ fn locale_for_langid(langid: u16) -> &'static str {
         .unwrap_or("en")
 }
 
-#[cfg(any(windows, test))]
+// Only the tests ask these two questions; `system_ui_locale` calls
+// `locale_for_langid` directly.
+#[cfg(test)]
 fn langid_is_zh(langid: u16) -> bool {
     locale_for_langid(langid) == "zh"
 }
 
-#[cfg(any(windows, test))]
+#[cfg(test)]
 fn langid_is_ru(langid: u16) -> bool {
     locale_for_langid(langid) == "ru"
 }
