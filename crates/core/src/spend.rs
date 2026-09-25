@@ -2266,12 +2266,16 @@ fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u
 pub fn agent_spend(days: u32) -> Vec<AgentSpend> {
     load_persisted_cache();
     let today = Local::now().date_naive().num_days_from_ce();
-    let Ok(map) = cache().lock() else { return Vec::new() };
-    let entries: Vec<PersistEntry> = map
-        .values()
-        .filter(|e| e.data.parent_session.is_some())
-        .map(|e| to_agent_entry(&e.data, e.claude.clone(), e.mtime))
-        .collect();
+    // Scoped so the cache lock is held only long enough to copy entries out
+    // of it -- `agent_spend_from` below does its own (unrelated) work and
+    // has no business running while the cache stays locked.
+    let entries: Vec<PersistEntry> = {
+        let Ok(map) = cache().lock() else { return Vec::new() };
+        map.values()
+            .filter(|e| e.data.parent_session.is_some())
+            .map(|e| to_agent_entry(&e.data, e.claude.clone(), e.mtime))
+            .collect()
+    };
     agent_spend_from(entries.iter(), days, today)
 }
 
@@ -2350,6 +2354,11 @@ const SUBAGENT_WALK_DEPTH: u32 = 6;
 /// *enclosing* `<uuid>`: it is never itself picked as the live session.
 fn live_session_in(dir: &Path, now_ms: i64) -> Option<LivePace> {
     let mut newest: Option<(String, SystemTime)> = None;
+    // Each session directory's own subagent files, path plus the mtime this
+    // same discovery pass already paid to stat. Keeping the list here means
+    // the eventual winner's `subagents/` subtree only has to be walked and
+    // stat'd once, below, instead of a second time when the tail is built.
+    let mut sub_files_by_uuid: HashMap<String, Vec<(PathBuf, SystemTime)>> = HashMap::new();
     for entry in fs::read_dir(dir).ok()?.flatten() {
         let path = entry.path();
         let Ok(ftype) = entry.file_type() else { continue };
@@ -2368,9 +2377,10 @@ fn live_session_in(dir: &Path, now_ms: i64) -> Option<LivePace> {
             }
         } else if ftype.is_dir() {
             let Some(uuid) = path.file_name().and_then(|s| s.to_str()) else { continue };
-            let mut sub_files = Vec::new();
-            jsonl_files_under(&path.join("subagents"), SUBAGENT_WALK_DEPTH, &mut sub_files);
-            for sub_path in sub_files {
+            let mut sub_paths = Vec::new();
+            jsonl_files_under(&path.join("subagents"), SUBAGENT_WALK_DEPTH, &mut sub_paths);
+            let mut sub_files = Vec::with_capacity(sub_paths.len());
+            for sub_path in sub_paths {
                 let Ok(mtime) = fs::metadata(&sub_path).and_then(|m| m.modified()) else { continue };
                 let better = match &newest {
                     Some((_, best)) => mtime > *best,
@@ -2379,7 +2389,9 @@ fn live_session_in(dir: &Path, now_ms: i64) -> Option<LivePace> {
                 if better {
                     newest = Some((uuid.to_string(), mtime));
                 }
+                sub_files.push((sub_path, mtime));
             }
+            sub_files_by_uuid.insert(uuid.to_string(), sub_files);
         }
     }
     let (uuid, mtime) = newest?;
@@ -2394,10 +2406,10 @@ fn live_session_in(dir: &Path, now_ms: i64) -> Option<LivePace> {
     // is attributed to the parent uuid; `pace_from_lines` sums and dedupes
     // across the combined lines exactly as it would within one file.
     let mut lines = tail_lines(&dir.join(format!("{uuid}.jsonl")));
-    let mut sub_files = Vec::new();
-    jsonl_files_under(&dir.join(&uuid).join("subagents"), SUBAGENT_WALK_DEPTH, &mut sub_files);
-    for sub_path in sub_files {
-        let Ok(sub_mtime) = fs::metadata(&sub_path).and_then(|m| m.modified()) else { continue };
+    // Reuse the winner's own subagent list from the discovery loop above --
+    // already walked and stat'd once there. A winner with no `subagents/`
+    // directory of its own just never got an entry, same as an empty walk.
+    for (sub_path, sub_mtime) in sub_files_by_uuid.remove(&uuid).unwrap_or_default() {
         let sub_ms = sub_mtime
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -2415,6 +2427,11 @@ fn live_session_in(dir: &Path, now_ms: i64) -> Option<LivePace> {
 /// into an unbounded walk; only directories are recursed into, and
 /// anything unreadable (including a missing `dir` itself) is silently
 /// skipped, same as every other best-effort read in this module.
+///
+/// Symlinks are followed, same as `recent_jsonl_files`: a `subagents/`
+/// entry relocated behind a link must still be found. A link cycle can't
+/// turn this into an infinite walk either way -- termination comes from
+/// the depth bound alone, not from refusing to follow links.
 fn jsonl_files_under(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
     if depth == 0 {
         return;
@@ -2429,6 +2446,15 @@ fn jsonl_files_under(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
             }
         } else if ftype.is_dir() {
             jsonl_files_under(&path, depth - 1, out);
+        } else if ftype.is_symlink() {
+            // `file_type()` reports the link itself, never its target, so
+            // the target's own type has to come from a follow-through stat.
+            let Ok(meta) = fs::metadata(&path) else { continue };
+            if meta.is_dir() {
+                jsonl_files_under(&path, depth - 1, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                out.push(path);
+            }
         }
     }
 }
@@ -5725,7 +5751,7 @@ mod tests {
             days: vec![(day, "claude-haiku-4-5".to_string(), cost, 15.0)],
             ..Default::default()
         };
-        let entries = vec![
+        let entries = [
             entry("uuid-a", Some("Explore"), today, 0.5),
             entry("uuid-b", Some("Explore"), today, 0.3),
             entry("uuid-c", None, today, 0.2),
@@ -5996,6 +6022,25 @@ mod tests {
             .as_deref(),
             Some(uuid)
         );
+    }
+
+    #[test]
+    fn a_session_literally_named_subagents_still_resolves() {
+        // The match is on the path component's name, not on some denylist
+        // of names a session directory isn't allowed to have -- a session
+        // directory that happens to be named `subagents` is a perfectly
+        // valid parent, found the same way any other name would be.
+        let root = Path::new("/h/.claude/projects/-w-acme");
+        assert_eq!(
+            sidechain_parent(&root.join("subagents").join("subagents").join("x.jsonl")).as_deref(),
+            Some("subagents"),
+            "a session directory literally named `subagents` still resolves as the parent"
+        );
+        // A top-level session file whose *stem* is "subagents" has no
+        // `subagents` path component at all, so it is not a sidechain of
+        // anything -- the file name coincidentally matching the magic
+        // directory name means nothing here.
+        assert_eq!(sidechain_parent(&root.join("subagents.jsonl")), None);
     }
 
     #[test]
