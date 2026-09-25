@@ -100,8 +100,6 @@ jobs:
       - run: npm run build
       - name: Core builds without Tauri
         run: cargo check -p aitm-core
-      - name: Tests
-        run: cargo test --workspace --locked
       # Lint findings do not depend on the OS, so running this on both
       # platforms would just double the wait for the same answer. This job
       # already pays for the toolchain and the frontend build a Tauri
@@ -109,3 +107,5 @@ jobs:
       # second job just to lint.
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Tests
+        run: cargo test --workspace --locked
