@@ -188,5 +188,14 @@ mod tests {
         r.hook_events = vec!["pretoolonly".into()];
         let policy = Policy { require_hooks: vec!["PreToolUse".into()], ..policy };
         assert_eq!(rules(&check(&r, &policy)), ["hook-missing"], "a differently-cased or unrelated event never satisfies the rule");
+
+        // Neither required hook is present: each is named on its own
+        // violation, in the order the policy lists them.
+        r.hook_events = vec![];
+        let policy = Policy { require_hooks: vec!["PreToolUse".into(), "Stop".into()], ..policy };
+        let found = check(&r, &policy);
+        assert_eq!(rules(&found), ["hook-missing", "hook-missing"]);
+        assert_eq!(found[0].detail, "no PreToolUse hook");
+        assert_eq!(found[1].detail, "no Stop hook");
     }
 }

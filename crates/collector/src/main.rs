@@ -9,8 +9,8 @@
 //! seat that has a custom agent with no tools allowlist
 //! ("agent-unrestricted"), `requireShellDeny` flags a seat with no deny rule
 //! covering the shell ("shell-deny"), and `requireHooks` (a list of hook
-//! event names) flags any of them missing from a seat's report
-//! ("hook-missing").
+//! event names, case-sensitive) flags any of them missing from a seat's
+//! report ("hook-missing").
 //!
 //! Self-hosted and small on purpose: one process, one folder of JSON files
 //! (the latest report per seat), no database, no accounts. Every request
@@ -125,6 +125,35 @@ fn tightest(report: &SeatReport) -> Option<String> {
         .map(|l| format!("{} {} {:.0}%", l.provider, l.metric, l.used_percent))
 }
 
+/// How many hook names a seat row shows before the rest collapse behind a
+/// count. A seat's own hook list is capped at 100 on the way in (see
+/// `seat::parse`); a real machine registers far fewer than that, so a table
+/// cell only ever needs room for a handful.
+const HOOKS_SHOWN: usize = 12;
+
+/// The guardrails column: unrestricted-agent count, whether the shell has a
+/// deny rule, and which hook events are registered. Returns unescaped text;
+/// the row it goes into runs everything through `esc()` once.
+fn guardrails_cell(r: &SeatReport) -> String {
+    let hooks = if r.hook_events.is_empty() {
+        "none".to_string()
+    } else {
+        let shown: Vec<&str> = r.hook_events.iter().take(HOOKS_SHOWN).map(String::as_str).collect();
+        let rest = r.hook_events.len() - shown.len();
+        if rest > 0 {
+            format!("{}, +{rest}", shown.join(", "))
+        } else {
+            shown.join(", ")
+        }
+    };
+    format!(
+        "{} unrestricted · shell deny: {} · hooks: {}",
+        r.agents_unrestricted,
+        if r.deny_covers_shell { "yes" } else { "no" },
+        hooks,
+    )
+}
+
 pub fn dashboard(reports: &[SeatReport], now: i64) -> String {
     dashboard_with(reports, None, now)
 }
@@ -164,12 +193,7 @@ pub fn dashboard_with(reports: &[SeatReport], policy: Option<&Policy>, now: i64)
             let spend: f64 = r.spend.iter().map(|s| s.last30).sum();
             let loose = r.servers.iter().filter(|s| s.pinned == Some(false)).count();
             let rules = r.allow_rules + r.ask_rules + r.deny_rules;
-            let guardrails = format!(
-                "{} unrestricted · shell deny: {} · hooks: {}",
-                r.agents_unrestricted,
-                if r.deny_covers_shell { "yes" } else { "no" },
-                if r.hook_events.is_empty() { "none".to_string() } else { r.hook_events.join(", ") },
-            );
+            let guardrails = guardrails_cell(r);
             let verdict = match policy.map(|p| policy::check(r, p)) {
                 None => "–".to_string(),
                 Some(v) if v.is_empty() => "Conforms".to_string(),
@@ -508,5 +532,35 @@ mod tests {
         // The safe default reads plainly too.
         let quiet = report("seat-bbbbbbbb", "Eli", 1);
         assert!(dashboard(&[quiet], 1).contains("0 unrestricted · shell deny: no · hooks: none"));
+    }
+
+    #[test]
+    fn guardrails_cell_covers_its_three_shapes() {
+        let mut r = report("seat-aaaaaaaa", "Dana", 1);
+        r.agents_unrestricted = 0;
+        r.deny_covers_shell = false;
+        r.hook_events = vec![];
+        assert_eq!(guardrails_cell(&r), "0 unrestricted · shell deny: no · hooks: none");
+
+        r.agents_unrestricted = 3;
+        r.deny_covers_shell = true;
+        r.hook_events = vec!["PreToolUse".into(), "Stop".into()];
+        assert_eq!(guardrails_cell(&r), "3 unrestricted · shell deny: yes · hooks: PreToolUse, Stop");
+
+        r.hook_events = (0..20).map(|i| format!("Hook{i}")).collect();
+        let cell = guardrails_cell(&r);
+        assert!(cell.ends_with("Hook11, +8"), "the first dozen are named, the rest collapse to a count: {cell}");
+    }
+
+    #[test]
+    fn the_guardrails_column_bounds_a_long_hook_list() {
+        let mut r = report("seat-aaaaaaaa", "Dana", 1);
+        r.hook_events =
+            (0..20).map(|i| if i == 5 { "<b>Hook5</b>".to_string() } else { format!("Hook{i}") }).collect();
+        let html = dashboard(&[r], 1);
+        assert!(html.contains("&lt;b&gt;Hook5&lt;/b&gt;"), "a name within the shown dozen is still escaped");
+        assert!(!html.contains("<b>Hook5</b>"));
+        assert!(html.contains("Hook11") && !html.contains("Hook12"), "only the first dozen render");
+        assert!(html.contains("+8"), "the rest collapse behind a count");
     }
 }
