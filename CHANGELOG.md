@@ -6,6 +6,18 @@ numbering at 0.1.0, so the numbers here do not continue upstream's. Pane's own
 release history is kept verbatim in
 [docs/upstream-changelog.md](docs/upstream-changelog.md).
 
+## 0.1.1 — Unreleased
+
+### Fixed
+
+- **Subagent transcripts no longer appear as sessions.** Claude Code writes
+  each subagent (Task-tool) run to its own log file under
+  `<session>/subagents/`; the scanner was listing every one of those as its
+  own phantom session instead of recognizing it as part of the session that
+  spawned it. Its cost is now folded into the session that spawned it, and
+  a new agent-spend view groups subagent runs by which agent ran them.
+  Project and day totals are unchanged: they already counted this spend.
+
 ## 0.1.0 — 2026-09-24
 
 First release of AI Task Manager. Everything below is relative to the imported

@@ -215,6 +215,8 @@ mod tests {
             top_model: None,
             areas: vec![],
             day_cost: None,
+            subagent_cost: 0.0,
+            subagent_runs: 0,
         }
     }
 

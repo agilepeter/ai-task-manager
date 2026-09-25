@@ -166,6 +166,19 @@ struct FileData {
     /// parse — the state behind MAX_MODELS_PER_FILE. Consulted only while
     /// parsing; split helpers don't keep it in step.
     models: HashSet<String>,
+    /// Claude Code only, per-file identity rather than spend: `Some(<uuid>)`
+    /// when this file is a subagent transcript (`<uuid>/subagents/<name>.jsonl`),
+    /// set from the path by `claude_file`/`claude_line`. `merge_data`
+    /// deliberately never touches this or `agent` below — combining many
+    /// files into `all` / a project's totals leaves no single file's
+    /// identity left to report.
+    parent_session: Option<String>,
+    /// This file's `attributionAgent`, the first one an assistant line
+    /// carries (constant for the whole file in practice). `None` either
+    /// because this is not a subagent transcript or because none of its
+    /// lines have named one yet; `agent_spend` is what turns the latter
+    /// into the display bucket `"unknown"`, never this field directly.
+    agent: Option<String>,
 }
 
 impl FileData {
@@ -348,7 +361,7 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 8; // bump on cache format *or* parser-logic changes
+const PERSIST_VERSION: u32 = 9; // bump on cache format *or* parser-logic changes
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -392,6 +405,12 @@ struct PersistEntry {
     claude: Option<ClaudeFileState>,
     #[serde(default)]
     pi_seen: Vec<String>,
+    /// `FileData::parent_session` / `::agent` — see those fields. Absent in
+    /// older caches, which the PERSIST_VERSION bump discards anyway.
+    #[serde(default)]
+    parent_session: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -441,6 +460,8 @@ fn load_persisted_cache() {
                 data.areas.insert((day, area), (cost, tokens));
             }
             data.unpriced = e.unpriced.into_iter().collect();
+            data.parent_session = e.parent_session;
+            data.agent = e.agent;
             if !stamp_matches && !probes_still_vouch(&e.probes, &data) {
                 continue; // a price this file used changed — re-parse it
             }
@@ -511,6 +532,8 @@ fn save_persisted_cache() {
                 codex: e.codex.clone(),
                 claude: e.claude.clone(),
                 pi_seen: e.pi_seen.iter().cloned().collect(),
+                parent_session: e.data.parent_session.clone(),
+                agent: e.data.agent.clone(),
             }
         })
         .collect();
@@ -549,6 +572,9 @@ fn note_unpriced(data: &mut FileData, ts: DateTime<Utc>, model: &str, tokens: f6
     }
 }
 
+/// Combines two files' totals. `parent_session` and `agent` are deliberately
+/// left out: they identify one physical file, and a target that has already
+/// absorbed several files has no single file's identity left to report.
 fn merge_data(target: &mut FileData, source: FileData) {
     for (key, (cost, tokens)) in source.days {
         let entry = target.days.entry(key).or_insert((0.0, 0.0));
@@ -1534,6 +1560,12 @@ struct ClaudeFileState {
     first_ms: Option<i64>,
     #[serde(default)]
     last_ms: Option<i64>,
+    /// This file's sidechain parent, recomputed from the path by
+    /// `claude_file` before every parse — never loaded from a checkpoint,
+    /// so a subagent transcript's attribution survives even when
+    /// `clip_claude_ckpt` wipes the rest of this state for being oversized.
+    #[serde(skip)]
+    parent_session: Option<String>,
 }
 
 /// Parse one Claude Code session-log line into spend events. Persisted
@@ -1629,6 +1661,36 @@ fn add_area(st: &ClaudeFileState, data: &mut FileData, ts: DateTime<Utc>, model:
     entry.1 += tokens;
 }
 
+/// Longest `attributionAgent` name admitted onto a `FileData`. Same bound
+/// as catalog canonicals (MAX_PROBE_KEY) — every built-in or custom agent
+/// name fits; a hostile or corrupt line just never sets the field.
+const MAX_AGENT_KEY: usize = MAX_PROBE_KEY;
+
+/// How many times a sidechain line's own `sessionId` has disagreed with the
+/// directory it was found under. `claude_line` trusts the directory either
+/// way (a rewritten or relocated log could disagree), so this is purely a
+/// debug signal — counted rather than logged, since a busy subagent fan-out
+/// would otherwise spam the log once per line.
+static SIDECHAIN_SESSION_MISMATCHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn note_sidechain_session_mismatch() {
+    SIDECHAIN_SESSION_MISMATCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// `Some(<session-uuid>)` when `path` is shaped like
+/// `<project>/<uuid>/subagents/<file>.jsonl` — a subagent transcript, never
+/// a session of its own. Pure path check: no filesystem access, and no
+/// validation that `<uuid>` actually looks like one — any directory name
+/// two levels up names the parent session.
+fn sidechain_parent(path: &Path) -> Option<String> {
+    let subagents_dir = path.parent()?;
+    if subagents_dir.file_name()?.to_str()? != "subagents" {
+        return None;
+    }
+    let session_dir = subagents_dir.parent()?;
+    session_dir.file_name()?.to_str().map(str::to_string)
+}
+
 fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
     if !line.contains("\"type\":\"assistant\"") {
         return;
@@ -1636,6 +1698,29 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
     let Ok(v) = serde_json::from_str::<Value>(line) else { return };
     if v.get("type").and_then(Value::as_str) != Some("assistant") {
         return;
+    }
+    // A subagent transcript's own directory names its parent session (see
+    // `sidechain_parent`, set by `claude_file` before the parse starts).
+    // `merge_data` never combines this across files, so it survives exactly
+    // as one file's own identity.
+    data.parent_session = st.parent_session.clone();
+    if let Some(parent) = &st.parent_session {
+        if let Some(sid) = v.get("sessionId").and_then(Value::as_str) {
+            if sid != parent {
+                note_sidechain_session_mismatch();
+            }
+        }
+        // The name is constant for the whole file in practice, so the first
+        // assistant line to carry one settles it; a transcript that never
+        // carries one stays `None` here and becomes the display bucket
+        // "unknown" only in `agent_spend`, never guessed this early.
+        if data.agent.is_none() {
+            if let Some(name) = v.get("attributionAgent").and_then(Value::as_str) {
+                if !name.is_empty() && name.len() <= MAX_AGENT_KEY {
+                    data.agent = Some(name.to_string());
+                }
+            }
+        }
     }
     // Before the duplicate check on purpose: Claude Code logs one content
     // block per line, so a message's tool call arrives on a later line than
@@ -1851,6 +1936,12 @@ pub struct SessionSpend {
     pub areas: Vec<(String, f64)>,
     /// When a single day was asked for: this session's cost on that day.
     pub day_cost: Option<f64>,
+    /// This session's own subagent runs' share of `cost` (already included
+    /// in it: the session really spent that) — broken out only for display.
+    pub subagent_cost: f64,
+    /// How many subagent transcript files fed `subagent_cost`, inside the
+    /// same window `cost` is cut to.
+    pub subagent_runs: usize,
 }
 
 fn session_from(id: &str, project: &str, data: &FileData, st: Option<&ClaudeFileState>, today: i32, bytes: u64) -> Option<SessionSpend> {
@@ -1889,6 +1980,8 @@ fn session_from(id: &str, project: &str, data: &FileData, st: Option<&ClaudeFile
             .map(|(m, _)| m.to_string()),
         areas,
         day_cost: None,
+        subagent_cost: 0.0,
+        subagent_runs: 0,
     })
 }
 
@@ -1933,18 +2026,62 @@ pub fn claude_sessions(area: Option<&str>, day: Option<&str>, limit: usize) -> V
     let root = claude_projects_root();
     load_persisted_cache();
     let today = Local::now().date_naive().num_days_from_ce();
+    let in_window = |d: i32| d > today - TREND_DAYS as i32 && d <= today;
     let known = crate::inventory::known_project_paths();
     let Ok(map) = cache().lock() else { return Vec::new() };
+
+    // A subagent transcript is a sidechain of the session that spawned it,
+    // never a session of its own (see `sidechain_parent`): fold each one's
+    // in-window cost and tokens into its parent id before the list below is
+    // built. A parent id nothing here matches (its own file sits outside
+    // the window, or is gone) simply never has this map consulted — its
+    // sidechains are not listed under anything, though the project/day
+    // totals upstream still count them.
+    let mut subagent: HashMap<&str, (f64, f64, usize)> = HashMap::new();
+    for entry in map.values() {
+        let Some(parent) = entry.data.parent_session.as_deref() else { continue };
+        let (mut cost, mut tokens) = (0.0, 0.0);
+        for ((d, _), (c, t)) in &entry.data.days {
+            if in_window(*d) {
+                cost += c;
+                tokens += t;
+            }
+        }
+        if cost <= 0.004 && tokens <= 0.0 {
+            continue;
+        }
+        let slot = subagent.entry(parent).or_insert((0.0, 0.0, 0));
+        slot.0 += cost;
+        slot.1 += tokens;
+        slot.2 += 1;
+    }
+
     let mut out: Vec<SessionSpend> = map
         .iter()
+        .filter(|(_, entry)| entry.data.parent_session.is_none())
         .filter_map(|(path, entry)| {
             let project = project_of(&root, path)?;
             let id = path.file_stem()?.to_str()?;
             let mut session =
                 session_from(id, &resolve_project(&project, &known), &entry.data, entry.claude.as_ref(), today, entry.size)?;
+            // The session really spent this: cost/tokens include the
+            // subagent share, which is broken out separately for display.
+            if let Some(&(sub_cost, sub_tokens, sub_runs)) = subagent.get(id) {
+                session.cost += sub_cost;
+                session.tokens += sub_tokens;
+                session.subagent_cost = sub_cost;
+                session.subagent_runs = sub_runs;
+            }
             if let Some(day) = day {
-                let on_day: f64 =
+                let mut on_day: f64 =
                     entry.data.days.iter().filter(|((d, _), _)| *d == day).map(|(_, (c, _))| c).sum();
+                on_day += map
+                    .values()
+                    .filter(|e| e.data.parent_session.as_deref() == Some(id))
+                    .flat_map(|e| e.data.days.iter())
+                    .filter(|((d, _), _)| *d == day)
+                    .map(|(_, (c, _))| c)
+                    .sum::<f64>();
                 if on_day <= 0.004 {
                     return None;
                 }
@@ -1962,6 +2099,108 @@ pub fn claude_sessions(area: Option<&str>, day: Option<&str>, limit: usize) -> V
         key(b).total_cmp(&key(a)).then_with(|| a.id.cmp(&b.id))
     });
     out.truncate(limit);
+    out
+}
+
+/// Subagent transcripts grouped by who ran them: a built-in agent
+/// (`general-purpose`, `Explore`, `Plan`, …), a custom definition's own
+/// name, or `"unknown"` for a transcript whose lines never carried one.
+/// Metadata only, same contract as `SessionSpend`: no field here can hold a
+/// prompt or a title, because none of its inputs (`FileData::agent`,
+/// day/model totals, a checkpoint's timestamps) can either.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSpend {
+    pub name: String,
+    /// How many subagent transcript files this agent name covers.
+    pub runs: usize,
+    pub cost: f64,
+    pub tokens: u64,
+    /// The newest assistant line across this agent's transcripts, epoch
+    /// milliseconds, falling back to a file's own mtime for an older
+    /// checkpoint that predates the span fields.
+    pub last_used_ms: i64,
+    pub top_model: Option<String>,
+}
+
+/// `agent_spend` groups this many days of subagent activity, read from the
+/// same persisted scan cache `claude_sessions` reads — no second scan.
+/// Sorted by cost, highest first.
+pub fn agent_spend(days: u32) -> Vec<AgentSpend> {
+    load_persisted_cache();
+    let today = Local::now().date_naive().num_days_from_ce();
+    let cutoff = today - days as i32;
+    let in_window = |d: i32| d > cutoff && d <= today;
+    let Ok(map) = cache().lock() else { return Vec::new() };
+
+    struct Group {
+        runs: usize,
+        cost: f64,
+        tokens: f64,
+        last_used_ms: i64,
+        by_model: HashMap<String, f64>,
+    }
+    let mut groups: HashMap<String, Group> = HashMap::new();
+    for entry in map.values() {
+        if entry.data.parent_session.is_none() {
+            continue; // not a subagent transcript at all
+        }
+        let (mut cost, mut tokens) = (0.0, 0.0);
+        let mut by_model: HashMap<String, f64> = HashMap::new();
+        for ((d, model), (c, t)) in &entry.data.days {
+            if !in_window(*d) {
+                continue;
+            }
+            cost += c;
+            tokens += t;
+            *by_model.entry(model.clone()).or_insert(0.0) += c;
+        }
+        if cost <= 0.0 && tokens <= 0.0 {
+            continue; // no activity in the requested window
+        }
+        let last_used_ms = entry.claude.as_ref().and_then(|c| c.last_ms).unwrap_or_else(|| {
+            entry
+                .mtime
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0)
+        });
+        let name = entry.data.agent.clone().unwrap_or_else(|| "unknown".to_string());
+        let g = groups.entry(name).or_insert_with(|| Group {
+            runs: 0,
+            cost: 0.0,
+            tokens: 0.0,
+            last_used_ms: 0,
+            by_model: HashMap::new(),
+        });
+        g.runs += 1;
+        g.cost += cost;
+        g.tokens += tokens;
+        g.last_used_ms = g.last_used_ms.max(last_used_ms);
+        for (model, c) in by_model {
+            *g.by_model.entry(model).or_insert(0.0) += c;
+        }
+    }
+
+    let mut out: Vec<AgentSpend> = groups
+        .into_iter()
+        .map(|(name, g)| {
+            let top_model = g
+                .by_model
+                .into_iter()
+                .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+                .map(|(m, _)| m);
+            AgentSpend {
+                name,
+                runs: g.runs,
+                cost: g.cost,
+                tokens: g.tokens.round() as u64,
+                last_used_ms: g.last_used_ms,
+                top_model,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| b.cost.total_cmp(&a.cost).then_with(|| a.name.cmp(&b.name)));
     out
 }
 
@@ -2021,38 +2260,87 @@ pub fn live_session_for_cwd(cwd: &str, now_ms: i64) -> Option<LivePace> {
     live_session_in(&dir, now_ms)
 }
 
-/// The newest top-level `*.jsonl` directly under `dir`, read only when it
-/// was written inside `LIVE_FRESH_MS`. Never recurses, so a subagent
-/// transcript -- one or more folders deeper, under `<session-uuid>/subagents/`
-/// -- can never be picked: it is never even listed.
+/// The newest write across a project's top-level `<uuid>.jsonl` session
+/// files and, one level deeper, each session's own `<uuid>/subagents/*.jsonl`
+/// transcripts -- a Task-tool fan-out keeps its parent uuid live even while
+/// the parent's own file sits idle. Never recurses past `subagents/`, and a
+/// subagent file's write only ever promotes the *enclosing* `<uuid>`: it is
+/// never itself picked as the live session.
 fn live_session_in(dir: &Path, now_ms: i64) -> Option<LivePace> {
-    let mut newest: Option<(PathBuf, SystemTime)> = None;
+    let mut newest: Option<(String, SystemTime)> = None;
     for entry in fs::read_dir(dir).ok()?.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-            continue;
-        }
         let Ok(ftype) = entry.file_type() else { continue };
-        if !ftype.is_file() {
-            continue;
-        }
-        let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else { continue };
-        let better = match &newest {
-            Some((_, best)) => mtime > *best,
-            None => true,
-        };
-        if better {
-            newest = Some((path, mtime));
+        if ftype.is_file() {
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Some(uuid) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+            let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else { continue };
+            let better = match &newest {
+                Some((_, best)) => mtime > *best,
+                None => true,
+            };
+            if better {
+                newest = Some((uuid.to_string(), mtime));
+            }
+        } else if ftype.is_dir() {
+            let Some(uuid) = path.file_name().and_then(|s| s.to_str()) else { continue };
+            let Ok(sub_entries) = fs::read_dir(path.join("subagents")) else { continue };
+            for sub in sub_entries.flatten() {
+                let sub_path = sub.path();
+                if sub_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                let Ok(sftype) = sub.file_type() else { continue };
+                if !sftype.is_file() {
+                    continue;
+                }
+                let Ok(mtime) = sub.metadata().and_then(|m| m.modified()) else { continue };
+                let better = match &newest {
+                    Some((_, best)) => mtime > *best,
+                    None => true,
+                };
+                if better {
+                    newest = Some((uuid.to_string(), mtime));
+                }
+            }
         }
     }
-    let (path, mtime) = newest?;
+    let (uuid, mtime) = newest?;
     let mtime_ms = mtime.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_millis() as i64;
     if now_ms.saturating_sub(mtime_ms) > LIVE_FRESH_MS {
         return None;
     }
-    let session_id = path.file_stem()?.to_str()?.to_string();
-    let lines = tail_lines(&path);
-    pace_from_lines(lines.iter().map(String::as_str), &session_id, now_ms)
+
+    // The parent's own tail, plus every one of its subagent transcripts
+    // that is itself still inside the freshness window -- a Task run that
+    // finished an hour ago should not be re-read on every poll. All of it
+    // is attributed to the parent uuid; `pace_from_lines` sums and dedupes
+    // across the combined lines exactly as it would within one file.
+    let mut lines = tail_lines(&dir.join(format!("{uuid}.jsonl")));
+    if let Ok(sub_entries) = fs::read_dir(dir.join(&uuid).join("subagents")) {
+        for sub in sub_entries.flatten() {
+            let sub_path = sub.path();
+            if sub_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Ok(sftype) = sub.file_type() else { continue };
+            if !sftype.is_file() {
+                continue;
+            }
+            let Ok(sub_mtime) = sub.metadata().and_then(|m| m.modified()) else { continue };
+            let sub_ms = sub_mtime
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            if now_ms.saturating_sub(sub_ms) > LIVE_FRESH_MS {
+                continue;
+            }
+            lines.extend(tail_lines(&sub_path));
+        }
+    }
+    pace_from_lines(lines.iter().map(String::as_str), &uuid, now_ms)
 }
 
 /// The last `LIVE_TAIL_BYTES` of `path` (or the whole file when it is
@@ -2347,6 +2635,10 @@ fn claude_file(file: &Path) -> FileData {
     let tail = will_resume_tail(file);
     let ckpt = if tail { load_claude_ckpt(file) } else { None };
     let mut state = ckpt.clone().unwrap_or_default();
+    // Always fresh from the current path, whatever the checkpoint carried:
+    // cheap, and a `clip_claude_ckpt` reset must not cost a subagent
+    // transcript its attribution.
+    state.parent_session = sidechain_parent(file);
     let data = if tail && ckpt.as_ref().is_some_and(|s| !s.seen.is_empty()) {
         file_days(file, &mut |line, data| claude_line(&mut state, line, data))
     } else if tail {
@@ -3776,6 +4068,50 @@ mod tests {
         println!("{}", serde_json::to_string(&collect(None)).unwrap());
     }
 
+    /// Diagnostic (ignored): how many entries the scan cache would list as
+    /// sessions without the new "not a sidechain" filter, against how many
+    /// `claude_sessions` actually lists now, plus the top three
+    /// `agent_spend` names by cost. Names and counts only -- never a
+    /// session id, a path, or anything from message content. A stale
+    /// persisted cache from a build compiled before this change (`tauri
+    /// dev` rebuilds the running app on any edit under `crates/`, per this
+    /// repo's own build notes) can otherwise mask the fix behind its own
+    /// `cache_unchanged` fast path; delete `spend_cache.json` in this app's
+    /// config dir first if these numbers look unchanged from before.
+    /// Run: cargo test -p aitm-core live_subagent_fold_report -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_subagent_fold_report() {
+        let _ = collect(None);
+        let root = claude_projects_root();
+        let known = crate::inventory::known_project_paths();
+        let today = Local::now().date_naive().num_days_from_ce();
+        let before = {
+            let Ok(map) = cache().lock() else { return };
+            map.iter()
+                .filter_map(|(path, entry)| {
+                    let project = project_of(&root, path)?;
+                    let id = path.file_stem()?.to_str()?;
+                    session_from(
+                        id,
+                        &resolve_project(&project, &known),
+                        &entry.data,
+                        entry.claude.as_ref(),
+                        today,
+                        entry.size,
+                    )
+                })
+                .count()
+        };
+        let after = claude_sessions(None, None, usize::MAX).len();
+        println!("sessions before (every cache entry, no sidechain filter): {before}");
+        println!("sessions after  (subagent transcripts folded into their parent): {after}");
+        println!("top agent_spend by cost (30d):");
+        for a in agent_spend(30).into_iter().take(3) {
+            println!("  {:<20} runs={:<4} cost=${:.2}", a.name, a.runs, a.cost);
+        }
+    }
+
     #[test]
     fn project_dirs_resolve_to_known_paths_and_fall_back_to_the_folder_name() {
         let known = vec!["/Users/me/work/acme-site".to_string(), "/Users/me/.dotfiles".to_string()];
@@ -3938,8 +4274,11 @@ mod tests {
                     area: Some("acme".into()),
                     first_ms: Some(1_790_000_000_000),
                     last_ms: Some(1_790_000_900_000),
+                    parent_session: None, // #[serde(skip)]: never persisted, recomputed from the path instead
                 }),
                 pi_seen: vec!["pi-msg-1".into()],
+                parent_session: Some("11111111-1111-1111-1111-111111111111".into()),
+                agent: Some("Explore".into()),
             }],
         };
         let json = serde_json::to_string(&doc).unwrap();
@@ -3963,6 +4302,8 @@ mod tests {
             b.claude.as_ref().map(|s| s.seen.len())
         );
         assert_eq!(a.pi_seen, b.pi_seen);
+        assert_eq!(a.parent_session, b.parent_session);
+        assert_eq!(a.agent, b.agent);
         // A tail parse resumes from this checkpoint: the area in force has
         // to survive, or the next lines would book to "(unsorted)".
         let (sa, sb) = (a.claude.as_ref().unwrap(), b.claude.as_ref().unwrap());
@@ -3978,6 +4319,18 @@ mod tests {
         let v2 = r#"{"version":2,"pricing_stamp":"x","entries":[]}"#;
         let doc: PersistFile = serde_json::from_str(v2).unwrap();
         assert_ne!(doc.version, PERSIST_VERSION);
+    }
+
+    /// The cache format moved from 8 to 9 when subagent transcripts gained
+    /// `parent_session` / `agent`: a cache an older build wrote must not be
+    /// trusted, or every subagent transcript it already parsed would go on
+    /// looking like its own session forever.
+    #[test]
+    fn persist_version_9_discards_a_version_8_cache() {
+        assert_eq!(PERSIST_VERSION, 9, "the cache-format version this fix shipped under");
+        let v8 = r#"{"version":8,"pricing_stamp":"x","corrections":0,"entries":[]}"#;
+        let doc: PersistFile = serde_json::from_str(v8).unwrap();
+        assert_ne!(doc.version, PERSIST_VERSION, "a version-8 cache must be treated as stale");
     }
 
     /// SWE/Penguin + V4.1 Flash baked rates bumped CORRECTIONS_REV. A
@@ -4999,6 +5352,259 @@ mod tests {
         assert_eq!(session_path_among(&root, outside.iter(), "def"), None);
     }
 
+    // ---- Subagent transcripts: a fixture tree shared by several tests ----
+
+    const PLANTED_PROMPT: &str = "PLANTED_PROMPT_SUBAGENT_FIXTURE";
+    const PLANTED_TITLE: &str = "PLANTED_TITLE_SUBAGENT_FIXTURE";
+    const PLANTED_TEXT: &str = "PLANTED_TEXT_SUBAGENT_FIXTURE";
+
+    /// One assistant line shaped like a real Claude Code log entry, for the
+    /// shared subagent fixture below.
+    fn subagent_line(
+        mid: &str,
+        rid: &str,
+        session_id: &str,
+        cost: f64,
+        sidechain: bool,
+        agent: Option<&str>,
+        text: &str,
+    ) -> String {
+        let mut obj = serde_json::Map::new();
+        obj.insert("type".into(), json!("assistant"));
+        obj.insert("timestamp".into(), json!((Utc::now() - chrono::Duration::hours(1)).to_rfc3339()));
+        obj.insert("cwd".into(), json!("/w"));
+        obj.insert("requestId".into(), json!(rid));
+        obj.insert("sessionId".into(), json!(session_id));
+        obj.insert("costUSD".into(), json!(cost));
+        if sidechain {
+            obj.insert("isSidechain".into(), json!(true));
+        }
+        if let Some(a) = agent {
+            obj.insert("attributionAgent".into(), json!(a));
+        }
+        obj.insert(
+            "message".into(),
+            json!({
+                "id": mid, "model": "claude-haiku-4-5",
+                "content": [{"type": "text", "text": text}],
+                "usage": {"input_tokens": 10.0, "output_tokens": 5.0},
+            }),
+        );
+        Value::Object(obj).to_string()
+    }
+
+    /// Serializes the tests below: they all build a fixture using the same
+    /// `attributionAgent` name ("Explore"), so two of them alive at once
+    /// would double up in `agent_spend`'s grouping by name, same as two
+    /// real subagents sharing an agent definition would — but here the
+    /// tests would then be racing each other's setup instead of describing
+    /// real concurrent usage. cargo test's default parallelism otherwise
+    /// overlaps them.
+    fn subagent_fixture_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct SubagentFixture {
+        root: PathBuf,
+        project: String,
+        uuid: String,
+        fake_paths: Vec<PathBuf>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    /// Cleans up the cache entries and temp directory a subagent fixture
+    /// created, even if the test using it panics on an assertion — a failed
+    /// test must not leak fixtures that later tests could trip over.
+    impl Drop for SubagentFixture {
+        fn drop(&mut self) {
+            if let Ok(mut map) = cache().lock() {
+                for p in &self.fake_paths {
+                    map.remove(p);
+                }
+            }
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// Runs the real scanner (`claude_file`) on a real file wherever it
+    /// happens to live, then moves the result into the shared cache under a
+    /// synthetic path shaped like the real Claude projects root — so the
+    /// public, cache-reading `claude_sessions` / `agent_spend` exercise real
+    /// parser output end to end, without this process's own
+    /// `~/.claude/projects` ever being written to.
+    fn inject_scanned(path: &Path, fake_path: &Path) {
+        let data = claude_file(path);
+        let claude_ckpt = cache().lock().ok().and_then(|mut m| m.remove(path)).and_then(|e| e.claude);
+        let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let entry = FileEntry {
+            mtime: SystemTime::now(),
+            size,
+            gen: pricing::generation(),
+            probes: Vec::new(),
+            data,
+            prefix_head: Vec::new(),
+            prefix_tail: Vec::new(),
+            grok_models: HashMap::new(),
+            codex: None,
+            claude: claude_ckpt,
+            pi_seen: HashSet::new(),
+        };
+        if let Ok(mut map) = cache().lock() {
+            map.insert(fake_path.to_path_buf(), entry);
+        }
+    }
+
+    /// Builds `<root>/<project>/<uuid>.jsonl` (a normal parent session:
+    /// 1.0 + 2.0 = 3.0 of its own) plus `<uuid>/subagents/a.jsonl`
+    /// (`attributionAgent` "Explore": 0.5 + 0.3 = 0.8, with message "a1"
+    /// replayed once — deduped like any other Claude log) and `b.jsonl` (no
+    /// `attributionAgent`: 0.2). All three plant a prompt, a custom title
+    /// and an assistant text block that must never surface downstream.
+    /// Scans them for real and stashes the results in the shared cache
+    /// under the real projects root's shape (see `inject_scanned`).
+    fn build_subagent_fixture(name: &str) -> SubagentFixture {
+        let lock = subagent_fixture_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, project, uuid, fake_paths) = build_subagent_fixture_unlocked(name);
+        SubagentFixture { root, project, uuid, fake_paths, _lock: lock }
+    }
+
+    /// The fixture-building body, without acquiring `subagent_fixture_lock`
+    /// itself — for a test that must hold the lock across a "before" read
+    /// too (real "Explore" / "unknown" activity on this machine must not
+    /// change between that read and the fixture existing).
+    fn build_subagent_fixture_unlocked(name: &str) -> (PathBuf, String, String, Vec<PathBuf>) {
+        let root = std::env::temp_dir().join(format!("pane-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let project = format!("proj-{name}");
+        let uuid = format!("uuid-{name}");
+        let sub_dir = root.join(&project).join(&uuid).join("subagents");
+        fs::create_dir_all(&sub_dir).unwrap();
+
+        let parent_path = root.join(&project).join(format!("{uuid}.jsonl"));
+        fs::write(
+            &parent_path,
+            format!(
+                "{}\n{}\n{}\n",
+                json!({"type": "user", "sessionId": uuid, "message": {"role": "user", "content": PLANTED_PROMPT}}),
+                subagent_line("p1", "r-p1", &uuid, 1.0, false, None, "ok"),
+                subagent_line("p2", "r-p2", &uuid, 2.0, false, None, "ok"),
+            ),
+        )
+        .unwrap();
+
+        let a_path = sub_dir.join("a.jsonl");
+        fs::write(
+            &a_path,
+            format!(
+                "{}\n{}\n{}\n{}\n",
+                json!({"type": "custom-title", "sessionId": uuid, "isSidechain": true, "customTitle": PLANTED_TITLE}),
+                subagent_line("a1", "r-a1", &uuid, 0.5, true, Some("Explore"), PLANTED_TEXT),
+                subagent_line("a1", "r-a1", &uuid, 0.5, true, Some("Explore"), PLANTED_TEXT), // duplicated message id
+                subagent_line("a2", "r-a2", &uuid, 0.3, true, Some("Explore"), "ok"),
+            ),
+        )
+        .unwrap();
+
+        let b_path = sub_dir.join("b.jsonl");
+        fs::write(&b_path, format!("{}\n", subagent_line("b1", "r-b1", &uuid, 0.2, true, None, "ok"))).unwrap();
+
+        let real_root = claude_projects_root();
+        let fake_parent = real_root.join(&project).join(format!("{uuid}.jsonl"));
+        let fake_a = real_root.join(&project).join(&uuid).join("subagents").join("a.jsonl");
+        let fake_b = real_root.join(&project).join(&uuid).join("subagents").join("b.jsonl");
+        inject_scanned(&parent_path, &fake_parent);
+        inject_scanned(&a_path, &fake_a);
+        inject_scanned(&b_path, &fake_b);
+
+        (root, project, uuid, vec![fake_parent, fake_a, fake_b])
+    }
+
+    #[test]
+    fn sessions_list_no_sidechain_and_fold_its_cost_into_the_parent() {
+        let fx = build_subagent_fixture("sessions-fold");
+        let sessions = claude_sessions(None, None, 10_000);
+        assert!(
+            sessions.iter().all(|s| s.id != "a" && s.id != "b"),
+            "subagent files must never appear as their own session"
+        );
+        let parent = sessions.iter().find(|s| s.id == fx.uuid).expect("the parent session is listed");
+        assert!((parent.cost - 4.0).abs() < 1e-9, "3.0 of its own + 1.0 folded from its subagents, got {}", parent.cost);
+        assert!((parent.subagent_cost - 1.0).abs() < 1e-9, "got {}", parent.subagent_cost);
+        assert_eq!(parent.subagent_runs, 2, "a.jsonl and b.jsonl");
+        assert_eq!(parent.project, fx.project);
+    }
+
+    #[test]
+    fn agent_spend_groups_by_attribution_agent_and_labels_the_rest_unknown() {
+        // "Explore" and "unknown" are real, common buckets: this developer's
+        // own machine may already have genuine entries in them (loaded from
+        // the persisted cache), and another test's fixture could otherwise
+        // come and go between a "before" read and this one. So the lock
+        // (normally scoped to one fixture's lifetime) is held from before
+        // that read through to the end of this test, and this measures what
+        // the fixture *adds*, never an absolute total.
+        let lock = subagent_fixture_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let find = |agents: &[AgentSpend], name: &str| {
+            agents.iter().find(|a| a.name == name).map(|a| (a.runs, a.cost)).unwrap_or((0, 0.0))
+        };
+        let (explore_runs_before, explore_cost_before) = find(&agent_spend(30), "Explore");
+        let (unknown_runs_before, unknown_cost_before) = find(&agent_spend(30), "unknown");
+
+        let (root, project, uuid, fake_paths) = build_subagent_fixture_unlocked("agent-groups");
+        let fx = SubagentFixture { root, project, uuid, fake_paths, _lock: lock };
+        let agents = agent_spend(30);
+
+        let explore = agents.iter().find(|a| a.name == "Explore").expect("Explore group present");
+        assert_eq!(explore.runs, explore_runs_before + 1, "one more file: a.jsonl");
+        assert!(
+            (explore.cost - (explore_cost_before + 0.8)).abs() < 1e-6,
+            "a1 (deduped) + a2 = 0.8 added on top of whatever this machine already had, got a delta of {}",
+            explore.cost - explore_cost_before
+        );
+
+        let unknown = agents.iter().find(|a| a.name == "unknown").expect("unknown group present");
+        assert_eq!(unknown.runs, unknown_runs_before + 1, "one more file: b.jsonl");
+        assert!(
+            (unknown.cost - (unknown_cost_before + 0.2)).abs() < 1e-6,
+            "b.jsonl (no attributionAgent) = 0.2 added on top of whatever this machine already had, got a delta of {}",
+            unknown.cost - unknown_cost_before
+        );
+
+        assert!(
+            agents.iter().all(|a| a.name != fx.project && a.name != fx.uuid),
+            "agent names come only from attributionAgent, never from a path"
+        );
+    }
+
+    #[test]
+    fn agent_spend_never_carries_prompt_text_or_titles() {
+        let _fx = build_subagent_fixture("agent-privacy");
+        let agents_json = serde_json::to_string(&agent_spend(30)).unwrap();
+        let sessions_json = serde_json::to_string(&claude_sessions(None, None, 10_000)).unwrap();
+        for planted in [PLANTED_PROMPT, PLANTED_TITLE, PLANTED_TEXT] {
+            assert!(!agents_json.contains(planted), "{planted} leaked into AgentSpend: {agents_json}");
+            assert!(!sessions_json.contains(planted), "{planted} leaked into SessionSpend: {sessions_json}");
+        }
+    }
+
+    #[test]
+    fn sidechain_tokens_count_once_in_project_totals() {
+        let fx = build_subagent_fixture("token-totals");
+        // Mimics claude()'s own aggregation, scoped to this fixture's own
+        // temp root: recent_jsonl_files + claude_file, the same path the
+        // real scanner uses, never the cache injection the other tests use.
+        let mut files = Vec::new();
+        recent_jsonl_files(&fx.root, &mut files);
+        let mut all = FileData::default();
+        for file in &files {
+            merge_data(&mut all, claude_file(file));
+        }
+        // 4 distinct messages (p1, p2, a1, a2) plus b1 = 5 distinct assistant
+        // lines x 15 tokens each; a1's duplicate must not add a sixth.
+        assert_eq!(tokens_sum(&all), 75.0, "parent + both subagent files, each counted exactly once");
+    }
+
     #[test]
     fn touching_a_scratch_folder_does_not_change_the_work_area() {
         let root = "/w";
@@ -5115,6 +5721,44 @@ mod tests {
     }
 
     #[test]
+    fn a_subagent_transcript_is_a_sidechain_of_its_directory_session() {
+        let root = Path::new("/h/.claude/projects/-w-acme");
+        let uuid = "11111111-1111-1111-1111-111111111111";
+        assert_eq!(
+            sidechain_parent(&root.join(uuid).join("subagents").join("a1b2c3.jsonl")).as_deref(),
+            Some(uuid)
+        );
+        // A top-level session file is never a sidechain of anything.
+        assert_eq!(sidechain_parent(&root.join(format!("{uuid}.jsonl"))), None);
+        // Two folders deep without a `subagents` directory name is not one.
+        assert_eq!(sidechain_parent(&root.join(uuid).join("notes").join("a1b2c3.jsonl")), None);
+        // Any directory name two levels up is accepted — no uuid-syntax check.
+        assert_eq!(
+            sidechain_parent(&root.join("not-a-uuid-at-all").join("subagents").join("x.jsonl")).as_deref(),
+            Some("not-a-uuid-at-all")
+        );
+
+        // claude_line attributes a line to that directory-named parent,
+        // trusting it over a disagreeing `sessionId` (counted, not logged).
+        let mut st = ClaudeFileState { parent_session: Some(uuid.to_string()), ..Default::default() };
+        let mut data = FileData::default();
+        let before = SIDECHAIN_SESSION_MISMATCHES.load(std::sync::atomic::Ordering::Relaxed);
+        let line = json!({
+            "type": "assistant", "timestamp": "2026-09-20T12:00:00Z", "cwd": "/w",
+            "requestId": "r-1", "isSidechain": true, "sessionId": "some-other-session", "costUSD": 0.1,
+            "attributionAgent": "Explore",
+            "message": {"id": "m1", "model": "claude-haiku-4-5", "content": [{"type": "text", "text": "ok"}],
+                         "usage": {"input_tokens": 10.0, "output_tokens": 5.0}}
+        })
+        .to_string();
+        claude_line(&mut st, &line, &mut data);
+        assert_eq!(data.parent_session.as_deref(), Some(uuid), "the directory wins over a disagreeing sessionId");
+        assert_eq!(data.agent.as_deref(), Some("Explore"));
+        let after = SIDECHAIN_SESSION_MISMATCHES.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(after, before + 1, "the disagreement is counted, not logged");
+    }
+
+    #[test]
     fn claude_synthetic_model_never_priced() {
         let bare = json!({"type": "assistant", "timestamp": "2026-07-10T10:00:00Z",
             "requestId": "req_1",
@@ -5228,28 +5872,104 @@ mod tests {
         assert!(got.is_none(), "a file untouched for 6 minutes must not report a live pace");
     }
 
+    /// Backdates or advances a just-written file's mtime so a live-pace
+    /// test's "which write is newest" comparison never depends on how fast
+    /// two sequential `fs::write` calls actually ran on this machine.
+    fn set_mtime(path: &Path, ms: i64) {
+        let file = fs::OpenOptions::new().write(true).open(path).expect("open for mtime");
+        file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_millis(ms as u64)).expect("set mtime");
+    }
+
     #[test]
     fn live_pace_skips_subagent_transcripts() {
+        // A subagent transcript is no longer recursed past to find "the
+        // real session" underneath it -- a fresh one now promotes its own
+        // uuid instead. This asserts that new attribution rather than the
+        // old exclusion (this test's name is the exclusion it used to
+        // check for; keep it, since the fixture below still proves a
+        // recursive walk isn't what finds the subagent file).
         let dir = std::env::temp_dir().join(format!("pane-live-pace-subagents-{}", std::process::id()));
-        let sub = dir.join("11111111-1111-1111-1111-111111111111").join("subagents");
+        let uuid = "11111111-1111-1111-1111-111111111111";
+        let sub = dir.join(uuid).join("subagents");
         let _ = fs::create_dir_all(&sub);
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
-        fs::write(
-            dir.join("real-session.jsonl"),
-            format!("{}\n", live_line("m1", "/w", LIVE_PACE_MODEL, now - 5_000, None)),
-        )
-        .unwrap();
+        let real_path = dir.join("real-session.jsonl");
+        fs::write(&real_path, format!("{}\n", live_line("m1", "/w", LIVE_PACE_MODEL, now - 5_000, None))).unwrap();
+        set_mtime(&real_path, now - 10_000);
         // A subagent transcript sitting a folder deeper, with its own
-        // in-window line: if the walk ever recursed, this file would be
-        // found (and would win on content) instead of the real session.
-        fs::write(
-            sub.join("subagent.jsonl"),
-            format!("{}\n", live_line("m2", "/w", LIVE_PACE_MODEL, now - 1_000, None)),
-        )
-        .unwrap();
-        let got = live_session_in(&dir, now).expect("the top-level session is live");
+        // in-window line and a write fresher than the top-level file above:
+        // it must be attributed to its own uuid, never to "real-session"
+        // and never under its own file stem ("subagent").
+        let subagent_path = sub.join("subagent.jsonl");
+        fs::write(&subagent_path, format!("{}\n", live_line("m2", "/w", LIVE_PACE_MODEL, now - 1_000, None))).unwrap();
+        set_mtime(&subagent_path, now);
+        let got = live_session_in(&dir, now).expect("the subagent's fresh write keeps its uuid live");
         let _ = fs::remove_dir_all(&dir);
-        assert_eq!(got.session_id, "real-session");
+        assert_eq!(got.session_id, uuid, "attributed to the directory uuid, never the top-level file or the subagent's own stem");
+    }
+
+    #[test]
+    fn live_pace_follows_a_session_whose_only_fresh_write_is_a_subagent() {
+        let dir = std::env::temp_dir().join(format!("pane-live-pace-subagent-only-{}", std::process::id()));
+        let uuid = "22222222-2222-2222-2222-222222222222";
+        let sub = dir.join(uuid).join("subagents");
+        let _ = fs::create_dir_all(&sub);
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        // The parent's own file has gone quiet well past the freshness
+        // window (and its one line sits outside the 10-minute pace window
+        // too).
+        let parent_path = dir.join(format!("{uuid}.jsonl"));
+        fs::write(&parent_path, format!("{}\n", live_line("p1", "/w", LIVE_PACE_MODEL, now - 20 * 60_000, None))).unwrap();
+        set_mtime(&parent_path, now - 20 * 60_000);
+        // Only its subagent transcript is still being written.
+        let subagent_path = sub.join("a.jsonl");
+        fs::write(&subagent_path, format!("{}\n", live_line("a1", "/w", LIVE_PACE_MODEL, now - 5_000, None))).unwrap();
+        set_mtime(&subagent_path, now);
+        let got = live_session_in(&dir, now).expect("the subagent's write keeps the parent live");
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(got.session_id, uuid);
+        assert_eq!(got.tokens_10m, 120, "only the subagent's in-window line counts; the parent's is 20 minutes old");
+    }
+
+    #[test]
+    fn live_pace_sums_the_parent_and_its_subagents_within_the_window() {
+        let dir = std::env::temp_dir().join(format!("pane-live-pace-sum-{}", std::process::id()));
+        let uuid = "33333333-3333-3333-3333-333333333333";
+        let sub = dir.join(uuid).join("subagents");
+        let _ = fs::create_dir_all(&sub);
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        let parent_path = dir.join(format!("{uuid}.jsonl"));
+        fs::write(&parent_path, format!("{}\n", live_line("p1", "/w", LIVE_PACE_MODEL, now - 60_000, None))).unwrap();
+        set_mtime(&parent_path, now - 30_000);
+        let subagent_path = sub.join("a.jsonl");
+        fs::write(&subagent_path, format!("{}\n", live_line("a1", "/w", LIVE_PACE_MODEL, now - 30_000, None))).unwrap();
+        set_mtime(&subagent_path, now);
+        let got = live_session_in(&dir, now).expect("both writes are fresh");
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(got.session_id, uuid);
+        assert_eq!(got.tokens_10m, 240, "120 from the parent's own line plus 120 from its subagent, both in window");
+    }
+
+    #[test]
+    fn live_pace_still_never_picks_a_subagent_file_as_the_session() {
+        let dir = std::env::temp_dir().join(format!("pane-live-pace-own-stem-{}", std::process::id()));
+        let uuid = "44444444-4444-4444-4444-444444444444";
+        let sub = dir.join(uuid).join("subagents");
+        let _ = fs::create_dir_all(&sub);
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        let parent_path = dir.join(format!("{uuid}.jsonl"));
+        fs::write(&parent_path, format!("{}\n", live_line("p1", "/w", LIVE_PACE_MODEL, now - 90_000, None))).unwrap();
+        set_mtime(&parent_path, now - 60_000);
+        // The freshest write on disk is the subagent file itself -- if
+        // anything ever reported a subagent's own path instead of the
+        // enclosing directory, this would surface its distinct file stem.
+        let subagent_path = sub.join("quite-a-different-name.jsonl");
+        fs::write(&subagent_path, format!("{}\n", live_line("a1", "/w", LIVE_PACE_MODEL, now - 2_000, None))).unwrap();
+        set_mtime(&subagent_path, now);
+        let got = live_session_in(&dir, now).expect("the subagent write is fresh");
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(got.session_id, uuid);
+        assert_ne!(got.session_id, "quite-a-different-name");
     }
 
     #[test]
