@@ -15,23 +15,45 @@ import { inlineLocaleImports } from "./inline-locales.mjs";
 // and src/inventory.ts is appended after, as one combined source. Unlike
 // synthetic.ts, inventory.ts also imports the Tauri bridge and ledger.ts --
 // neither is reachable from describeAgent(), so both import lines are
-// dropped rather than resolved. Its own top-level `function render(): void`
-// (the DOM orchestrator) would otherwise collide with i18n.ts's exported
-// `render(locale, msg)`; only the declaration is renamed, not its call
-// sites, which is safe because nothing this file calls -- describeAgent()
-// and the plain helpers under it -- ever calls the tab's own render().
+// dropped rather than resolved. describeAgent() does reach src/format.ts's
+// money()/tokens(), so that file is inlined the same way i18n.ts is: its own
+// `./i18n` import is dropped (localeTag is already in scope from the inlined
+// i18n source above it) and its body is appended ahead of inventory.ts's, with
+// inventory.ts's own import of the two functions dropped in turn. Its own
+// top-level `function render(): void` (the DOM orchestrator) would otherwise
+// collide with i18n.ts's exported `render(locale, msg)`; only the declaration
+// is renamed, not its call sites, which is safe because nothing this file
+// calls -- describeAgent() and the plain helpers under it -- ever calls the
+// tab's own render().
+// Cached after the first build: every test below calls loadInventoryModule()
+// again, and re-reading, re-inlining and re-transpiling this combined source
+// from scratch each time was most of this file's runtime. Sharing one built
+// module is safe because every test awaits setActiveLocale() right before it
+// reads anything -- nothing here depends on whatever locale a previous test
+// left active -- and node:test runs a file's top-level tests one at a time,
+// never overlapping two of these calls.
+let cachedModule = null;
 async function loadInventoryModule() {
+  if (!cachedModule) cachedModule = buildInventoryModule();
+  return cachedModule;
+}
+
+async function buildInventoryModule() {
   const i18nSource = await readFile(new URL("../src/i18n.ts", import.meta.url), "utf8");
   const localesDir = new URL("../src/locales/", import.meta.url);
   const inlinedI18n = await inlineLocaleImports(i18nSource, localesDir);
+  const formatSource = await readFile(new URL("../src/format.ts", import.meta.url), "utf8");
+  const strippedFormat = formatSource.replace('import { localeTag } from "./i18n";', "");
+  if (strippedFormat === formatSource) throw new Error("no substitution matched -- src/format.ts's source shape moved under this test");
   const inventorySource = await readFile(new URL("../src/inventory.ts", import.meta.url), "utf8");
   const stripped = inventorySource
     .replace('import { invoke } from "@tauri-apps/api/core";', "")
     .replace('import { showLedger } from "./ledger";', "")
     .replace('import { localeTag, plural, t, tm, type Msg } from "./i18n";', "")
+    .replace('import { money, tokens } from "./format";', "")
     .replace("function render(): void {", "function __unusedInventoryRender(): void {");
   if (stripped === inventorySource) throw new Error("no substitution matched -- src/inventory.ts's source shape moved under this test");
-  const code = ts.transpileModule(`${inlinedI18n}\n${stripped}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+  const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${stripped}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 
@@ -117,4 +139,21 @@ test("describeAgent() falls back through folder -> area -> client in en", async 
   assert.equal(describeAgent(WINDOWS_NO_CWD).place, "folder unknown");
   assert.equal(describeAgent(UNPRICED_AREA_ONLY).place, "dev/scratchpad · scratchpad");
   assert.equal(describeAgent(PRICED_WITH_CLIENT).place, "dev/acme-webapp · acme-portal/web · for Acme Co");
+});
+
+// renderAgents() (src/inventory.ts) shows this sentence instead of
+// empty.runningAgents when a scan of the running agents failed -- a failure
+// must say so rather than reading exactly like the "nothing running" case.
+// This calls the module's own t() with the fully-qualified key, the same way
+// renderAgents() reaches it through its local T() alias, so a missing key or
+// a var-name typo in any locale's register fails here.
+test("empty.runningAgentsError carries the error message with no leftover {error} in every locale", async () => {
+  const { t: translate, setActiveLocale, LOCALES: locales } = await loadInventoryModule();
+  for (const locale of locales) {
+    setActiveLocale(locale);
+    const rendered = translate("inventory.empty.runningAgentsError", { error: "permission denied" });
+    assert.ok(!hasLeftoverBraces(rendered), `${locale}: left a {var} unfilled: "${rendered}"`);
+    assert.ok(!looksLikeARawKey(rendered), `${locale}: rendered as its own raw key: "${rendered}"`);
+    assert.ok(rendered.includes("permission denied"), `${locale}: error message missing from the rendered sentence: "${rendered}"`);
+  }
 });

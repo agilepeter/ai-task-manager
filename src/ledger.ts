@@ -4,6 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { localeTag, plural, t } from "./i18n";
+import { money } from "./format";
 
 const T = (k: string, v?: Record<string, string | number>) => t(`ledger.${k}`, v);
 
@@ -56,10 +57,6 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
   );
-}
-
-function money(n: number): string {
-  return n >= 10 ? `$${Math.round(n).toLocaleString(localeTag())}` : `$${n.toFixed(2)}`;
 }
 
 function cap(s: string): string {

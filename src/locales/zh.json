@@ -597,6 +597,7 @@
   "inventory.empty.running": "当前没有正在运行的 MCP 服务器。它们会在客户端请求时启动。",
   "inventory.empty.runningError": "无法读取进程列表：{error}",
   "inventory.empty.runningAgents": "当前没有正在运行的智能体。",
+  "inventory.empty.runningAgentsError": "无法列出正在运行的智能体：{error}",
   "inventory.empty.signins": "无法读取登录位置信息。",
   "inventory.empty.tools": "未找到本应用已知的任何 AI 工具。",
   "inventory.empty.mcp": "此范围内未配置任何 MCP 服务器。",

@@ -228,7 +228,7 @@ async fn get_running() -> Result<Vec<procs::RunningServer>, String> {
 /// on every Inventory open and after End task, so a finished session or a
 /// closed terminal drops off on the very next read.
 #[tauri::command]
-async fn get_running_agents() -> Result<Vec<aitm_core::procs::RunningAgent>, String> {
+async fn get_running_agents() -> Result<Vec<procs::RunningAgent>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let rules = clients::load_from(&clients::path());
         procs::agents_snapshot(&rules)

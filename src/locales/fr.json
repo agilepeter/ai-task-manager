@@ -609,6 +609,7 @@
   "inventory.empty.running": "Aucun serveur MCP n'est en cours d'exécution. Ils démarrent quand un client en demande un.",
   "inventory.empty.runningError": "Impossible de lire la liste des processus : {error}",
   "inventory.empty.runningAgents": "Aucun agent n'est en cours d'exécution pour le moment.",
+  "inventory.empty.runningAgentsError": "Impossible de lister les agents en cours d'exécution : {error}",
   "inventory.empty.signins": "Impossible de lire les emplacements de connexion.",
   "inventory.empty.tools": "Aucun des outils d'IA connus de cette application n'a été trouvé.",
   "inventory.empty.mcp": "Aucun serveur MCP configuré pour cette portée.",

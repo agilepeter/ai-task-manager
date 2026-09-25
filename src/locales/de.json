@@ -609,6 +609,7 @@
   "inventory.empty.running": "Keine MCP-Server laufen. Sie starten, wenn ein Client einen anfordert.",
   "inventory.empty.runningError": "Prozessliste konnte nicht gelesen werden: {error}",
   "inventory.empty.runningAgents": "Gerade läuft kein Agent.",
+  "inventory.empty.runningAgentsError": "Liste laufender Agenten konnte nicht gelesen werden: {error}",
   "inventory.empty.signins": "Anmeldeorte konnten nicht gelesen werden.",
   "inventory.empty.tools": "Keines der dieser App bekannten KI-Tools wurde gefunden.",
   "inventory.empty.mcp": "Keine MCP-Server für diesen Bereich konfiguriert.",

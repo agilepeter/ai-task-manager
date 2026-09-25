@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { showLedger } from "./ledger";
 import { localeTag, plural, t, tm, type Msg } from "./i18n";
+import { money, tokens } from "./format";
 
 const T = (k: string, v?: Record<string, string | number>) => t(`inventory.${k}`, v);
 
@@ -377,20 +378,6 @@ function upLabel(secs: number): string {
   return t("time.mins", { m: Math.max(1, m) });
 }
 
-/// B/M/K stay English, same house loanword rule as detail.ts's tokens().
-function tokens(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(0)}K`;
-  return String(Math.round(n));
-}
-
-/// Whole dollars from $10 up, cents below, same rule as ledger.ts/detail.ts's
-/// money(): $ stays a symbol, digit grouping follows the app's language.
-function money(n: number): string {
-  return n >= 10 ? `$${Math.round(n).toLocaleString(localeTag())}` : `$${n.toFixed(2)}`;
-}
-
 /// The last two path segments of a cwd ("/Users/x/dev/acme/web" -> "acme/web"),
 /// one segment when that is all there is. A display label, not a real path,
 /// so "/" reads fine even on a Windows-style cwd (which never reaches here
@@ -448,7 +435,7 @@ function renderAgents(list: RunningAgent[]): string {
   if (!list.length && !runningAgentsError) return "";
   const head = `<div class="inv-grouphead">${esc(T("running.agentsTitle"))} <span class="inv-grouphead-n">${list.length}</span></div>`;
   if (!list.length) {
-    return `${head}<p class="inv-empty">${esc(T("empty.runningAgents"))}</p>`;
+    return `${head}<p class="inv-empty">${esc(runningAgentsError ? T("empty.runningAgentsError", { error: runningAgentsError }) : T("empty.runningAgents"))}</p>`;
   }
   const lead = `<p class="inv-note run-lead">${esc(plural("inventory.running.agentCount", list.length))}</p>`;
   const rows = list
@@ -461,7 +448,7 @@ function renderAgents(list: RunningAgent[]): string {
         ? `<div class="inv-row-sub"${d.tip ? ` title="${esc(d.tip)}"` : ""}>${esc(d.pace)}</div>`
         : "";
       return `
-      <div class="inv-row run-row agent-row">
+      <div class="inv-row run-row">
         <div class="inv-row-main">
           <span class="inv-name">${esc(d.title)}</span>
           <span class="spacer"></span>

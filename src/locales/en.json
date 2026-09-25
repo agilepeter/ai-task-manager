@@ -609,6 +609,7 @@
   "inventory.empty.running": "No MCP servers are running. They start when a client asks for one.",
   "inventory.empty.runningError": "Could not read the process list: {error}",
   "inventory.empty.runningAgents": "No agent is running right now.",
+  "inventory.empty.runningAgentsError": "Could not list running agents: {error}",
   "inventory.empty.signins": "Could not read the sign-in locations.",
   "inventory.empty.tools": "None of the AI tools this app knows were found.",
   "inventory.empty.mcp": "No MCP servers configured for this scope.",

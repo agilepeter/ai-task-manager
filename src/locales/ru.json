@@ -621,6 +621,7 @@
   "inventory.empty.running": "Ни один MCP-сервер не выполняется. Они запускаются, когда клиенту это нужно.",
   "inventory.empty.runningError": "Не удалось прочитать список процессов: {error}",
   "inventory.empty.runningAgents": "Сейчас не запущен ни один агент.",
+  "inventory.empty.runningAgentsError": "Не удалось прочитать список запущенных агентов: {error}",
   "inventory.empty.signins": "Не удалось прочитать расположения входов.",
   "inventory.empty.tools": "Не найдено ни одного из известных приложению ИИ-инструментов.",
   "inventory.empty.mcp": "Для этой области не настроено ни одного MCP-сервера.",

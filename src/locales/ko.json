@@ -597,6 +597,7 @@
   "inventory.empty.running": "실행 중인 MCP 서버가 없습니다. 클라이언트가 요청하면 시작됩니다.",
   "inventory.empty.runningError": "프로세스 목록을 읽지 못했습니다: {error}",
   "inventory.empty.runningAgents": "지금 실행 중인 에이전트가 없습니다.",
+  "inventory.empty.runningAgentsError": "실행 중인 에이전트 목록을 읽지 못했습니다: {error}",
   "inventory.empty.signins": "로그인 위치를 읽지 못했습니다.",
   "inventory.empty.tools": "이 앱이 아는 AI 도구가 발견되지 않았습니다.",
   "inventory.empty.mcp": "이 범위에 설정된 MCP 서버가 없습니다.",
