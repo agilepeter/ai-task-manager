@@ -306,6 +306,7 @@ export function handle(cmd: string, args: Args = {}): unknown {
     case "get_inventory": return inventory();
     case "get_running": return structuredClone(RUNNING.filter((r) => !endedServers.has(r.name)));
     case "get_running_agents": return structuredClone(AGENTS);
+    case "get_agent_spend": return (fixture as any).agentSpend ?? [];
     case "end_task": {
       if (!RUNNING.some((r) => r.name === args.name)) throw "that server is not running any more";
       endedServers.add(String(args.name));

@@ -4184,6 +4184,15 @@ mod tests {
         println!("{}", serde_json::to_string(&collect(None)).unwrap());
     }
 
+    /// Prints this machine's real 30-day agent spend, same call `get_agent_spend`
+    /// makes. `cargo test -p aitm-core live_agent_spend -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_agent_spend() {
+        let _ = collect(None);
+        println!("{}", serde_json::to_string(&agent_spend(30)).unwrap());
+    }
+
     /// Diagnostic (ignored): how many entries the scan cache would list as
     /// sessions without the new "not a sidechain" filter, against how many
     /// `claude_sessions` actually lists now, plus the top three

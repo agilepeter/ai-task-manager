@@ -9,7 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { displayMetricDetail, displayMetricLabel, localeTag, plural, t } from "./i18n";
-import { money, tokens } from "./format";
+import { money, relativeActivity, tokens } from "./format";
 
 interface Metric {
   label: string;
@@ -95,6 +95,11 @@ interface SessionSpend {
   topModel: string | null;
   areas: [string, number][];
   dayCost: number | null;
+  /** This session's own subagent runs' share of `cost` (already included in
+   *  it), broken out only for display -- see inventory.agents.spend for the
+   *  same {runs} composer used here. */
+  subagentCost: number;
+  subagentRuns: number;
 }
 
 interface ClientRule {
@@ -642,16 +647,12 @@ function span(s: SessionSpend): [string, string] {
 
 /// "active today", "active yesterday", "last active 12 days ago": when the
 /// session last wrote a line. An old session still being appended to is the
-/// one worth finding, and this is what gives it away.
+/// one worth finding, and this is what gives it away. The day-bucketing
+/// itself lives in relativeActivity() (src/format.ts), shared with the
+/// per-agent spend line so the two never disagree about where "today" ends.
 function lastActive(s: SessionSpend): string {
   if (s.endedMs === null) return "";
-  const days = Math.floor((Date.now() - s.endedMs) / 86_400_000);
-  if (days <= 0) return t("detail.session.activeToday");
-  if (days === 1) return t("detail.session.activeYesterday");
-  // days is always >= 2 here (0 and 1 handled above), so no guard for 0/1.
-  // plural() still picks the right form (ru's few/many, zh's other) for
-  // whatever count actually lands here.
-  return plural("detail.session.lastActive", days);
+  return relativeActivity(s.endedMs, Date.now());
 }
 
 /// MB/KB stay English: format tokens, not prose, same as tokens()'s B/M/K and money()'s $.
@@ -672,6 +673,9 @@ function sessionRows(sessions: SessionSpend[]): string {
         s.topModel ? t("detail.session.mostly", { model: s.topModel }) : "",
         where,
         s.dayCost !== null ? t("detail.session.over30Days", { money: money(s.cost) }) : "",
+        s.subagentRuns > 0
+          ? t("detail.session.subagentShare", { cost: money(s.subagentCost), runs: plural("inventory.agents.runCount", s.subagentRuns) })
+          : "",
         s.bytes ? fileSize(s.bytes) : "",
       ]
         .filter(Boolean)

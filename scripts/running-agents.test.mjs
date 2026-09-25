@@ -17,8 +17,8 @@ import { inlineLocaleImports } from "./inline-locales.mjs";
 // neither is reachable from describeAgent(), so both import lines are
 // dropped rather than resolved. describeAgent() does reach src/format.ts's
 // money()/tokens(), so that file is inlined the same way i18n.ts is: its own
-// `./i18n` import is dropped (localeTag is already in scope from the inlined
-// i18n source above it) and its body is appended ahead of inventory.ts's, with
+// `./i18n` import is dropped (localeTag, plural and t are already in scope
+// from the inlined i18n source above it) and its body is appended ahead of inventory.ts's, with
 // inventory.ts's own import of the two functions dropped in turn. Its own
 // top-level `function render(): void` (the DOM orchestrator) would otherwise
 // collide with i18n.ts's exported `render(locale, msg)`; only the declaration
@@ -43,14 +43,14 @@ async function buildInventoryModule() {
   const localesDir = new URL("../src/locales/", import.meta.url);
   const inlinedI18n = await inlineLocaleImports(i18nSource, localesDir);
   const formatSource = await readFile(new URL("../src/format.ts", import.meta.url), "utf8");
-  const strippedFormat = formatSource.replace('import { localeTag } from "./i18n";', "");
+  const strippedFormat = formatSource.replace('import { localeTag, plural, t } from "./i18n";', "");
   if (strippedFormat === formatSource) throw new Error("no substitution matched -- src/format.ts's source shape moved under this test");
   const inventorySource = await readFile(new URL("../src/inventory.ts", import.meta.url), "utf8");
   const stripped = inventorySource
     .replace('import { invoke } from "@tauri-apps/api/core";', "")
     .replace('import { showLedger } from "./ledger";', "")
     .replace('import { localeTag, plural, t, tm, type Msg } from "./i18n";', "")
-    .replace('import { money, tokens } from "./format";', "")
+    .replace('import { money, relativeActivity, tokens } from "./format";', "")
     .replace("function render(): void {", "function __unusedInventoryRender(): void {");
   if (stripped === inventorySource) throw new Error("no substitution matched -- src/inventory.ts's source shape moved under this test");
   const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${stripped}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;

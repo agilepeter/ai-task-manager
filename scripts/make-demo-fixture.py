@@ -43,8 +43,8 @@ write(claude / "settings.json", json.dumps({
     "permissions": {"allow": ["Bash(git status)", "Bash(npm test)"], "deny": ["Read(./.env)", "Bash(git push --force*)", "Bash(rm -rf*)"]},
     "hooks": {"SessionEnd": [{"hooks": [{"type": "command", "command": "true"}]}]},
 }, indent=2))
-write(claude / "agents" / "reviewer.md", "---\nname: reviewer\nmodel: sonnet\n---\nReviews diffs.\n")
-write(claude / "agents" / "researcher.md", "---\nname: researcher\n---\nFinds things.\n")
+write(claude / "agents" / "deploy-checker.md", "---\nname: deploy-checker\ntools: Bash, Read\nmodel: sonnet\n---\nChecks a deploy before it ships.\n")
+write(claude / "agents" / "release-notes.md", "---\nname: release-notes\n---\nDrafts release notes from merged PRs.\n")
 for skill in ["deploy", "release-notes", "invoice"]:
     write(claude / "skills" / skill / "SKILL.md", f"---\nname: {skill}\n---\n")
 for folder in ["acme-portal/web", "acme-portal/api", "northwind-api", "internal-tools", "blog"]:
@@ -109,6 +109,55 @@ while t < now:
 first = json.loads(lines[0]); first["cwd"] = str(work); lines[0] = compact(first)
 write(project_dir / f"{sid}.jsonl", "\n".join(lines) + "\n")
 
+# One session with a subagent fan-out: deploy-checker (a real custom agent,
+# so it stops reading "never run"), plus general-purpose and Explore (the
+# built-ins Claude Code ships, never a Definition file). release-notes gets
+# no subagent activity at all, so it stays the one unused custom agent.
+# Area is northwind-api, same as the long-open session below: make-demo-
+# fixture.py runs with AITM_AREA=northwind-api (see env, below), which is
+# what live_sessions() uses for the fixture's own "sessions.area" -- and
+# src/detail.ts's main Sessions list calls get_sessions with no area filter
+# at all, which src/demo/mock.ts then serves from that same "area" array, so
+# a session outside this one area would never actually show up there.
+host_start = now - datetime.timedelta(days=2, hours=3)
+host_sid = str(uuid.uuid4())
+host_lines = []
+t = host_start
+for _ in range(5):
+    t += datetime.timedelta(minutes=random.uniform(2, 6))
+    host_lines.append(compact({
+        "type": "assistant", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": host_sid,
+        "cwd": str(work / "northwind-api"), "requestId": f"req_{uuid.uuid4().hex[:12]}", "costUSD": round(random.uniform(0.1, 0.6), 4),
+        "message": {"id": f"msg_{uuid.uuid4().hex[:16]}", "model": "claude-sonnet-5", "content": [{"type": "text", "text": "."}],
+                    "usage": {"input_tokens": random.randint(800, 4000), "output_tokens": random.randint(150, 900),
+                              "cache_read_input_tokens": random.randint(10000, 60000)}},
+    }))
+first = json.loads(host_lines[0]); first["cwd"] = str(work); host_lines[0] = compact(first)
+write(project_dir / f"{host_sid}.jsonl", "\n".join(host_lines) + "\n")
+
+def subagent_transcript(agent_name, start, turns, model):
+    """A sidechain transcript stamped with attributionAgent, same line shape
+    the real engine parses (crates/core/src/spend.rs's claude_line)."""
+    lines = []
+    t = start
+    for _ in range(turns):
+        t += datetime.timedelta(minutes=random.uniform(1, 4))
+        lines.append(compact({
+            "type": "assistant", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": host_sid,
+            "cwd": str(work / "northwind-api"), "requestId": f"req_{uuid.uuid4().hex[:12]}", "costUSD": round(random.uniform(0.05, 0.4), 4),
+            "isSidechain": True, "attributionAgent": agent_name,
+            "message": {"id": f"msg_{uuid.uuid4().hex[:16]}", "model": model, "content": [{"type": "text", "text": "."}],
+                        "usage": {"input_tokens": random.randint(500, 3000), "output_tokens": random.randint(100, 600),
+                                  "cache_read_input_tokens": random.randint(5000, 40000)}},
+        }))
+    return "\n".join(lines) + "\n"
+
+sub_dir = project_dir / host_sid / "subagents"
+write(sub_dir / "deploy-checker-1.jsonl", subagent_transcript("deploy-checker", host_start + datetime.timedelta(minutes=10), 3, "claude-sonnet-5"))
+write(sub_dir / "deploy-checker-2.jsonl", subagent_transcript("deploy-checker", now - datetime.timedelta(hours=6), 2, "claude-haiku-4-5-20251001"))
+write(sub_dir / "general-purpose.jsonl", subagent_transcript("general-purpose", host_start + datetime.timedelta(minutes=20), 2, "claude-sonnet-5"))
+write(sub_dir / "explore.jsonl", subagent_transcript("Explore", host_start + datetime.timedelta(minutes=30), 4, "claude-haiku-4-5-20251001"))
+
 # --- run the real engine against it -----------------------------------------
 env = dict(os.environ, HOME=str(home), CLAUDE_CONFIG_DIR="", XDG_CONFIG_HOME="", AITM_AREA="northwind-api")
 env.pop("CLAUDE_CONFIG_DIR"); env.pop("XDG_CONFIG_HOME")
@@ -134,6 +183,7 @@ fixture = {
     "spend": live("live_spend", "[{"),
     "sessions": live("live_sessions", '{"area"'),
     "audit": live("live_audit", '{"generatedAt"'),
+    "agentSpend": live("live_agent_spend", "[{"),
 }
 # The fictional home's path must not leak a real one, and reads better short.
 text = json.dumps(fixture).replace(str(home), "/Users/dana")
@@ -141,6 +191,6 @@ assert os.path.expanduser("~") not in text, "the real home directory leaked into
 write(ROOT / "src" / "demo-fixture.json", json.dumps(json.loads(text), indent=1))
 shutil.rmtree(home, ignore_errors=True)
 f = json.loads(text)
-print("fixture written: %d MCP servers, %d tools, spend 30d $%.0f, %d areas, audit %s/100" % (
+print("fixture written: %d MCP servers, %d tools, spend 30d $%.0f, %d areas, %d agent-spend rows, audit %s/100" % (
     len(f["inventory"]["mcpServers"]), len(f["inventory"]["tools"]), f["spend"][0]["last30"]["cost"],
-    len(f["spend"][0]["projects"][0]["areas"]), f["audit"]["score"]))
+    len(f["spend"][0]["projects"][0]["areas"]), len(f["agentSpend"]), f["audit"]["score"]))

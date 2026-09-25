@@ -412,6 +412,12 @@ fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     inv.opportunities.extend(coaching::opportunities(claude, &spend::claude_sessions(None, None, 500)));
     inv.opportunities.extend(procs::opportunities(&procs::snapshot(&inv.mcp_servers)));
     inv.opportunities.extend(drift::opportunities(&drift::scan()));
+    // Same 30-day window the agent-spend view itself reads, so the opportunity
+    // and the numbers behind it can never disagree about what "recent" means.
+    let agent_spend = spend::agent_spend(30);
+    let any_subagent_runs = !agent_spend.is_empty();
+    let used_agents: HashSet<String> = agent_spend.into_iter().map(|a| a.name).collect();
+    inv.opportunities.extend(inventory::agent_usage_opportunities(&inv.agents, &used_agents, any_subagent_runs));
     // Gaps first, then things to learn, each in the order found.
     inv.opportunities.sort_by_key(|o| o.kind != "tighten");
     (inv, spend)
@@ -472,6 +478,17 @@ async fn get_sessions(area: Option<String>, day: Option<String>) -> Result<Vec<s
     tauri::async_runtime::spawn_blocking(move || spend::claude_sessions(area.as_deref(), day.as_deref(), 40))
         .await
         .map_err(|e| format!("sessions: {e}"))
+}
+
+/// 30 days of subagent spend, grouped by who ran it: a custom agent's own
+/// name, a built-in one Claude Code ships (`general-purpose`, `Explore`,
+/// `Plan`, ...), or "unknown" for a transcript with no attribution line at
+/// all. Same scan cache the rest of the spend view reads; no rescan.
+#[tauri::command]
+async fn get_agent_spend() -> Result<Vec<spend::AgentSpend>, String> {
+    tauri::async_runtime::spawn_blocking(|| spend::agent_spend(30))
+        .await
+        .map_err(|e| format!("agent spend: {e}"))
 }
 
 /// Shows a session's log file in the OS file manager. Read-only, and the
@@ -3671,6 +3688,7 @@ pub fn run() {
             get_trust,
             get_forecast,
             get_sessions,
+            get_agent_spend,
             reveal_session,
             client_rollup,
             save_clients,

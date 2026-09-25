@@ -10,6 +10,7 @@
 
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::i18n::{self, Msg};
@@ -174,6 +175,7 @@ pub(crate) const FINDING_IDS: &[&str] = &[
     "agents-none",
     "agents-model-unset",
     "hooks-none",
+    "agent-unused",
 ];
 
 // ---------------------------------------------------------------------------
@@ -478,6 +480,38 @@ pub fn opportunities_for(inv: &Inventory) -> Vec<Opportunity> {
         );
     }
     out
+}
+
+/// Custom agents nobody called in the window `used`/`any_runs` describe --
+/// `used` is every name `spend::agent_spend(days)` returned with at least
+/// one run (a built-in name or "unknown" can sit in there too; only the
+/// ones that also match a `Definition` in `agents` matter here), `any_runs`
+/// is whether that call returned anything at all. `any_runs` gates the
+/// whole thing rather than each agent being judged one at a time: a machine
+/// that ran zero subagents in the window has said nothing about any one
+/// custom agent being unused, it simply has no subagent data yet, so no
+/// opportunity fires. Separate from `opportunities_for` (which only ever
+/// sees the `Inventory` itself) because this needs the spend scan too;
+/// called from where the two are already both in hand
+/// (`enriched_inventory` in `src-tauri/src/lib.rs`). An opportunity to
+/// mention, never an audit check: `audit.rs` never asks for "agent-unused",
+/// because a custom agent nobody happened to call this month is not a
+/// hygiene or security gap the way an unpinned MCP server is.
+pub fn agent_usage_opportunities(agents: &[Definition], used: &HashSet<String>, any_runs: bool) -> Vec<Opportunity> {
+    if !any_runs {
+        return Vec::new();
+    }
+    let unused = agents.iter().filter(|a| !used.contains(&a.name)).count();
+    if unused == 0 {
+        return Vec::new();
+    }
+    vec![Opportunity::from_msgs(
+        "agent-unused",
+        "learn",
+        Msg::new("finding.agent-unused.title").count(unused as i64),
+        Some(Msg::new("finding.agent-unused.detail")),
+        None,
+    )]
 }
 
 /// A single top-level `key: value` from a leading `---` frontmatter block.
@@ -989,6 +1023,49 @@ mod tests {
         assert!(!unpinned.detail.contains("cloud"));
     }
 
+    #[test]
+    fn agent_unused_fires_only_when_subagents_ran_at_all() {
+        let agents = vec![Definition { name: "reviewer".into(), scope: "user".into(), project: None, model: None }];
+        let never_ran: HashSet<String> = HashSet::new();
+        // Nothing on this machine has run a subagent in the window at all --
+        // an idle custom agent proves nothing yet, so this must stay quiet.
+        assert!(agent_usage_opportunities(&agents, &never_ran, false).is_empty());
+
+        // Same "never ran" set, but now the machine did run subagents in the
+        // window (just never this one): the opportunity fires.
+        let found = agent_usage_opportunities(&agents, &never_ran, true);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "agent-unused");
+        assert_eq!(found[0].kind, "learn");
+        assert!(found[0].title.contains('1'), "{}", found[0].title);
+
+        // Once something did call it, there is nothing left to flag.
+        let ran: HashSet<String> = ["reviewer".to_string()].into_iter().collect();
+        assert!(agent_usage_opportunities(&agents, &ran, true).is_empty());
+    }
+
+    #[test]
+    fn agent_unused_ignores_built_in_names_and_skills() {
+        let agents = vec![Definition { name: "reviewer".into(), scope: "user".into(), project: None, model: None }];
+        // "general-purpose" and "Explore" are built-ins Claude Code ships --
+        // they never have a Definition file, so they can never appear in
+        // `agents`. A spend row for one of them landing in `used` must not
+        // be mistaken for the custom agent's own name, nor make the
+        // function invent an entry for a name `agents` never listed.
+        let used: HashSet<String> = ["general-purpose".to_string(), "Explore".to_string()].into_iter().collect();
+        let found = agent_usage_opportunities(&agents, &used, true);
+        assert_eq!(found.len(), 1, "built-in spend rows are not definitions and cannot mask the real one");
+        assert_eq!(found[0].id, "agent-unused");
+
+        // Skills are never passed in `agents` at all (the caller sends
+        // `inv.agents`, never `inv.skills`), so a skill sharing a built-in's
+        // name changes nothing here -- there is no separate check for it
+        // because there is no code path that could see one.
+        let mut skills_and_builtins = used.clone();
+        skills_and_builtins.insert("deploy".to_string()); // a skill's name, hypothetically
+        assert_eq!(agent_usage_opportunities(&agents, &skills_and_builtins, true).len(), 1);
+    }
+
     /// A missing translation key renders as its own literal key text instead
     /// of failing -- that is the silent failure mode `render()` is built to
     /// have, so it takes a real fixture run to catch it. `loose` above
@@ -1059,10 +1136,28 @@ mod tests {
     }
 
     /// Prints this machine's real inventory. `cargo test live_scan -- --ignored --nocapture`
+    /// Folds in the agent-usage opportunity the same way `enriched_inventory`
+    /// (`src-tauri/src/lib.rs`) does for the real app's Inventory tab, from
+    /// the same `spend::agent_spend(30)` call, so the demo fixture this test
+    /// backs (`scripts/make-demo-fixture.py`) shows it too when the
+    /// synthetic home it scans has both an idle custom agent and some
+    /// subagent activity -- the same real engine, not a hand-added row.
     #[test]
     #[ignore]
     fn live_scan() {
-        println!("{}", serde_json::to_string_pretty(&scan()).unwrap());
+        let mut inv = scan();
+        // agent_spend() only ever reads the persisted scan cache, never
+        // populates it -- collect() is what actually walks the session
+        // logs. This test runs as its own process (make-demo-fixture.py
+        // shells out to it separately from live_agent_spend), so without
+        // this call the cache is empty here even though a sibling call
+        // already filled it in a different process.
+        let _ = crate::spend::collect(None);
+        let agent_spend = crate::spend::agent_spend(30);
+        let any_runs = !agent_spend.is_empty();
+        let used: HashSet<String> = agent_spend.into_iter().map(|a| a.name).collect();
+        inv.opportunities.extend(agent_usage_opportunities(&inv.agents, &used, any_runs));
+        println!("{}", serde_json::to_string_pretty(&inv).unwrap());
     }
 
     #[test]

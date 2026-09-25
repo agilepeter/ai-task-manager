@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { showLedger } from "./ledger";
 import { localeTag, plural, t, tm, type Msg } from "./i18n";
-import { money, tokens } from "./format";
+import { money, relativeActivity, tokens } from "./format";
 
 const T = (k: string, v?: Record<string, string | number>) => t(`inventory.${k}`, v);
 
@@ -93,6 +93,19 @@ interface Definition {
   model: string | null;
 }
 
+/// 30 days of one agent's subagent runs, grouped by the name a transcript
+/// was stamped with -- a custom Definition's own name, a built-in Claude
+/// Code ships ("general-purpose", "Explore", "Plan", ...), or "unknown" for
+/// a transcript with no attribution line at all.
+interface AgentSpend {
+  name: string;
+  runs: number;
+  cost: number;
+  tokens: number;
+  lastUsedMs: number;
+  topModel: string | null;
+}
+
 interface Opportunity {
   id: string;
   kind: "tighten" | "learn";
@@ -152,6 +165,7 @@ let running: RunningServer[] = [];
 let runningError = "";
 let runningAgents: RunningAgent[] = [];
 let runningAgentsError = "";
+let agentSpend: AgentSpend[] = [];
 let signIns: Diagnosis[] = [];
 let ending = "";
 let scopeFilter = ALL_SCOPES;
@@ -582,10 +596,69 @@ function defRows(list: Definition[]): string {
     .join("");
 }
 
+/// The one place a spend row becomes the sentence a Definition row (or a
+/// built-in agent row) shows under its name -- pure, so every locale is
+/// exercised by feeding it a fixed `nowMs` rather than the live clock. `s`
+/// is `undefined` when the 30-day scan carries no row for this name at all,
+/// same reading as a row that carries one with zero runs.
+export function describeAgentSpend(s: AgentSpend | undefined, nowMs: number): string {
+  if (!s || s.runs <= 0) return T("agents.neverRun");
+  return T("agents.spend", {
+    runs: plural("inventory.agents.runCount", s.runs),
+    cost: money(s.cost),
+    when: relativeActivity(s.lastUsedMs, nowMs),
+  });
+}
+
+/// Custom agent rows, each with its 30-day spend line underneath the name --
+/// skills use the plain defRows() above since they carry no spend of their
+/// own to show.
+function agentRows(list: Definition[], spend: Map<string, AgentSpend>, nowMs: number): string {
+  return list
+    .map(
+      (d) => `
+      <div class="inv-row">
+        <div class="inv-row-main">
+          <span class="inv-name">${esc(d.name)}</span>
+          <span class="inv-sub">${esc(describeAgentSpend(spend.get(d.name), nowMs))}</span>
+        </div>
+        <div class="inv-row-meta">${d.model ? `<span class="inv-fact">${esc(d.model)}</span>` : ""}${scopeChip(d)}</div>
+      </div>`,
+    )
+    .join("");
+}
+
+/// Agents Claude Code ships with -- never a file on disk, so never a
+/// Definition, only ever a name a subagent transcript was stamped with.
+/// Excludes every custom agent's own name (`allAgents`, unfiltered by scope:
+/// a project-scoped row hidden by the current filter must still count as
+/// "already listed", not reappear here) and "unknown" (a transcript with no
+/// attribution line at all is missing data, not an agent to name).
+function builtInAgentRows(allAgents: Definition[], spend: AgentSpend[], nowMs: number): string {
+  const customNames = new Set(allAgents.map((a) => a.name));
+  const builtIns = spend.filter((s) => s.name !== "unknown" && !customNames.has(s.name));
+  if (!builtIns.length) return "";
+  const rows = builtIns
+    .map(
+      (s) => `
+      <div class="inv-row">
+        <div class="inv-row-main">
+          <span class="inv-name">${esc(s.name)}</span>
+          <span class="inv-sub">${esc(describeAgentSpend(s, nowMs))}</span>
+        </div>
+      </div>`,
+    )
+    .join("");
+  return (
+    `<div class="inv-grouphead">${esc(T("agents.builtIn"))} <span class="inv-grouphead-n">${builtIns.length}</span></div>` +
+    `<p class="inv-note">${esc(T("agents.builtInHint"))}</p>${rows}`
+  );
+}
+
 /// Agents, skills and guardrails are all "how this machine is configured",
 /// they rarely change, and each was its own accordion. Eight collapsible
 /// sections is a wall; these three are one, with sub-headings inside.
-function renderSetup(inv: Inventory, agents: Definition[], skills: Definition[]): string {
+function renderSetup(inv: Inventory, agents: Definition[], skills: Definition[], spend: AgentSpend[]): string {
   const p = inv.permissions;
   const guardrails = [
     [T("setup.defaultModel"), inv.model ?? T("setup.modelNotPinned")],
@@ -606,8 +679,14 @@ function renderSetup(inv: Inventory, agents: Definition[], skills: Definition[])
   const defs = (title: string, list: Definition[], hint: string) =>
     `<div class="inv-grouphead">${esc(title)} <span class="inv-grouphead-n">${list.length}</span></div>` +
     (list.length ? defRows(list) : `<p class="inv-empty">${esc(hint)}</p>`);
+  const nowMs = Date.now();
+  const spendByName = new Map(spend.map((s) => [s.name, s]));
+  const agentsBody =
+    `<div class="inv-grouphead">${esc(T("setup.agents"))} <span class="inv-grouphead-n">${agents.length}</span></div>` +
+    (agents.length ? agentRows(agents, spendByName, nowMs) : `<p class="inv-empty">${esc(T("empty.agents"))}</p>`) +
+    builtInAgentRows(inv.agents, spend, nowMs);
   const body =
-    defs(T("setup.agents"), agents, T("empty.agents")) +
+    agentsBody +
     defs(T("setup.skills"), skills, T("empty.skills")) +
     `<div class="inv-grouphead">${esc(T("setup.guardrails"))}</div>${guardrails}`;
   const count = agents.length + skills.length + p.allow + p.ask + p.deny + inv.hooks.length;
@@ -661,7 +740,7 @@ function render(): void {
     ${renderSignIns()}
     ${renderTools(inv)}
     ${renderMcp(mcp)}
-    ${renderSetup(inv, agents, skills)}`;
+    ${renderSetup(inv, agents, skills, agentSpend)}`;
 }
 
 /// Cheap next to a full scan, so it refreshes on its own whenever the view is
@@ -696,6 +775,19 @@ async function loadAgents(): Promise<void> {
   }
 }
 
+/// 30 days of subagent spend, grouped by who ran it. Same cadence as
+/// loadRunning()/loadAgents() -- no rescan, refreshed on every Inventory
+/// open -- but errors collapse to no rows rather than to the tab's own
+/// loadError: every custom agent then simply reads as "never run", which is
+/// the right answer when spend cannot be read at all, not a scan failure.
+async function loadAgentSpend(): Promise<AgentSpend[]> {
+  try {
+    return await invoke<AgentSpend[]>("get_agent_spend");
+  } catch {
+    return [];
+  }
+}
+
 async function load(): Promise<void> {
   try {
     inventory = await invoke<Inventory>("get_inventory");
@@ -714,6 +806,10 @@ async function load(): Promise<void> {
   void loadTrust();
   void loadRunning().then(render);
   void loadAgents().then(render);
+  void loadAgentSpend().then((rows) => {
+    agentSpend = rows;
+    render();
+  });
 }
 
 function show(view: View): void {
