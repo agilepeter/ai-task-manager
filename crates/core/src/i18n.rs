@@ -687,25 +687,30 @@ mod tests {
         non_empty(en, base).is_some() || ["one", "other"].iter().all(|f| non_empty(en, &format!("{base}.{f}")).is_some())
     }
 
+    /// Check prefixes (`check.<id>.<status>`) where NEITHER branch that
+    /// ever produces that prefix carries a detail Msg: pure data (the
+    /// joined tool or server names), or a deliberately empty pass detail;
+    /// see the `check(...)` calls in audit.rs's `run` and `agent_checks`.
+    /// "check.tools.info" is deliberately NOT here: its empty-list branch
+    /// has a real detail sentence even though its non-empty-list branch
+    /// does not, so the prefix as a whole still needs the key
+    /// `every_finding_and_check_id_has_title_and_detail_keys` below would
+    /// otherwise let it skip -- en.json cannot tell those two branches
+    /// apart, only the runtime data that picks between them can, which is
+    /// exactly why that one id cannot be folded into this derived-from-
+    /// en.json list. Hand-written, but no longer just trusted: kept
+    /// honest by `no_detail_registry_matches_the_english_dictionary` right
+    /// below the test that reads it.
+    const NO_DETAIL: &[&str] = &["check.mcp.configured", "check.perm-none.pass", "check.agent-tools.pass", "check.deny-shell.pass"];
+
     /// Every finding id each emitting module registers, and every check
     /// prefix `audit.rs` registers: `en.json` has a `.title` (bare, or the
-    /// full plural-form set) and a `.detail` (same) for each -- unless the
-    /// id is in `NO_DETAIL`, where NEITHER branch that produces this prefix
-    /// ever carries a detail Msg (pure data, or an empty pass detail; see
-    /// audit.rs's check_data). "check.tools.info" is deliberately NOT here:
-    /// its empty-list branch has a real detail sentence even though its
-    /// names branch does not, so the prefix as a whole still needs the key
-    /// this test would otherwise let it skip. This is the loud half of the
-    /// pair with `no_orphan_finding_or_check_keys` below: this one catches a
+    /// full plural-form set) and a `.detail` (same) for each, unless the
+    /// prefix is in `NO_DETAIL`. This is the loud half of the pair with
+    /// `no_orphan_finding_or_check_keys` below: this one catches a
     /// registered id nobody wrote a key for.
     #[test]
     fn every_finding_and_check_id_has_title_and_detail_keys() {
-        const NO_DETAIL: &[&str] = &[
-            "check.mcp.configured",
-            "check.perm-none.pass",
-            "check.agent-tools.pass",
-            "check.deny-shell.pass",
-        ];
         let en = dict("en");
         let mut prefixes: Vec<String> = crate::inventory::FINDING_IDS
             .iter()
@@ -722,6 +727,28 @@ mod tests {
                 assert!(has_key_or_forms(en, &format!("{prefix}.detail")), "{prefix}.detail is missing from en.json");
             }
         }
+    }
+
+    /// `NO_DETAIL` is hand-written, so nothing stops it drifting from
+    /// en.json as checks are added, renamed, or gain a detail sentence
+    /// they used not to have. This derives the same set straight from the
+    /// dictionary -- every `check.<id>.<status>` prefix from `CHECK_KEYS`
+    /// whose `.title` exists but whose `.detail` does not -- and asserts
+    /// it is exactly `NO_DETAIL`, so a future drift fails here instead of
+    /// silently passing the test above by skipping a detail key that now
+    /// actually exists (or missing one that stopped existing).
+    #[test]
+    fn no_detail_registry_matches_the_english_dictionary() {
+        let en = dict("en");
+        let mut derived: Vec<&str> = crate::audit::CHECK_KEYS
+            .iter()
+            .copied()
+            .filter(|prefix| has_key_or_forms(en, &format!("{prefix}.title")) && !has_key_or_forms(en, &format!("{prefix}.detail")))
+            .collect();
+        derived.sort_unstable();
+        let mut expected = NO_DETAIL.to_vec();
+        expected.sort_unstable();
+        assert_eq!(derived, expected, "NO_DETAIL no longer matches every check.<id>.<status> in en.json with a title but no detail");
     }
 
     /// Same shape as the test above, for the five newer prefixes:

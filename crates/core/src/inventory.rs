@@ -334,6 +334,15 @@ pub fn mcp_from_claude_json(doc: &Value) -> Vec<McpServer> {
     out
 }
 
+/// Bash-shaped the way Claude Code itself spells a shell rule in a
+/// `permissions.deny` list: the bare tool name, or the tool name followed
+/// by a `(...)` matcher (e.g. `Bash(rm -rf:*)`). Case matters, matching
+/// every other rule string this app reads verbatim -- `bash` and
+/// `Bashful(x)` both fall through.
+fn is_shell_deny_rule(rule: &str) -> bool {
+    rule == "Bash" || rule.starts_with("Bash(")
+}
+
 pub fn permissions_from(settings: &Value) -> Permissions {
     let node = settings.get("permissions");
     let count = |key: &str| {
@@ -341,20 +350,12 @@ pub fn permissions_from(settings: &Value) -> Permissions {
             .and_then(Value::as_array)
             .map_or(0, Vec::len)
     };
-    // Bash-shaped the way Claude Code itself spells a shell rule: the bare
-    // tool name, or the tool name followed by a `(...)` matcher. Case
-    // matters, matching every other rule string this app reads verbatim.
     // Only this one boolean survives; the rule strings themselves are
     // never stored anywhere.
     let deny_covers_shell = node
         .and_then(|n| n.get("deny"))
         .and_then(Value::as_array)
-        .is_some_and(|rules| {
-            rules
-                .iter()
-                .filter_map(Value::as_str)
-                .any(|r| r == "Bash" || r.starts_with("Bash("))
-        });
+        .is_some_and(|rules| rules.iter().filter_map(Value::as_str).any(is_shell_deny_rule));
     Permissions {
         default_mode: node
             .and_then(|n| n.get("defaultMode"))
@@ -542,16 +543,33 @@ pub fn agent_usage_opportunities(agents: &[Definition], used: &HashSet<String>, 
     )]
 }
 
+/// The raw lines of a leading `---`…`---` frontmatter block, stopping
+/// before the closing `---` -- empty when `text` does not open with one.
+/// Indentation is preserved so a caller can tell a top-level `key:` line
+/// from one that is nested under it; the closing fence itself is never
+/// yielded, so running this iterator dry always means "no more top-level
+/// lines in the block", never "found the closing fence, now what". The one
+/// walk both `frontmatter_field` and `frontmatter_list` are built on.
+fn frontmatter_lines(text: &str) -> impl Iterator<Item = &str> {
+    let mut lines = text.lines();
+    let mut open = matches!(lines.next(), Some(first) if first.trim() == "---");
+    std::iter::from_fn(move || {
+        if !open {
+            return None;
+        }
+        match lines.next() {
+            Some(line) if line.trim() != "---" => Some(line),
+            _ => {
+                open = false;
+                None
+            }
+        }
+    })
+}
+
 /// A single top-level `key: value` from a leading `---` frontmatter block.
 fn frontmatter_field(text: &str, key: &str) -> Option<String> {
-    let mut lines = text.lines();
-    if lines.next()?.trim() != "---" {
-        return None;
-    }
-    for line in lines {
-        if line.trim() == "---" {
-            break;
-        }
+    for line in frontmatter_lines(text) {
         // Top-level keys only: an indented line belongs to a nested value.
         if line.starts_with([' ', '\t']) {
             continue;
@@ -566,23 +584,24 @@ fn frontmatter_field(text: &str, key: &str) -> Option<String> {
     None
 }
 
-/// A top-level `key:` from a leading `---` frontmatter block, as a list:
-/// either the inline comma form (`tools: Read, Grep, Bash(git:*)` -> 3
-/// items) or a block of indented `- item` lines under a bare `key:`.
-/// `None` when the key is absent, or present but yields no items --
-/// callers never see the difference between "not written" and "written
-/// empty", which is fine here because both mean "no allowlist". Same
-/// top-level-only scan as `frontmatter_field`, extended rather than
-/// replaced.
+/// A top-level `key:` from a leading `---` frontmatter block, as a list.
+/// Three YAML shapes are understood, and nothing else is:
+///   - an inline comma list on the key's own line, the whole value quoted
+///     or not (`tools: Read, Grep, Bash(git:*)` or
+///     `tools: "Read, Grep, Bash(git:*)"`);
+///   - a YAML flow list, each item quoted or not
+///     (`tools: [Read, "Grep", Bash(git:*)]`);
+///   - a block list: indented `- item` lines under a bare `key:`.
+///
+/// A plain scalar, a mapping, or anything else shaped differently is
+/// treated exactly like the key being absent. `None` when the key is
+/// absent, or present but yields no items -- callers never see the
+/// difference between "not written" and "written empty", which is fine
+/// here because both mean "no allowlist". Same top-level-only walk as
+/// `frontmatter_field`, via `frontmatter_lines`.
 fn frontmatter_list(text: &str, key: &str) -> Option<Vec<String>> {
-    let mut lines = text.lines();
-    if lines.next()?.trim() != "---" {
-        return None;
-    }
+    let mut lines = frontmatter_lines(text);
     while let Some(line) = lines.next() {
-        if line.trim() == "---" {
-            return None;
-        }
         if line.starts_with([' ', '\t']) {
             continue; // indented: belongs to a different key's nested value
         }
@@ -592,15 +611,24 @@ fn frontmatter_list(text: &str, key: &str) -> Option<Vec<String>> {
         }
         let v = v.trim().trim_matches(['"', '\'']).trim();
         if !v.is_empty() {
-            // Inline form on the key's own line.
-            let items: Vec<String> = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+            // Inline form on the key's own line: a plain comma list or a
+            // `[...]` flow list. Strip one wrapping bracket pair before
+            // splitting -- a flow list is otherwise indistinguishable from
+            // a comma list whose first and last items carry stray `[`/`]`
+            // characters -- then strip quotes from each item.
+            let v = v.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')).unwrap_or(v);
+            let items: Vec<String> = v
+                .split(',')
+                .map(|s| s.trim().trim_matches(['"', '\'']).trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
             return (!items.is_empty()).then_some(items);
         }
         // Block form: `- item` lines indented under the bare key, until the
         // next top-level key or the closing `---`.
         let mut items = Vec::new();
         for line in lines.by_ref() {
-            if line.trim() == "---" || !line.starts_with([' ', '\t']) {
+            if !line.starts_with([' ', '\t']) {
                 break;
             }
             if let Some(item) = line.trim().strip_prefix("- ") {
@@ -972,6 +1000,14 @@ mod tests {
     }
 
     #[test]
+    fn is_shell_deny_rule_matches_bash_bare_or_parenthesized_only() {
+        assert!(is_shell_deny_rule("Bash"));
+        assert!(is_shell_deny_rule("Bash(rm -rf:*)"));
+        assert!(!is_shell_deny_rule("bash"));
+        assert!(!is_shell_deny_rule("Bashful(x)"));
+    }
+
+    #[test]
     fn frontmatter_reads_top_level_keys_only() {
         let text = "---\nname: \"reviewer\"\nmodel: opus\nmetadata:\n  name: nested\n---\nname: body\n";
         assert_eq!(frontmatter_field(text, "name").as_deref(), Some("reviewer"));
@@ -993,6 +1029,20 @@ mod tests {
             frontmatter_list(block, "tools"),
             Some(vec!["Read".to_string(), "Grep".to_string(), "Bash(git:*)".to_string()])
         );
+
+        // Flow list, one item quoted -- the bug this test guards against:
+        // stripping only the outer quotes left the brackets glued onto the
+        // first and last items (`["[Read", "Grep]"]`).
+        let flow = "---\nname: r\ntools: [Read, \"Grep\", Bash(git:*)]\nmodel: opus\n---\nbody\n";
+        assert_eq!(
+            frontmatter_list(flow, "tools"),
+            Some(vec!["Read".to_string(), "Grep".to_string(), "Bash(git:*)".to_string()])
+        );
+
+        // The whole inline value quoted as one YAML string -- a comma
+        // list, not a flow list, so no brackets to strip.
+        let quoted_whole = "---\nname: r\ntools: \"Read, Grep\"\nmodel: opus\n---\nbody\n";
+        assert_eq!(frontmatter_list(quoted_whole, "tools"), Some(vec!["Read".to_string(), "Grep".to_string()]));
 
         // A block that runs to the closing `---` rather than another key.
         let block_to_close = "---\nname: r\ntools:\n  - Read\n---\nbody\n";

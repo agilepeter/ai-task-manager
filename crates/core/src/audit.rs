@@ -593,10 +593,16 @@ mod tests {
     fn agent_tools_check_is_absent_without_custom_agents() {
         let none = Inventory::default();
         assert!(!statuses(&run_one(&none)).iter().any(|(id, _)| id == "agent-tools"), "no custom agents at all");
+    }
 
+    #[test]
+    fn agent_tools_check_is_pass_or_attention_with_its_own_wording() {
         let fully_scoped = Inventory { agents: vec![agent("r", Some("haiku"), Some(vec!["Read"]))], ..Inventory::default() };
-        let got = statuses(&run_one(&fully_scoped));
+        let r = run_one(&fully_scoped);
+        let got = statuses(&r);
         assert_eq!(got.iter().find(|(id, _)| id == "agent-tools").map(|(_, s)| s.as_str()), Some("pass"));
+        let c = r.sections.iter().flat_map(|s| &s.checks).find(|c| c.id == "agent-tools").unwrap();
+        assert_eq!(c.title, "Every agent lists the tools it may use");
 
         let one_bare = Inventory {
             agents: vec![agent("r", Some("haiku"), Some(vec!["Read"])), agent("u", None, None)],
@@ -613,24 +619,38 @@ mod tests {
     fn deny_shell_check_is_absent_when_no_deny_rules() {
         let no_deny = Inventory::default();
         assert!(!statuses(&run_one(&no_deny)).iter().any(|(id, _)| id == "deny-shell"), "deny == 0 is perm-deny's gap, not this one's");
+    }
 
+    #[test]
+    fn deny_shell_check_is_pass_or_attention_with_its_own_wording() {
         let covered = Inventory {
             permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 2, deny_covers_shell: true },
             ..Inventory::default()
         };
-        assert_eq!(
-            statuses(&run_one(&covered)).iter().find(|(id, _)| id == "deny-shell").map(|(_, s)| s.as_str()),
-            Some("pass")
-        );
+        let r = run_one(&covered);
+        let got = statuses(&r);
+        assert_eq!(got.iter().find(|(id, _)| id == "deny-shell").map(|(_, s)| s.as_str()), Some("pass"));
+        let c = r.sections.iter().flat_map(|s| &s.checks).find(|c| c.id == "deny-shell").unwrap();
+        assert_eq!(c.title, "A deny rule limits the shell");
 
         let uncovered = Inventory {
             permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 2, deny_covers_shell: false },
             ..Inventory::default()
         };
-        assert_eq!(
-            statuses(&run_one(&uncovered)).iter().find(|(id, _)| id == "deny-shell").map(|(_, s)| s.as_str()),
-            Some("attention")
-        );
+        let r = run_one(&uncovered);
+        let got = statuses(&r);
+        assert_eq!(got.iter().find(|(id, _)| id == "deny-shell").map(|(_, s)| s.as_str()), Some("attention"));
+        let c = r.sections.iter().flat_map(|s| &s.checks).find(|c| c.id == "deny-shell").unwrap();
+        assert_eq!(c.title, "No deny rule limits the shell");
+    }
+
+    #[test]
+    fn agent_model_check_is_absent_when_every_agent_pins_a_model() {
+        // Every agent pins a model: the row disappears rather than flipping
+        // to a "pass" -- there is no meaningful "every agent has a model
+        // pinned, well done" row here, only the gap or nothing.
+        let tidy = Inventory { agents: vec![agent("p", Some("haiku"), Some(vec!["Read"]))], ..Inventory::default() };
+        assert!(!statuses(&run_one(&tidy)).iter().any(|(id, _)| id == "agent-model"));
     }
 
     #[test]
@@ -647,14 +667,10 @@ mod tests {
         let r = run_one(&inv);
         let got = statuses(&r);
         assert_eq!(got.iter().find(|(id, _)| id == "agent-model").map(|(_, s)| s.as_str()), Some("consider"));
+        let c = r.sections.iter().flat_map(|s| &s.checks).find(|c| c.id == "agent-model").unwrap();
+        assert_eq!(c.title, "1 agent inherits whatever model runs it");
         assert_eq!(r.attention, 0, "{:?}", got);
         assert_eq!(r.score, Some(100), "a consider costs nothing against the score");
-
-        // Every agent pins a model: the row disappears rather than flipping
-        // to a "pass" -- there is no meaningful "every agent has a model
-        // pinned, well done" row here, only the gap or nothing.
-        let tidy = Inventory { agents: vec![agent("p", Some("haiku"), Some(vec!["Read"]))], ..Inventory::default() };
-        assert!(!statuses(&run_one(&tidy)).iter().any(|(id, _)| id == "agent-model"));
     }
 
     #[test]

@@ -71,14 +71,40 @@ function checkMsg(msg, where, errors) {
   }
 }
 
-// The only ids whose check ever carries a null detailMsg on purpose: "tools"
-// and "mcp" when their detail is the joined list of names rather than a
-// sentence (there is nothing in a name to translate), "perm-none", which
-// has no detail at all, and the two agent-tools/deny-shell pass rows, whose
-// detail is deliberately empty ("Every agent lists the tools it may use"
-// needs nothing more said). Every other check's detail is a real sentence,
-// so a null there means the engine failed to attach one.
-const NULLABLE_DETAIL_CHECK_IDS = new Set(["tools", "mcp", "perm-none", "agent-tools", "deny-shell"]);
+// The "check.<id>.<status>" a title key reduces to once its trailing
+// ".title" (bare, or its .one/.other plural pair) is stripped -- the same
+// shape both en.json's own check.* keys and a check row's titleMsg.key
+// share. Null for a key that is not shaped that way at all.
+function titlePrefix(key) {
+  for (const suffix of [".title.one", ".title.other", ".title"]) {
+    if (key.endsWith(suffix)) return key.slice(0, -suffix.length);
+  }
+  return null;
+}
+
+// Every "check.<id>.<status>" prefix whose title exists in en.json but
+// whose detail does not: nothing will ever render a detail sentence for
+// it, so a null detailMsg on a row at that exact prefix is the only shape
+// possible, not a bug. Derived straight from the dictionary instead of
+// hand-listed, so a check gaining or losing its detail key changes this
+// set by itself instead of quietly falling out of step with it. Entry for
+// entry, this is meant to equal NO_DETAIL in crates/core/src/i18n.rs's
+// no_detail_registry_matches_the_english_dictionary test -- read the two
+// together whenever either changes.
+const NULLABLE_DETAIL_PREFIXES = new Set(
+  Object.keys(en)
+    .filter((k) => k.startsWith("check."))
+    .map(titlePrefix)
+    .filter((prefix) => prefix !== null && !keyExists(`${prefix}.detail`)),
+);
+
+// "check.tools.info" cannot be derived the same way: en.json DOES define
+// check.tools.info.detail (the sentence used when the tool list is empty),
+// but the non-empty-list branch reuses that very same title key with the
+// joined tool names as plain data instead, so its detailMsg is null too
+// even though the key exists. Which branch ran is a runtime fact en.json
+// has no way to encode, so this one id stays a literal.
+const LEGACY_NULLABLE_PREFIXES = new Set(["check.tools.info"]);
 
 test("every inventory.opportunities[] entry carries a titleMsg and a real detailMsg", () => {
   const opportunities = fixture?.inventory?.opportunities;
@@ -106,8 +132,10 @@ test("every audit.sections[].checks[] entry carries a titleMsg, and a null detai
       const where = `check "${c.id}" (status "${c.status}", section "${section.name}")`;
       checkMsg(c.titleMsg, `${where}.titleMsg`, errors);
       if (c.detailMsg === null) {
-        if (!NULLABLE_DETAIL_CHECK_IDS.has(c.id)) {
-          errors.push(`${where}: detailMsg is null, which is only expected for ${[...NULLABLE_DETAIL_CHECK_IDS].join(", ")}`);
+        const prefix = c.titleMsg && typeof c.titleMsg.key === "string" ? titlePrefix(c.titleMsg.key) : null;
+        if (!prefix || (!NULLABLE_DETAIL_PREFIXES.has(prefix) && !LEGACY_NULLABLE_PREFIXES.has(prefix))) {
+          const named = prefix ?? c.titleMsg?.key ?? "(no titleMsg.key)";
+          errors.push(`${where}: detailMsg is null, which is only expected when en.json has no "${named}.detail" key (or for ${[...LEGACY_NULLABLE_PREFIXES].join(", ")})`);
         }
       } else if (c.detailMsg === undefined) {
         errors.push(`${where}: detailMsg is missing (should be a Msg object, or explicit null for a pure-data/empty detail)`);
