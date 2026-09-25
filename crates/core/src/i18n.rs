@@ -700,7 +700,12 @@ mod tests {
     /// registered id nobody wrote a key for.
     #[test]
     fn every_finding_and_check_id_has_title_and_detail_keys() {
-        const NO_DETAIL: &[&str] = &["check.mcp.configured", "check.perm-none.pass"];
+        const NO_DETAIL: &[&str] = &[
+            "check.mcp.configured",
+            "check.perm-none.pass",
+            "check.agent-tools.pass",
+            "check.deny-shell.pass",
+        ];
         let en = dict("en");
         let mut prefixes: Vec<String> = crate::inventory::FINDING_IDS
             .iter()

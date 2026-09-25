@@ -66,10 +66,16 @@ write(home / ".claude.json", json.dumps({
 }, indent=2))
 write(claude / "settings.json", json.dumps({
     "model": "claude-sonnet-5",
-    "permissions": {"allow": ["Bash(git status)", "Bash(npm test)"], "deny": ["Read(./.env)", "Bash(git push --force*)", "Bash(rm -rf*)"]},
+    # None of these name Bash: the deny list keeps secrets and credentials out
+    # of reach but leaves the shell itself unguarded, which is exactly the
+    # gap the "deny-shell" audit check exists to catch.
+    "permissions": {"allow": ["Bash(git status)", "Bash(npm test)"], "deny": ["Read(./.env)", "Write(./.env)", "Edit(./secrets/**)"]},
     "hooks": {"SessionEnd": [{"hooks": [{"type": "command", "command": "true"}]}]},
 }, indent=2))
 write(claude / "agents" / "deploy-checker.md", "---\nname: deploy-checker\ntools: Bash, Read\nmodel: sonnet\n---\nChecks a deploy before it ships.\n")
+# No `tools:` and no `model:` line on purpose: this is the one agent in the
+# demo that leaves both unset, so "agent-tools" and "agent-model" each have
+# something to flag instead of sitting absent.
 write(claude / "agents" / "release-notes.md", "---\nname: release-notes\n---\nDrafts release notes from merged PRs.\n")
 for skill in ["deploy", "release-notes", "invoice"]:
     write(claude / "skills" / skill / "SKILL.md", f"---\nname: {skill}\n---\n")

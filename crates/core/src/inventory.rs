@@ -56,6 +56,13 @@ pub struct Definition {
     pub project: Option<String>,
     /// Agents only: the `model` frontmatter field, if set.
     pub model: Option<String>,
+    /// Agents only: the `tools` frontmatter field, parsed to a list. `None`
+    /// means no allowlist was written at all -- Claude Code then lets the
+    /// agent use every tool its parent has, shell included -- never an
+    /// empty list, which would mean something different (no tools at all)
+    /// and this parser never produces. Skills carry no `tools` line and are
+    /// always `None`.
+    pub tools: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -72,6 +79,10 @@ pub struct Permissions {
     pub allow: usize,
     pub ask: usize,
     pub deny: usize,
+    /// Whether any deny rule targets the shell (`Bash` or `Bash(...)`).
+    /// Computed once while counting; the rule strings themselves are never
+    /// kept on this struct.
+    pub deny_covers_shell: bool,
 }
 
 #[derive(Serialize, Debug, Clone, Default)]
@@ -330,6 +341,20 @@ pub fn permissions_from(settings: &Value) -> Permissions {
             .and_then(Value::as_array)
             .map_or(0, Vec::len)
     };
+    // Bash-shaped the way Claude Code itself spells a shell rule: the bare
+    // tool name, or the tool name followed by a `(...)` matcher. Case
+    // matters, matching every other rule string this app reads verbatim.
+    // Only this one boolean survives; the rule strings themselves are
+    // never stored anywhere.
+    let deny_covers_shell = node
+        .and_then(|n| n.get("deny"))
+        .and_then(Value::as_array)
+        .is_some_and(|rules| {
+            rules
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|r| r == "Bash" || r.starts_with("Bash("))
+        });
     Permissions {
         default_mode: node
             .and_then(|n| n.get("defaultMode"))
@@ -338,6 +363,7 @@ pub fn permissions_from(settings: &Value) -> Permissions {
         allow: count("allow"),
         ask: count("ask"),
         deny: count("deny"),
+        deny_covers_shell,
     }
 }
 
@@ -540,6 +566,55 @@ fn frontmatter_field(text: &str, key: &str) -> Option<String> {
     None
 }
 
+/// A top-level `key:` from a leading `---` frontmatter block, as a list:
+/// either the inline comma form (`tools: Read, Grep, Bash(git:*)` -> 3
+/// items) or a block of indented `- item` lines under a bare `key:`.
+/// `None` when the key is absent, or present but yields no items --
+/// callers never see the difference between "not written" and "written
+/// empty", which is fine here because both mean "no allowlist". Same
+/// top-level-only scan as `frontmatter_field`, extended rather than
+/// replaced.
+fn frontmatter_list(text: &str, key: &str) -> Option<Vec<String>> {
+    let mut lines = text.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    while let Some(line) = lines.next() {
+        if line.trim() == "---" {
+            return None;
+        }
+        if line.starts_with([' ', '\t']) {
+            continue; // indented: belongs to a different key's nested value
+        }
+        let Some((k, v)) = line.split_once(':') else { continue };
+        if k.trim() != key {
+            continue;
+        }
+        let v = v.trim().trim_matches(['"', '\'']).trim();
+        if !v.is_empty() {
+            // Inline form on the key's own line.
+            let items: Vec<String> = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+            return (!items.is_empty()).then_some(items);
+        }
+        // Block form: `- item` lines indented under the bare key, until the
+        // next top-level key or the closing `---`.
+        let mut items = Vec::new();
+        for line in lines.by_ref() {
+            if line.trim() == "---" || !line.starts_with([' ', '\t']) {
+                break;
+            }
+            if let Some(item) = line.trim().strip_prefix("- ") {
+                let item = item.trim().trim_matches(['"', '\'']).trim();
+                if !item.is_empty() {
+                    items.push(item.to_string());
+                }
+            }
+        }
+        return (!items.is_empty()).then_some(items);
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Filesystem scan
 // ---------------------------------------------------------------------------
@@ -587,6 +662,7 @@ fn definitions_in(dir: &Path, scope: &str, project: Option<&str>, skills: bool) 
             scope: scope.to_string(),
             project: project.map(str::to_string),
             model: if skills { None } else { frontmatter_field(&text, "model") },
+            tools: if skills { None } else { frontmatter_list(&text, "tools") },
         });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -883,7 +959,7 @@ mod tests {
         });
         assert_eq!(
             permissions_from(&settings),
-            Permissions { default_mode: Some("acceptEdits".into()), allow: 1, ask: 0, deny: 3 }
+            Permissions { default_mode: Some("acceptEdits".into()), allow: 1, ask: 0, deny: 3, deny_covers_shell: false }
         );
         assert_eq!(
             hooks_from(&settings),
@@ -902,6 +978,76 @@ mod tests {
         assert_eq!(frontmatter_field(text, "model").as_deref(), Some("opus"));
         assert_eq!(frontmatter_field(text, "tools"), None);
         assert_eq!(frontmatter_field("no frontmatter\nname: x", "name"), None);
+    }
+
+    #[test]
+    fn tools_frontmatter_inline_and_block_forms() {
+        let inline = "---\nname: r\ntools: Read, Grep, Bash(git:*)\nmodel: opus\n---\nbody\n";
+        assert_eq!(
+            frontmatter_list(inline, "tools"),
+            Some(vec!["Read".to_string(), "Grep".to_string(), "Bash(git:*)".to_string()])
+        );
+
+        let block = "---\nname: r\ntools:\n  - Read\n  - Grep\n  - Bash(git:*)\nmodel: opus\n---\nbody\n";
+        assert_eq!(
+            frontmatter_list(block, "tools"),
+            Some(vec!["Read".to_string(), "Grep".to_string(), "Bash(git:*)".to_string()])
+        );
+
+        // A block that runs to the closing `---` rather than another key.
+        let block_to_close = "---\nname: r\ntools:\n  - Read\n---\nbody\n";
+        assert_eq!(frontmatter_list(block_to_close, "tools"), Some(vec!["Read".to_string()]));
+
+        assert_eq!(frontmatter_list("---\nname: r\n---\n", "tools"), None, "key absent");
+        assert_eq!(frontmatter_list("---\nname: r\ntools: \n---\n", "tools"), None, "empty inline, no block follows");
+        assert_eq!(frontmatter_list("no frontmatter\ntools: Read", "tools"), None);
+    }
+
+    #[test]
+    fn agent_without_tools_line_has_no_allowlist() {
+        let root = std::env::temp_dir().join(format!("aitm-tools-fm-{}", crate::providers::unique_stamp()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("bare.md"), "---\nname: bare\n---\nno tools line").unwrap();
+        std::fs::write(
+            root.join("scoped.md"),
+            "---\nname: scoped\ntools: Read, Bash(git:*)\n---\nan allowlist",
+        )
+        .unwrap();
+
+        let agents = definitions_in(&root, "user", None, false);
+        let by = |n: &str| agents.iter().find(|a| a.name == n).cloned().expect(n);
+        assert_eq!(by("bare").tools, None, "no allowlist written at all means no allowlist, not an empty one");
+        assert_eq!(by("scoped").tools, Some(vec!["Read".to_string(), "Bash(git:*)".to_string()]));
+
+        // Skills never read `tools`, whatever the frontmatter says.
+        std::fs::create_dir_all(root.join("a-skill")).unwrap();
+        std::fs::write(root.join("a-skill/SKILL.md"), "---\nname: a-skill\ntools: Read\n---\nbody").unwrap();
+        let skills = definitions_in(&root, "project", Some("/p"), true);
+        assert_eq!(skills.iter().find(|s| s.name == "a-skill").unwrap().tools, None);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn deny_rule_targeting_bash_sets_deny_covers_shell() {
+        assert!(permissions_from(&json!({"permissions": {"deny": ["Bash"]}})).deny_covers_shell, "bare Bash");
+        assert!(
+            permissions_from(&json!({"permissions": {"deny": ["Read(./.env)", "Bash(rm -rf:*)"]}})).deny_covers_shell,
+            "a scoped Bash(...) rule among others"
+        );
+        assert!(
+            !permissions_from(&json!({"permissions": {"deny": ["Read(./.env)", "Write(./.env)"]}})).deny_covers_shell,
+            "no rule names the shell at all"
+        );
+        assert!(
+            !permissions_from(&json!({"permissions": {"deny": ["bash(rm -rf:*)"]}})).deny_covers_shell,
+            "case-sensitive, matching how Claude Code itself spells it"
+        );
+        assert!(
+            !permissions_from(&json!({"permissions": {"deny": ["Bashful(x)"]}})).deny_covers_shell,
+            "a tool name that merely starts with the same letters is not Bash"
+        );
+        assert!(!permissions_from(&json!({})).deny_covers_shell, "no permissions node at all");
     }
 
     fn server(name: &str, package: Option<&str>, transport: &str, env_count: usize) -> McpServer {
@@ -1002,9 +1148,9 @@ mod tests {
         // A tidy setup earns no findings at all.
         let tidy = Inventory {
             mcp_servers: vec![server("a", Some("@s/a@1"), "stdio", 0)],
-            agents: vec![Definition { name: "r".into(), scope: "user".into(), project: None, model: Some("haiku".into()) }],
+            agents: vec![Definition { name: "r".into(), scope: "user".into(), project: None, model: Some("haiku".into()), tools: None }],
             hooks: vec![HookEvent { event: "SessionEnd".into(), count: 1 }],
-            permissions: Permissions { default_mode: None, allow: 4, ask: 0, deny: 9 },
+            permissions: Permissions { default_mode: None, allow: 4, ask: 0, deny: 9, deny_covers_shell: false },
             ..Inventory::default()
         };
         assert!(ids(&tidy).is_empty(), "{:?}", ids(&tidy));
@@ -1027,7 +1173,7 @@ mod tests {
 
     #[test]
     fn agent_unused_fires_only_when_subagents_ran_at_all() {
-        let agents = vec![Definition { name: "reviewer".into(), scope: "user".into(), project: None, model: None }];
+        let agents = vec![Definition { name: "reviewer".into(), scope: "user".into(), project: None, model: None, tools: None }];
         let never_ran: HashSet<String> = HashSet::new();
         // Nothing on this machine has run a subagent in the window at all --
         // an idle custom agent proves nothing yet, so this must stay quiet.
@@ -1048,7 +1194,7 @@ mod tests {
 
     #[test]
     fn agent_unused_ignores_built_in_names_and_skills() {
-        let agents = vec![Definition { name: "reviewer".into(), scope: "user".into(), project: None, model: None }];
+        let agents = vec![Definition { name: "reviewer".into(), scope: "user".into(), project: None, model: None, tools: None }];
         // "general-purpose" and "Explore" are built-ins Claude Code ships --
         // they never have a Definition file, so they can never appear in
         // `agents`. A spend row for one of them landing in `used` must not
@@ -1087,8 +1233,8 @@ mod tests {
             "a silently dropped finding would otherwise still pass this test"
         );
         let other = Inventory {
-            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 3 },
-            agents: vec![Definition { name: "r".into(), scope: "user".into(), project: None, model: None }],
+            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 3, deny_covers_shell: false },
+            agents: vec![Definition { name: "r".into(), scope: "user".into(), project: None, model: None, tools: None }],
             hooks: vec![HookEvent { event: "SessionEnd".into(), count: 1 }],
             ..Inventory::default()
         };
@@ -1127,7 +1273,7 @@ mod tests {
     #[test]
     fn deny_only_posture_is_a_learning_note_not_a_gap() {
         let inv = Inventory {
-            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 23 },
+            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 23, deny_covers_shell: false },
             ..Inventory::default()
         };
         let found = opportunities_for(&inv);

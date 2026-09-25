@@ -73,10 +73,12 @@ function checkMsg(msg, where, errors) {
 
 // The only ids whose check ever carries a null detailMsg on purpose: "tools"
 // and "mcp" when their detail is the joined list of names rather than a
-// sentence (there is nothing in a name to translate), and "perm-none",
-// which has no detail at all. Every other check's detail is a real
-// sentence, so a null there means the engine failed to attach one.
-const NULLABLE_DETAIL_CHECK_IDS = new Set(["tools", "mcp", "perm-none"]);
+// sentence (there is nothing in a name to translate), "perm-none", which
+// has no detail at all, and the two agent-tools/deny-shell pass rows, whose
+// detail is deliberately empty ("Every agent lists the tools it may use"
+// needs nothing more said). Every other check's detail is a real sentence,
+// so a null there means the engine failed to attach one.
+const NULLABLE_DETAIL_CHECK_IDS = new Set(["tools", "mcp", "perm-none", "agent-tools", "deny-shell"]);
 
 test("every inventory.opportunities[] entry carries a titleMsg and a real detailMsg", () => {
   const opportunities = fixture?.inventory?.opportunities;

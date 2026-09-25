@@ -252,7 +252,7 @@ mod tests {
             }],
             tools: vec![AiTool { name: "Claude Code".into(), kind: "app".into(), mcp_servers: 1 }],
             hooks: vec![HookEvent { event: "SessionEnd".into(), count: 2 }],
-            permissions: Permissions { default_mode: Some("acceptEdits".into()), allow: 1, ask: 0, deny: 9 },
+            permissions: Permissions { default_mode: Some("acceptEdits".into()), allow: 1, ask: 0, deny: 9, deny_covers_shell: false },
             // The seat report only ever reads the English `title`/`detail`
             // below (see `build()`), so the placeholder Msg test_only()
             // builds in their place is never read by anything this test

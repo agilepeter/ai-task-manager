@@ -53,6 +53,11 @@ pub(crate) const CHECK_KEYS: &[&str] = &[
     "check.perm-rules.pass",
     "check.perm-deny.pass",
     "check.perm-deny.attention",
+    "check.agent-tools.attention",
+    "check.agent-tools.pass",
+    "check.deny-shell.attention",
+    "check.deny-shell.pass",
+    "check.agent-model.consider",
     "check.model.pinned",
     "check.model.unpinned",
     "check.usage-thin.info",
@@ -160,6 +165,68 @@ fn section(name_key: &'static str, checks: Vec<Check>) -> Section {
     Section { name: i18n::render("en", &Msg::new(name_key)), name_key, checks }
 }
 
+/// The guardrails checks specific to custom agents and the deny list,
+/// appended to the guardrails section after the existing permission checks.
+/// Each is entirely absent -- never a "pass" row -- when it does not apply:
+/// "agent-tools" and "agent-model" need at least one custom agent to mean
+/// anything, and "deny-shell" needs at least one deny rule (zero deny rules
+/// is already `perm-deny`'s gap to report, so this would only repeat it).
+fn agent_checks(inv: &Inventory) -> Vec<Check> {
+    let mut out = Vec::new();
+
+    if !inv.agents.is_empty() {
+        let missing = inv.agents.iter().filter(|a| a.tools.is_none()).count();
+        out.push(if missing > 0 {
+            check(
+                "agent-tools",
+                "attention",
+                Msg::new("check.agent-tools.attention.title")
+                    .var("total", inv.agents.len() as i64)
+                    .count(missing as i64),
+                Some(Msg::new("check.agent-tools.attention.detail")),
+                "",
+            )
+        } else {
+            check("agent-tools", "pass", Msg::new("check.agent-tools.pass.title"), None, "")
+        });
+    }
+
+    if inv.permissions.deny > 0 {
+        out.push(if inv.permissions.deny_covers_shell {
+            check("deny-shell", "pass", Msg::new("check.deny-shell.pass.title"), None, "")
+        } else {
+            check(
+                "deny-shell",
+                "attention",
+                Msg::new("check.deny-shell.attention.title"),
+                Some(Msg::new("check.deny-shell.attention.detail")),
+                "",
+            )
+        });
+    }
+
+    // Same condition the Inventory tab's "agents-model-unset" opportunity
+    // fires on, but under its own check id and its own, shorter key: that
+    // opportunity card already carries the full explanation and a Learn
+    // More link, so this row does not restate it -- it names the same
+    // count and, in the popover, links back to the Inventory tab (`WHERE`
+    // in src/audit.ts) instead of duplicating the card's text. Unscored,
+    // like every "consider": a model left to inherit is worth a look, not
+    // a failing.
+    let unset = inv.agents.iter().filter(|a| a.model.is_none()).count();
+    if unset > 0 {
+        out.push(check(
+            "agent-model",
+            "consider",
+            Msg::new("check.agent-model.consider.title").count(unset as i64),
+            Some(Msg::new("check.agent-model.consider.detail")),
+            "",
+        ));
+    }
+
+    out
+}
+
 pub fn run(i: &Inputs, now: i64) -> AuditReport {
     let inv = i.inventory;
     let packaged = inv.mcp_servers.iter().filter(|s| s.package.is_some()).count();
@@ -248,7 +315,7 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
         Some(m) => (Msg::new("check.model.pinned.title").var("model", m), Msg::new("check.model.pinned.detail")),
         None => (Msg::new("check.model.unpinned.title"), Msg::new("check.model.unpinned.detail")),
     };
-    let guardrails = vec![
+    let mut guardrails = vec![
         if p.allow + p.ask + p.deny == 0 {
             from_finding(inv, "perm-none", Msg::new("check.perm-none.pass.title"), None)
         } else {
@@ -279,14 +346,15 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
                 "",
             )
         },
-        from_finding(
-            inv,
-            "hooks-none",
-            Msg::new("check.hooks-none.pass.title"),
-            Some(Msg::new("check.hooks-none.pass.detail")),
-        ),
-        check("model", "info", model_title, Some(model_detail), ""),
     ];
+    guardrails.extend(agent_checks(inv));
+    guardrails.push(from_finding(
+        inv,
+        "hooks-none",
+        Msg::new("check.hooks-none.pass.title"),
+        Some(Msg::new("check.hooks-none.pass.detail")),
+    ));
+    guardrails.push(check("model", "info", model_title, Some(model_detail), ""));
 
     let mut usage = Vec::new();
     // Whether the dollar figures can be trusted belongs before anything that
@@ -464,7 +532,7 @@ pub fn to_markdown(r: &AuditReport, date: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::inventory::{AiTool, HookEvent, McpServer, Opportunity, Permissions};
+    use crate::inventory::{AiTool, Definition, HookEvent, McpServer, Opportunity, Permissions};
     use crate::ledger::{view, Cycle, Subscription};
     use std::collections::HashMap;
 
@@ -507,12 +575,94 @@ mod tests {
         assert_eq!(c.status, "consider", "a resting cost is not a failing");
     }
 
+    fn agent(name: &str, model: Option<&str>, tools: Option<Vec<&str>>) -> Definition {
+        Definition {
+            name: name.into(),
+            scope: "user".into(),
+            project: None,
+            model: model.map(str::to_string),
+            tools: tools.map(|t| t.into_iter().map(str::to_string).collect()),
+        }
+    }
+
+    fn run_one(inv: &Inventory) -> AuditReport {
+        run(&Inputs { inventory: inv, ledger: &ledger(&[], &[]), spend30: 0.0, client_rules: 0, work_areas: 0 }, 1)
+    }
+
+    #[test]
+    fn agent_tools_check_is_absent_without_custom_agents() {
+        let none = Inventory::default();
+        assert!(!statuses(&run_one(&none)).iter().any(|(id, _)| id == "agent-tools"), "no custom agents at all");
+
+        let fully_scoped = Inventory { agents: vec![agent("r", Some("haiku"), Some(vec!["Read"]))], ..Inventory::default() };
+        let got = statuses(&run_one(&fully_scoped));
+        assert_eq!(got.iter().find(|(id, _)| id == "agent-tools").map(|(_, s)| s.as_str()), Some("pass"));
+
+        let one_bare = Inventory {
+            agents: vec![agent("r", Some("haiku"), Some(vec!["Read"])), agent("u", None, None)],
+            ..Inventory::default()
+        };
+        let r = run_one(&one_bare);
+        let got = statuses(&r);
+        assert_eq!(got.iter().find(|(id, _)| id == "agent-tools").map(|(_, s)| s.as_str()), Some("attention"));
+        let c = r.sections.iter().flat_map(|s| &s.checks).find(|c| c.id == "agent-tools").unwrap();
+        assert_eq!(c.title, "1 of 2 agents can use every tool");
+    }
+
+    #[test]
+    fn deny_shell_check_is_absent_when_no_deny_rules() {
+        let no_deny = Inventory::default();
+        assert!(!statuses(&run_one(&no_deny)).iter().any(|(id, _)| id == "deny-shell"), "deny == 0 is perm-deny's gap, not this one's");
+
+        let covered = Inventory {
+            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 2, deny_covers_shell: true },
+            ..Inventory::default()
+        };
+        assert_eq!(
+            statuses(&run_one(&covered)).iter().find(|(id, _)| id == "deny-shell").map(|(_, s)| s.as_str()),
+            Some("pass")
+        );
+
+        let uncovered = Inventory {
+            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 2, deny_covers_shell: false },
+            ..Inventory::default()
+        };
+        assert_eq!(
+            statuses(&run_one(&uncovered)).iter().find(|(id, _)| id == "deny-shell").map(|(_, s)| s.as_str()),
+            Some("attention")
+        );
+    }
+
+    #[test]
+    fn agent_model_is_consider_and_unscored() {
+        // Every agent already fully scoped on tools and the deny list
+        // already covers the shell, so the only thing left to flag is the
+        // unpinned model -- isolates "agent-model" from "agent-tools" and
+        // "deny-shell" instead of three ids muddying one score.
+        let inv = Inventory {
+            agents: vec![agent("u", None, Some(vec!["Read"]))],
+            permissions: Permissions { default_mode: None, allow: 1, ask: 0, deny: 2, deny_covers_shell: true },
+            ..Inventory::default()
+        };
+        let r = run_one(&inv);
+        let got = statuses(&r);
+        assert_eq!(got.iter().find(|(id, _)| id == "agent-model").map(|(_, s)| s.as_str()), Some("consider"));
+        assert_eq!(r.attention, 0, "{:?}", got);
+        assert_eq!(r.score, Some(100), "a consider costs nothing against the score");
+
+        // Every agent pins a model: the row disappears rather than flipping
+        // to a "pass" -- there is no meaningful "every agent has a model
+        // pinned, well done" row here, only the gap or nothing.
+        let tidy = Inventory { agents: vec![agent("p", Some("haiku"), Some(vec!["Read"]))], ..Inventory::default() };
+        assert!(!statuses(&run_one(&tidy)).iter().any(|(id, _)| id == "agent-model"));
+    }
+
     #[test]
     fn a_tidy_setup_scores_100_and_every_pass_says_why() {
         let inv = Inventory {
             tools: vec![AiTool { name: "Claude Code".into(), kind: "app".into(), mcp_servers: 1 }],
             mcp_servers: vec![server("docs", Some("docs-mcp@2"))],
-            permissions: Permissions { default_mode: None, allow: 3, ask: 0, deny: 9 },
+            permissions: Permissions { default_mode: None, allow: 3, ask: 0, deny: 9, deny_covers_shell: true },
             hooks: vec![HookEvent { event: "SessionEnd".into(), count: 1 }],
             model: Some("claude-sonnet-5".into()),
             ..Inventory::default()
@@ -529,7 +679,7 @@ mod tests {
         let inv = Inventory {
             tools: vec![AiTool { name: "Claude Code".into(), kind: "app".into(), mcp_servers: 2 }],
             mcp_servers: vec![server("loose", Some("loose-mcp")), server("bin", None)],
-            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 23 },
+            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 23, deny_covers_shell: false },
             opportunities: vec![
                 finding("mcp-unpinned", "1 MCP server runs an unpinned package"),
                 finding("mix-top-heavy", "92% of spend is on the largest models"),
@@ -564,7 +714,7 @@ mod tests {
         agents.kind = "learn".into();
         let inv = Inventory {
             mcp_servers: vec![server("cloud", None)],
-            permissions: Permissions { default_mode: None, allow: 1, ask: 0, deny: 5 },
+            permissions: Permissions { default_mode: None, allow: 1, ask: 0, deny: 5, deny_covers_shell: true },
             hooks: vec![HookEvent { event: "SessionEnd".into(), count: 1 }],
             opportunities: vec![remote, agents],
             ..Inventory::default()
@@ -639,7 +789,7 @@ mod tests {
         let tidy = Inventory {
             tools: vec![AiTool { name: "Claude Code".into(), kind: "app".into(), mcp_servers: 1 }],
             mcp_servers: vec![server("docs", Some("docs-mcp@2"))],
-            permissions: Permissions { default_mode: None, allow: 3, ask: 0, deny: 9 },
+            permissions: Permissions { default_mode: None, allow: 3, ask: 0, deny: 9, deny_covers_shell: true },
             hooks: vec![HookEvent { event: "SessionEnd".into(), count: 1 }],
             model: Some("claude-sonnet-5".into()),
             ..Inventory::default()
@@ -651,7 +801,7 @@ mod tests {
         let loose = Inventory {
             tools: vec![AiTool { name: "Claude Code".into(), kind: "app".into(), mcp_servers: 2 }],
             mcp_servers: vec![server("loose", Some("loose-mcp")), server("bin", None)],
-            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 23 },
+            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 23, deny_covers_shell: false },
             opportunities: vec![
                 finding("mcp-unpinned", "1 MCP server runs an unpinned package"),
                 finding("mix-top-heavy", "92% of spend is on the largest models"),

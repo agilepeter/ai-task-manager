@@ -42,6 +42,7 @@ let firstRun = false;
 const WHERE: Record<string, "inventory" | "ledger" | "usage"> = {
   "mcp-unpinned": "inventory", "mcp-env-secrets": "inventory", "mcp-remote": "inventory",
   "perm-none": "inventory", "perm-deny": "inventory", "hooks-none": "inventory", "agents-none": "inventory",
+  "agent-tools": "inventory", "deny-shell": "inventory", "agent-model": "inventory",
   ledger: "ledger", "ledger-idle": "ledger", "ledger-dates": "ledger",
   clients: "usage", "areas-unsorted": "usage", "mix-top-heavy": "usage", "session-long-lived": "usage",
 };

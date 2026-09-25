@@ -73,13 +73,18 @@
     "name": "deploy-checker",
     "scope": "user",
     "project": null,
-    "model": "sonnet"
+    "model": "sonnet",
+    "tools": [
+     "Bash",
+     "Read"
+    ]
    },
    {
     "name": "release-notes",
     "scope": "user",
     "project": null,
-    "model": null
+    "model": null,
+    "tools": null
    }
   ],
   "skills": [
@@ -87,19 +92,22 @@
     "name": "deploy",
     "scope": "user",
     "project": null,
-    "model": null
+    "model": null,
+    "tools": null
    },
    {
     "name": "invoice",
     "scope": "user",
     "project": null,
-    "model": null
+    "model": null,
+    "tools": null
    },
    {
     "name": "release-notes",
     "scope": "user",
     "project": null,
-    "model": null
+    "model": null,
+    "tools": null
    }
   ],
   "hooks": [
@@ -112,7 +120,8 @@
    "defaultMode": null,
    "allow": 2,
    "ask": 0,
-   "deny": 3
+   "deny": 3,
+   "denyCoversShell": false
   },
   "model": "claude-sonnet-5",
   "projects": 1,
@@ -2977,8 +2986,8 @@
  "audit": {
   "generatedAt": 1,
   "passed": 8,
-  "attention": 4,
-  "score": 67,
+  "attention": 6,
+  "score": 57,
   "sections": [
    {
     "name": "Setup",
@@ -3132,6 +3141,56 @@
       },
       "detailMsg": {
        "key": "check.perm-deny.pass.detail",
+       "vars": {},
+       "count": null
+      }
+     },
+     {
+      "id": "agent-tools",
+      "status": "attention",
+      "title": "1 of 2 agents can use every tool",
+      "detail": "An agent without a tools line inherits every tool its parent has, shell included. List the tools each agent needs in its frontmatter.",
+      "titleMsg": {
+       "key": "check.agent-tools.attention.title",
+       "vars": {
+        "total": "2"
+       },
+       "count": 1
+      },
+      "detailMsg": {
+       "key": "check.agent-tools.attention.detail",
+       "vars": {},
+       "count": null
+      }
+     },
+     {
+      "id": "deny-shell",
+      "status": "attention",
+      "title": "No deny rule limits the shell",
+      "detail": "Deny rules exist, but none of them names Bash, so any agent can run any command. A rule such as Bash(rm -rf:*) is the usual floor.",
+      "titleMsg": {
+       "key": "check.deny-shell.attention.title",
+       "vars": {},
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.deny-shell.attention.detail",
+       "vars": {},
+       "count": null
+      }
+     },
+     {
+      "id": "agent-model",
+      "status": "consider",
+      "title": "1 agent inherits whatever model runs it",
+      "detail": "An agent with no model line runs on the caller's model, often the most expensive one. Pin a cheaper model where the task allows it.",
+      "titleMsg": {
+       "key": "check.agent-model.consider.title",
+       "vars": {},
+       "count": 1
+      },
+      "detailMsg": {
+       "key": "check.agent-model.consider.detail",
        "vars": {},
        "count": null
       }
