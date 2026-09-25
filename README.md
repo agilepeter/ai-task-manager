@@ -268,12 +268,18 @@ requires measured low usage; a tool with no spend data says "no data".
 across every MCP-capable app it knows (Claude Code, Claude Desktop, VS Code,
 Cursor, Windsurf, Gemini CLI, Codex). **Running now** reads the process table
 and shows which of those servers are actually running, grouped by runner, with
-their memory, and lets you end one. **Audit** scores the whole setup: every
-finding is computed from your machine, states its own numbers, and disappears
-when it no longer applies. Nothing is graded twice, and what cannot be judged
-is left out rather than counted against you. If you came looking for an MCP
-manager, this tab is it: every server, what it runs, whether it is pinned, and
-which copies are live.
+their memory, and lets you end one; it also lists every running agent host
+(Claude Code, Codex, Gemini CLI, Cursor Agent, Aider, OpenCode, Goose, Copilot
+CLI) with its folder, client and live token pace -- ending one is deliberately
+not offered. Inventory's agent rows carry thirty days of spend too, your own
+custom agents and Claude Code's built-ins alike, so one nobody has run shows up
+as an opportunity instead of going unnoticed. **Audit** scores the whole setup,
+including three guardrail checks on agents (no tools allowlist, no shell in the
+deny list, no model pinned): every finding is computed from your machine,
+states its own numbers, and disappears when it no longer applies. Nothing is
+graded twice, and what cannot be judged is left out rather than counted against
+you. If you came looking for an MCP manager, this tab is it: every server, what
+it runs, whether it is pinned, and which copies are live.
 
 Also: work areas and client attribution with CSV export, budget alerts per
 client, an optional weekly digest, a read-only [local HTTP
@@ -289,6 +295,20 @@ notifications and the tray tooltip; model ids, area and client names, and
 `$`/`%` figures stay as data rather than prose. CSV headers translate too,
 but the numbers inside an export keep the app's own plain formatting rather
 than switching to the active locale's.
+
+**Teams.** A headless agent -- `aitm-agent report` prints this machine's seat
+report, `push --to <url>` sends it on a schedule you set (cron, launchd, Task
+Scheduler) -- feeds a self-hosted collector (`aitm-collector`): one process,
+one folder of JSON files, a token required on every request, including the
+dashboard. The report can never carry a prompt, path, folder, work area,
+client name, session id, credential, agent name, or hook command or matcher
+-- counts and shapes only. Drop a `policy.json` next to the collector's data
+folder and the dashboard becomes a conformance view, computed there from what
+each seat reported: allowed and blocked packages, pinned versions, remote
+servers, a minimum deny-rule count, allowed AI tools, every custom agent
+carrying a tools allowlist, the shell itself denied, and required hook events
+-- nine rules in all. Seats never receive the policy, and a broken file just
+means no policy.
 
 ## Privacy and security
 
@@ -316,6 +336,9 @@ including every network call the app can make and the greps that prove it, is
   never published to the local HTTP API by default; the extra feeds that would
   expose them are opt-in and loopback-only, with a DNS-rebinding host check so
   a web page cannot read them through your browser.
+- **Running now reads a live agent's working folder with `lsof`, on macOS
+  only.** A local read; the folder never leaves the app and is never part of
+  the seat report or the local HTTP API.
 - **The app changes your machine in exactly two places, both behind an explicit
   confirmed click**: ending a running MCP server, and pinning an unpinned MCP
   package to a version. The second takes its version from your local package

@@ -26,6 +26,11 @@
 //   node scripts/layout-check.mjs
 //   # optional: node scripts/layout-check.mjs http://127.0.0.1:8731 /some/out/dir
 //
+// main() probes BASE with a plain fetch before launching a browser: nothing
+// answering there (the static server above was never started, or died) fails
+// on one line naming the fix, instead of a multi-frame Playwright
+// net::ERR_CONNECTION_REFUSED trace.
+//
 // Env overrides for faster iteration while chasing a single fix (the default
 // with no env vars is the full 63-cell matrix the gates expect):
 //   ONLY_LOCALES=de,ru node scripts/layout-check.mjs
@@ -376,6 +381,20 @@ async function runCell(page, view, locale) {
 }
 
 async function main() {
+  // A bare page.goto() against a dead static server buries the real problem
+  // in a multi-frame Playwright stack trace. Probe first with a plain fetch
+  // so a forgotten server fails on one line naming the fix (see the header).
+  try {
+    await fetch(BASE);
+  } catch {
+    console.error(
+      `\nERROR: nothing is answering at ${BASE}.\n` +
+        'Start the static server first: (cd dist-demo && python3 -m http.server 8731 &)\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const browser = await webkit.launch();
   const page = await browser.newPage({ viewport: { width: 380, height: 600 }, deviceScaleFactor: 2 });
   const pageErrors = [];

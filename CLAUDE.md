@@ -17,13 +17,15 @@ limits, spend, and the local AI setup. Cargo workspace:
 
 The collector reads an optional `policy.json` from its data folder on every request
 (`crates/core/src/policy.rs`: allowed / blocked packages with `*`, require pinned, allow remote,
-minimum deny rules, allowed tools). **Conformance is computed on the collector from what a
+minimum deny rules, allowed tools, every custom agent must list its tools, the shell must be
+denied, required hook events). **Conformance is computed on the collector from what a
 seat reported**; seats never receive the policy and cannot claim to conform. A broken policy
 file means "no policy", never an error page.
 
 **The seat report (`crates/core/src/seat.rs`) is the privacy boundary of the enterprise half.**
-It has no field that could hold a prompt, path, folder, work area, client name, session id or
-credential, and `never_carries_*` plants those in its inputs. Add a field only with a reason
+It has no field that could hold a prompt, path, folder, work area, client name, session id,
+credential, agent name, or hook command or matcher, and `never_carries_*` plants those in its
+inputs. Add a field only with a reason
 an organisation needs it, and extend that test. Finding *titles* go out; *details* do not. Live limits go out as provider family, plan,
 metric label, percent and reset time only: never the card name or a metric's detail text,
 which can hold an account email. `aitm-agent --no-limits` skips the vendor calls entirely.
@@ -149,7 +151,9 @@ and computed Opportunities). Usage stays the default view.
   A native `<select>`'s own clipped, selected-option text does not move its
   `scrollWidth`/`clientWidth` in WebKit, so the harness cannot see that one class of clipping; the
   human screenshot pass stays the real check for a `<select>`. Run it per the comment at the top of
-  the file (`npm run build:demo`, serve `dist-demo`, then `node scripts/layout-check.mjs`).
+  the file (`npm run build:demo`, serve `dist-demo`, then `node scripts/layout-check.mjs`). It
+  needs a static server on 8731 first (`(cd dist-demo && python3 -m http.server 8731 &)`); with
+  nothing answering there it now fails on a one-line hint instead of a Playwright stack trace.
 - **Detail view** (`src/detail.ts`): click a card's name. Same window, slide-in page like
   Settings; Esc backs out before it hides the window. Limits over time come from
   `crates/core/src/history.rs` (local SQLite, readings only, 90 days); spend groups by
@@ -186,6 +190,8 @@ and computed Opportunities). Usage stays the default view.
   entry uses ordered static imports because the app boots on DOMContentLoaded.
   `scripts/sync-demo-to-site.sh` rebuilds it into the staas.fund product page
   (`staasfund/task-manager/demo/`); it never commits or pushes, because a push there is a deploy.
+  `npm run fixture:demo` pins `AITM_TODAY` to a fixed instant, so two runs are byte-identical
+  until that constant is bumped by hand.
 - **A new finding is invisible to the audit until it is listed there.** `audit.rs` does not
   iterate opportunities; it asks for specific ids (`from_finding`, or `only_if_present` for a
   finding with no meaningful "pass"). The running and pricing findings were computed and shown
@@ -218,7 +224,9 @@ and computed Opportunities). Usage stays the default view.
   (`spend::claude_sessions`, read from the scan cache, never a rescan). Times, totals, top
   model and areas only. Claude Code keeps conversation titles in the same logs; they come
   from prompts and are deliberately never read. A span is first to last message, not time
-  worked: sessions stay open for weeks.
+  worked: sessions stay open for weeks. Anything under a session's own `<uuid>/subagents/`,
+  whatever the depth, is that session's sidechain, never a session of its own -- `sidechain_parent`
+  in `spend.rs` is the one place this is decided, and its cost folds into the parent.
 - **Subscriptions ledger.** The user's own numbers in `ledger.json`. **Never guess a price**:
   a detected plan names a tier, not what someone pays, so suggestions pre-fill the name and
   the linked tool only. Renewals step from the anchor date (Jan 31 -> Feb 28 -> Mar 31, no
@@ -302,7 +310,10 @@ and computed Opportunities). Usage stays the default view.
   A process that matches nothing MCP-shaped is dropped rather than described. `never_leaks_*`
   plants a key, a token and a path in a command line and asserts none reach the output.
   Findings: duplicate copies and unconfigured servers score as "tighten", total memory is
-  "learn" (a resting cost is not a failing).
+  "learn" (a resting cost is not a failing). The same module also drives Running now's agent
+  rows: `AGENT_HOSTS` matches a process by its binary or its extracted package, never argv, so
+  command lines stay out of this module for agents too. There is no End task for an agent, only
+  for the MCP servers it starts.
 - **Sign-ins** (`crates/core/src/diagnose.rs`): why a card is empty. Lists every place each
   locally-signed-in provider reads and whether it is there, so "you are not signed in" and
   "we looked in the wrong place" stop looking the same — on macOS Peter has no

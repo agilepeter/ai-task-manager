@@ -8,6 +8,50 @@ release history is kept verbatim in
 
 ## 0.1.1 — Unreleased
 
+### Added
+
+- **Agent processes in Running now.** Every agent host it recognizes (Claude
+  Code, Codex, Gemini CLI, Cursor Agent, Aider, OpenCode, Goose, GitHub
+  Copilot CLI) is listed alongside MCP servers: which tool, how long it has
+  run, its working folder (via `lsof` on macOS; Windows has no way yet to
+  read another process's folder), the client that folder maps to, and live
+  token pace from the newest session writing there, subagent fan-outs
+  included. Matching is by binary or package, never argv, and there is no
+  End task for an agent -- only for the MCP servers it starts.
+- **Cost per agent, in Inventory.** Thirty days of subagent spend broken out
+  by agent name, for your own custom definitions and Claude Code's built-in
+  agents alike, with an unattributed row for a transcript that never named
+  one. A custom agent nobody has run in the window surfaces as a Learn
+  opportunity rather than sitting unnoticed. A session's own row shows how
+  much of its cost its subagents accounted for.
+- **Agent guardrails, locally and for a team.** Audit gains three checks: a
+  custom agent with no tools allowlist, a deny list that never names the
+  shell, and a custom agent with no model pinned (the first two score
+  against the setup; the model check is a "consider"). The same three
+  conditions are now policy rules a collector can require (`requireAgentTools`,
+  `requireShellDeny`, `requireHooks`), backed by four additive seat-report
+  fields -- two counts, a boolean, and a capped list of hook event names --
+  that never carry an agent's name, its model, or a hook's command or
+  matcher. The collector's dashboard gains a Guardrails column.
+- **A deterministic browser demo.** `npm run fixture:demo` pins the
+  fictional machine's "today" (`AITM_TODAY`) to a fixed instant, so two runs
+  of the fixture, and two builds of the demo from it, are byte-identical
+  until that instant is bumped by hand.
+
+### Changed
+
+- **A session's cost now includes its subagents'.** Folding a subagent
+  transcript into the session that spawned it (see Fixed, below) means that
+  session's own cost and token totals now include what its subagents spent;
+  project and day totals do not move, since they already counted this
+  spend. The new agent-spend view above breaks the subagent share back out
+  by which agent ran it.
+- **The local scan cache re-scans once.** Recognizing subagent transcripts
+  nested a folder deeper, under a workflow run's own
+  `subagents/workflows/<workflow-id>/`, bumped the cache format, so the
+  first launch after updating re-reads session logs once, to reclassify
+  transcripts an older build had already cached as their own sessions.
+
 ### Fixed
 
 - **Subagent transcripts no longer appear as sessions.** Claude Code writes
@@ -15,15 +59,10 @@ release history is kept verbatim in
   `<session>/subagents/`, and a workflow run nests its own transcripts a
   folder deeper still, under `subagents/workflows/<workflow-id>/`; the
   scanner was listing every one of those as its own phantom session instead
-  of recognizing it as part of the session that spawned it. Its cost is now
-  folded into the session that spawned it, at any of those nesting depths,
-  and a new agent-spend view groups subagent runs by which agent ran them.
-  The Running-now pace follows the same writes, including workflow
-  transcripts, so a session waiting on a subagent no longer reads as idle.
-  Project and day totals are unchanged: they already counted this spend.
-  Recognizing the deeper workflow nesting bumped the local scan-cache
-  format, so the next launch re-scans session logs once to pick up
-  transcripts an older build had already cached as their own sessions.
+  of recognizing it as part of the session that spawned it. Recognizing it
+  now covers both nesting depths, and the Running-now pace follows the same
+  writes, including workflow transcripts, so a session waiting on a
+  subagent no longer reads as idle.
 
 ## 0.1.0 — 2026-09-24
 
