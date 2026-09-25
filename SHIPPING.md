@@ -57,8 +57,8 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
    release with the installers, the `.sig` files and `latest.json`.
 3. Check the draft's assets, then publish it. Installs with update checks on see it at their
    next launch or popover open, or within four hours.
-4. Refresh the site's embedded demo and its SEO files: `npm run build:demo`, then
-   `scripts/sync-demo-to-site.sh` to copy `dist-demo/` into
+4. Refresh the site's embedded demo and its SEO files: `scripts/sync-demo-to-site.sh`
+   rebuilds the demo itself, copies `dist-demo/` into
    `staasfund/task-manager/demo/` and bump the page's iframe `?v=`; bring the AI Task
    Manager rows in the site's `llms.txt` and `llms-full.txt` current by hand. Skipping
    this step after 0.1.0 left the site showing a stale demo build.

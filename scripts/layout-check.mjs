@@ -385,7 +385,9 @@ async function main() {
   // in a multi-frame Playwright stack trace. Probe first with a plain fetch
   // so a forgotten server fails on one line naming the fix (see the header).
   try {
-    await fetch(BASE);
+    // A closed local port refuses at once; a BASE from argv that silently drops
+    // packets would otherwise hang here, so the probe gives up after 3 s.
+    await fetch(BASE, { signal: AbortSignal.timeout(3000) });
   } catch {
     console.error(
       `\nERROR: nothing is answering at ${BASE}.\n` +

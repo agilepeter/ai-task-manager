@@ -304,10 +304,10 @@ dashboard. The report can never carry a prompt, path, folder, work area,
 client name, session id, credential, agent name, or hook command or matcher
 -- counts and shapes only. Drop a `policy.json` next to the collector's data
 folder and the dashboard becomes a conformance view, computed there from what
-each seat reported: allowed and blocked packages, pinned versions, remote
-servers, a minimum deny-rule count, allowed AI tools, every custom agent
-carrying a tools allowlist, the shell itself denied, and required hook events
--- nine rules in all. Seats never receive the policy, and a broken file just
+each seat reported: allowed packages, blocked packages, pinned versions, no
+remote servers, a minimum deny-rule count, allowed AI tools, a tools allowlist
+on every custom agent, the shell itself denied, and required hook events --
+nine rules in all. Seats never receive the policy, and a broken file just
 means no policy.
 
 ## Privacy and security
