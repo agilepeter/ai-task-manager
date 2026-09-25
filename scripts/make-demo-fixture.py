@@ -191,26 +191,47 @@ env.pop("CLAUDE_CONFIG_DIR"); env.pop("XDG_CONFIG_HOME")
 env["PATH"] = f"{os.path.expanduser('~')}/.cargo/bin:" + env["PATH"]
 env["CARGO_HOME"] = os.path.expanduser("~/.cargo"); env["RUSTUP_HOME"] = os.path.expanduser("~/.rustup")
 
-def live(test, marker):
+FIXTURE_BEGIN, FIXTURE_END = "AITM_FIXTURE_BEGIN", "AITM_FIXTURE_END"
+
+def run_ignored_test(test):
+    """Runs one #[ignore]d fixture test under --nocapture and returns its stdout, split into lines."""
     out = subprocess.run(["cargo", "test", "-p", "aitm-core", "--lib", "--release", test, "--", "--ignored", "--nocapture"],
                          cwd=ROOT, env=env, capture_output=True, text=True).stdout
-    for line in out.splitlines():
+    return out.splitlines()
+
+def live(test, marker):
+    lines = run_ignored_test(test)
+    for line in lines:
         if line.startswith(marker):
             return json.loads(line)
     # live_scan pretty-prints: its JSON starts on a line that is exactly "{".
-    lines = out.splitlines()
     if "{" in lines:
         start = lines.index("{")
         end = len(lines) - 1 - lines[::-1].index("}")
         return json.loads("\n".join(lines[start:end + 1]))
     sys.exit(f"{test} printed no JSON. Last output:\n" + "\n".join(lines[-8:]))
 
+def live_fixture(test):
+    """Same idea as live(), but for a result that can legitimately be an
+    empty array: a leading-substring marker like "[{" never matches an
+    empty `[]`, so that heuristic misread a real empty result as no output
+    at all. live_spend and live_agent_spend instead print their JSON
+    between two sentinel lines that can never themselves be a JSON prefix,
+    so an empty array is a valid result and a missing sentinel still fails
+    loudly rather than guessing."""
+    lines = run_ignored_test(test)
+    if FIXTURE_BEGIN in lines and FIXTURE_END in lines:
+        start, end = lines.index(FIXTURE_BEGIN) + 1, lines.index(FIXTURE_END)
+        if start <= end:
+            return json.loads("\n".join(lines[start:end]))
+    sys.exit(f"{test} printed no {FIXTURE_BEGIN}/{FIXTURE_END} sentinel pair. Last output:\n" + "\n".join(lines[-8:]))
+
 fixture = {
     "inventory": live("live_scan", "\x00"),
-    "spend": live("live_spend", "[{"),
+    "spend": live_fixture("live_spend"),
     "sessions": live("live_sessions", '{"area"'),
     "audit": live("live_audit", '{"generatedAt"'),
-    "agentSpend": live("live_agent_spend", "[{"),
+    "agentSpend": live_fixture("live_agent_spend"),
 }
 def round_floats(obj, ndigits=6):
     """The engine sums these by iterating a std HashMap, whose order is

@@ -22,6 +22,14 @@ use crate::providers;
 
 pub const TREND_DAYS: usize = 30;
 
+/// Parses `AITM_TODAY`'s raw value as an ISO `YYYY-MM-DD` date -- the one
+/// shape scripts/make-demo-fixture.py ever writes. Kept separate from the
+/// env read so the parsing rule has one home and can be unit-tested without
+/// touching process environment state.
+fn parse_today_override(raw: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(raw, "%Y-%m-%d").ok()
+}
+
 /// Which local calendar day counts as "today" for every day-bucketing
 /// cutoff in this module -- the last-30-days window, the trend window, a
 /// session's own recency filter. `Local::now().date_naive()` normally;
@@ -36,9 +44,17 @@ pub const TREND_DAYS: usize = 30;
 /// weekday-dependent random draws along the way.
 pub fn today_naive_date() -> NaiveDate {
     if let Ok(raw) = std::env::var("AITM_TODAY") {
-        if let Ok(d) = NaiveDate::parse_from_str(&raw, "%Y-%m-%d") {
+        if let Some(d) = parse_today_override(&raw) {
             return d;
         }
+        // Set but not an ISO date -- almost certainly a typo in a shell
+        // export while poking at the fixture script, so name the value
+        // that got rejected rather than silently reading the real clock
+        // and leaving the mismatch to be found later. Debug-only: never
+        // worth a release build's stderr, and either way the real clock
+        // beneath this keeps a live install running normally.
+        #[cfg(debug_assertions)]
+        eprintln!("AITM_TODAY={raw:?} is not an ISO YYYY-MM-DD date; using the real date instead");
     }
     Local::now().date_naive()
 }
@@ -204,7 +220,7 @@ struct FileData {
     /// carries (constant for the whole file in practice). `None` either
     /// because this is not a subagent transcript or because none of its
     /// lines have named one yet; `agent_spend` is what turns the latter
-    /// into the display bucket `"unknown"`, never this field directly.
+    /// into an empty, unattributed display name, never this field directly.
     agent: Option<String>,
 }
 
@@ -1771,8 +1787,8 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
         }
         // The name is constant for the whole file in practice, so the first
         // assistant line to carry one settles it; a transcript that never
-        // carries one stays `None` here and becomes the display bucket
-        // "unknown" only in `agent_spend`, never guessed this early.
+        // carries one stays `None` here and becomes an empty, unattributed
+        // display name only in `agent_spend`, never guessed this early.
         if data.agent.is_none() {
             if let Some(name) = v.get("attributionAgent").and_then(Value::as_str) {
                 if !name.is_empty() && name.len() <= MAX_AGENT_KEY {
@@ -2163,10 +2179,13 @@ pub fn claude_sessions(area: Option<&str>, day: Option<&str>, limit: usize) -> V
 
 /// Subagent transcripts grouped by who ran them: a built-in agent
 /// (`general-purpose`, `Explore`, `Plan`, …), a custom definition's own
-/// name, or `"unknown"` for a transcript whose lines never carried one.
-/// Metadata only, same contract as `SessionSpend`: no field here can hold a
-/// prompt or a title, because none of its inputs (`FileData::agent`,
-/// day/model totals, a checkpoint's timestamps) can either.
+/// name, or an empty `name` for a transcript whose lines never carried one.
+/// Empty rather than a placeholder word like `"unknown"` because a `.md`
+/// definition's own stem can never be empty, so the unattributed bucket can
+/// never collide with a real agent's name. Metadata only, same contract as
+/// `SessionSpend`: no field here can hold a prompt or a title, because none
+/// of its inputs (`FileData::agent`, day/model totals, a checkpoint's
+/// timestamps) can either.
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSpend {
@@ -2245,7 +2264,10 @@ fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u
             .as_ref()
             .and_then(|c| c.last_ms)
             .unwrap_or_else(|| entry.mtime_secs as i64 * 1000 + entry.mtime_nanos as i64 / 1_000_000);
-        let name = entry.agent.clone().unwrap_or_else(|| "unknown".to_string());
+        // Empty, never "unknown": a `.md` definition's own stem is never
+        // empty, so this can't collide with a real agent that happens to be
+        // named it.
+        let name = entry.agent.clone().unwrap_or_default();
         let g = groups.entry(name).or_insert_with(|| Group {
             runs: 0,
             cost: 0.0,
@@ -2280,7 +2302,11 @@ fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u
             }
         })
         .collect();
-    out.sort_by(|a, b| b.cost.total_cmp(&a.cost).then_with(|| a.name.cmp(&b.name)));
+    // The empty, unattributed name (if any) sorts last regardless of its
+    // cost -- named agents are always the more actionable rows, and an
+    // empty name would otherwise sort first on a cost tie or even ahead of
+    // a named row that spent less.
+    out.sort_by(|a, b| a.name.is_empty().cmp(&b.name.is_empty()).then_with(|| b.cost.total_cmp(&a.cost)).then_with(|| a.name.cmp(&b.name)));
     out
 }
 
@@ -4187,6 +4213,25 @@ mod week_tests {
 
 #[cfg(test)]
 mod tests {
+    /// Sentinel lines `scripts/make-demo-fixture.py` scans for around an
+    /// ignored fixture test's printed JSON, so it can find that JSON by
+    /// exact bracketing lines rather than by a leading substring like
+    /// `"[{"` -- which a legitimately empty array (`[]`) never starts with,
+    /// so that heuristic misread "no activity yet" as "no output at all".
+    const FIXTURE_BEGIN: &str = "AITM_FIXTURE_BEGIN";
+    const FIXTURE_END: &str = "AITM_FIXTURE_END";
+
+    /// `parse_today_override` only ever accepts the one shape
+    /// scripts/make-demo-fixture.py writes -- a bare ISO `YYYY-MM-DD` --
+    /// and rejects everything else, including a real calendar date spelled
+    /// in a different field order, rather than guessing at it.
+    #[test]
+    fn today_override_parses_iso_and_rejects_garbage() {
+        assert_eq!(super::parse_today_override("2026-09-25"), chrono::NaiveDate::from_ymd_opt(2026, 9, 25));
+        assert_eq!(super::parse_today_override(""), None, "empty string");
+        assert_eq!(super::parse_today_override("not-a-date"), None, "garbage");
+        assert_eq!(super::parse_today_override("25-09-2026"), None, "non-ISO field order (day-month-year)");
+    }
 
     /// Prints real sessions as JSON: `{"area": [...], "day": [...]}` for the
     /// area and local day named in AITM_AREA / AITM_DAY.
@@ -4207,7 +4252,9 @@ mod tests {
     #[test]
     #[ignore]
     fn live_spend() {
+        println!("{FIXTURE_BEGIN}");
         println!("{}", serde_json::to_string(&collect(None)).unwrap());
+        println!("{FIXTURE_END}");
     }
 
     /// Prints this machine's real 30-day agent spend, same call `get_agent_spend`
@@ -4216,7 +4263,9 @@ mod tests {
     #[ignore]
     fn live_agent_spend() {
         let _ = collect(None);
+        println!("{FIXTURE_BEGIN}");
         println!("{}", serde_json::to_string(&agent_spend(30)).unwrap());
+        println!("{FIXTURE_END}");
     }
 
     /// Diagnostic (ignored): how many entries the scan cache would list as
@@ -4236,7 +4285,7 @@ mod tests {
         let _ = collect(None);
         let root = claude_projects_root();
         let known = crate::inventory::known_project_paths();
-        let today = Local::now().date_naive().num_days_from_ce();
+        let today = today_days_from_ce();
         let before = {
             let Ok(map) = cache().lock() else { return };
             map.iter()
@@ -4313,7 +4362,7 @@ mod tests {
 
     #[test]
     fn daily_cost_lines_up_with_the_token_trend() {
-        let today = Local::now().date_naive().num_days_from_ce();
+        let today = today_days_from_ce();
         let mut data = FileData::default();
         data.days.insert((today, "opus".into()), (3.0, 10.0));
         data.days.insert((today, "sonnet".into()), (1.5, 5.0));
@@ -5648,7 +5697,7 @@ mod tests {
 
     /// The fixture-building body, without acquiring `subagent_fixture_lock`
     /// itself — for a test that must hold the lock across a "before" read
-    /// too (real "Explore" / "unknown" activity on this machine must not
+    /// too (real "Explore" / unattributed activity on this machine must not
     /// change between that read and the fixture existing).
     fn build_subagent_fixture_unlocked(name: &str) -> (PathBuf, String, String, Vec<PathBuf>) {
         let root = std::env::temp_dir().join(format!("pane-{name}-{}", std::process::id()));
@@ -5774,7 +5823,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_spend_groups_by_attribution_agent_and_labels_the_rest_unknown() {
+    fn agent_spend_groups_by_attribution_agent_and_labels_the_rest_unattributed() {
         // Pure: PersistEntry fixtures built entirely in memory, fed straight
         // to agent_spend_from -- no before/after delta and no dependence on
         // this machine's real cache or spend_cache.json, because the
@@ -5807,9 +5856,9 @@ mod tests {
         assert_eq!(explore.runs, 2, "uuid-a and uuid-b attribute to Explore; uuid-d is outside the window");
         assert!((explore.cost - 0.8).abs() < 1e-9, "0.5 + 0.3, got {}", explore.cost);
 
-        let unknown = agents.iter().find(|a| a.name == "unknown").expect("unknown group present");
-        assert_eq!(unknown.runs, 1);
-        assert!((unknown.cost - 0.2).abs() < 1e-9, "got {}", unknown.cost);
+        let unattributed = agents.iter().find(|a| a.name.is_empty()).expect("unattributed group present");
+        assert_eq!(unattributed.runs, 1);
+        assert!((unattributed.cost - 0.2).abs() < 1e-9, "got {}", unattributed.cost);
 
         assert!(
             agents.iter().all(|a| a.name != "uuid-a" && a.name != "uuid-b" && a.name != "uuid-c"),
@@ -5820,6 +5869,25 @@ mod tests {
             (total - 1.0).abs() < 1e-9,
             "the out-of-window and non-subagent entries (99 and 999) must never reach any group, got total {total}"
         );
+    }
+
+    #[test]
+    fn agent_spend_orders_the_unattributed_row_last_even_when_it_costs_more() {
+        let today = 20_000;
+        let entry = |parent: &str, agent: Option<&str>, cost: f64| PersistEntry {
+            parent_session: Some(parent.to_string()),
+            agent: agent.map(str::to_string),
+            days: vec![(today, "claude-haiku-4-5".to_string(), cost, 15.0)],
+            ..Default::default()
+        };
+        // The unattributed entry is by far the biggest spender here -- a
+        // plain cost-descending sort would put it first. It must still land
+        // last, because a named row is always the more actionable one.
+        let entries = [entry("uuid-a", Some("Explore"), 0.1), entry("uuid-b", None, 99.0)];
+        let agents = agent_spend_from(entries.iter(), 30, today);
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].name, "Explore");
+        assert_eq!(agents.last().map(|a| a.name.as_str()), Some(""), "the unattributed row must sort last regardless of cost");
     }
 
     #[test]
@@ -5834,7 +5902,7 @@ mod tests {
         // or whatever real entries it already holds.
         let mut files = Vec::new();
         recent_jsonl_files(&fx.root, &mut files);
-        let today = Local::now().date_naive().num_days_from_ce();
+        let today = today_days_from_ce();
         let entries: Vec<PersistEntry> = files
             .iter()
             .map(|f| {

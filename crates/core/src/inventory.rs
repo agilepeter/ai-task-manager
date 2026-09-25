@@ -484,8 +484,10 @@ pub fn opportunities_for(inv: &Inventory) -> Vec<Opportunity> {
 
 /// Custom agents nobody called in the window `used`/`any_runs` describe --
 /// `used` is every name `spend::agent_spend(days)` returned with at least
-/// one run (a built-in name or "unknown" can sit in there too; only the
-/// ones that also match a `Definition` in `agents` matter here), `any_runs`
+/// one run (a built-in name or an empty, unattributed marker can sit in
+/// there too; only the ones that also match a `Definition` in `agents`
+/// matter here -- and a real definition's own stem can never be empty, so
+/// the marker can never falsely count as one), `any_runs`
 /// is whether that call returned anything at all. `any_runs` gates the
 /// whole thing rather than each agent being judged one at a time: a machine
 /// that ran zero subagents in the window has said nothing about any one

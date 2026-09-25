@@ -95,8 +95,9 @@ interface Definition {
 
 /// 30 days of one agent's subagent runs, grouped by the name a transcript
 /// was stamped with -- a custom Definition's own name, a built-in Claude
-/// Code ships ("general-purpose", "Explore", "Plan", ...), or "unknown" for
-/// a transcript with no attribution line at all.
+/// Code ships ("general-purpose", "Explore", "Plan", ...), or an empty name
+/// for a transcript with no attribution line at all (a Definition's own
+/// file stem can never be empty, so this can't collide with a real one).
 interface AgentSpend {
   name: string;
   runs: number;
@@ -632,14 +633,14 @@ function agentRows(list: Definition[], spend: Map<string, AgentSpend>, nowMs: nu
 /// Definition, only ever a name a subagent transcript was stamped with.
 /// Excludes every custom agent's own name (`allAgents`, unfiltered by scope:
 /// a project-scoped row hidden by the current filter must still count as
-/// "already listed", not reappear here). "unknown" (a transcript with no
-/// attribution line at all) is still real spend, so it is never dropped --
-/// it renders as this group's last row, under its own label rather than the
-/// raw string "unknown", so that spend cannot go missing from the tab.
+/// "already listed", not reappear here). An empty name (a transcript with
+/// no attribution line at all) is still real spend, so it is never dropped
+/// -- it renders as this group's last row, under its own label rather than
+/// blank, so that spend cannot go missing from the tab.
 export function builtInAgentRows(allAgents: Definition[], spend: AgentSpend[], nowMs: number): string {
   const customNames = new Set(allAgents.map((a) => a.name));
-  const named = spend.filter((s) => s.name !== "unknown" && !customNames.has(s.name));
-  const unattributed = spend.find((s) => s.name === "unknown");
+  const named = spend.filter((s) => s.name !== "" && !customNames.has(s.name));
+  const unattributed = spend.find((s) => s.name === "");
   const total = named.length + (unattributed ? 1 : 0);
   if (!total) return "";
   const row = (label: string, s: AgentSpend) => `

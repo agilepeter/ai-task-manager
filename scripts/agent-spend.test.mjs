@@ -113,15 +113,15 @@ test("describeAgentSpend() names the run count, the cost and a relative last-use
 test("builtInAgentRows() renders an unattributed row last, under its own label, for spend with no attribution line, in en", async () => {
   const { builtInAgentRows, setActiveLocale, t } = await loadInventoryModule();
   setActiveLocale("en");
-  // A named built-in and an "unknown" row together: proves the unknown row
-  // is not just shown but shown AFTER every named one, per the group's own
-  // "last row" contract.
+  // A named built-in and an empty-name row together: proves the empty-name
+  // row is not just shown but shown AFTER every named one, per the group's
+  // own "last row" contract.
   const NAMED = { name: "Explore", runs: 5, cost: 2.5, tokens: 40_000, lastUsedMs: NOW_MS - 86_400_000, topModel: "claude-sonnet-5" };
-  const UNKNOWN = { name: "unknown", runs: 3, cost: 1.23, tokens: 9_000, lastUsedMs: NOW_MS - 3 * 86_400_000, topModel: "claude-sonnet-5" };
-  const html = builtInAgentRows([], [NAMED, UNKNOWN], NOW_MS);
+  const UNATTRIBUTED = { name: "", runs: 3, cost: 1.23, tokens: 9_000, lastUsedMs: NOW_MS - 3 * 86_400_000, topModel: "claude-sonnet-5" };
+  const html = builtInAgentRows([], [NAMED, UNATTRIBUTED], NOW_MS);
   const label = t("inventory.agents.unattributed");
   assert.ok(html.includes(label), "the unattributed row's label never rendered");
   assert.ok(html.includes("$1.23") && html.includes("3 days ago"), "the unattributed row's own spend line never rendered");
-  assert.ok(!/inv-name">unknown</.test(html), 'the raw "unknown" name leaked into a row instead of the unattributed label');
+  assert.ok(!/inv-name">\s*<\/span>/.test(html), "an empty name leaked into a row instead of the unattributed label");
   assert.ok(html.indexOf(label) > html.indexOf("Explore"), "the unattributed row must render after every named built-in");
 });

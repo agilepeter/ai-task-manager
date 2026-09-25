@@ -401,6 +401,30 @@ async fn get_burn_profile(provider_id: String) -> Result<Vec<history::BurnProfil
         .map_err(|e| format!("burn profile: {e}"))
 }
 
+/// How long `get_agent_spend` may answer straight from the rows
+/// `enriched_inventory` just computed, instead of re-running
+/// `spend::agent_spend(30)` over the same session logs. `load()` on the
+/// frontend (`src/inventory.ts`) fires `get_inventory` and `get_agent_spend`
+/// back to back on every Inventory open, so without this the same 30-day
+/// scan ran twice a few milliseconds apart for no reason. Ten seconds is
+/// generous slack for that pairing while still noticing a spend change from
+/// any other caller within one tab session.
+const AGENT_SPEND_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The most recent rows `enriched_inventory` computed, and when. Read by
+/// `get_agent_spend` so the two commands `load()` fires together do not
+/// each pay for their own scan; written only by `enriched_inventory`, never
+/// by `get_agent_spend` itself, so a caller of `get_agent_spend` alone
+/// (a test, say) always sees a real scan rather than seeding the cache.
+static AGENT_SPEND_CACHE: Mutex<Option<(std::time::Instant, Vec<spend::AgentSpend>)>> = Mutex::new(None);
+
+/// Whether a rows snapshot captured at `captured` is still within `ttl` of
+/// `now`. Takes both instants as plain values, rather than reading the
+/// clock itself, so the freshness window can be tested without sleeping.
+fn cache_is_fresh(captured: std::time::Instant, ttl: std::time::Duration, now: std::time::Instant) -> bool {
+    now.saturating_duration_since(captured) < ttl
+}
+
 /// The inventory plus every computed finding, and the spend it was built
 /// from. **Both the Inventory tab and the audit go through here**: they used
 /// to assemble the list separately, so the audit silently scored a shorter
@@ -415,6 +439,9 @@ fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     // Same 30-day window the agent-spend view itself reads, so the opportunity
     // and the numbers behind it can never disagree about what "recent" means.
     let agent_spend = spend::agent_spend(30);
+    if let Ok(mut slot) = AGENT_SPEND_CACHE.lock() {
+        *slot = Some((std::time::Instant::now(), agent_spend.clone()));
+    }
     let any_subagent_runs = !agent_spend.is_empty();
     let used_agents: HashSet<String> = agent_spend.into_iter().map(|a| a.name).collect();
     inv.opportunities.extend(inventory::agent_usage_opportunities(&inv.agents, &used_agents, any_subagent_runs));
@@ -482,13 +509,27 @@ async fn get_sessions(area: Option<String>, day: Option<String>) -> Result<Vec<s
 
 /// 30 days of subagent spend, grouped by who ran it: a custom agent's own
 /// name, a built-in one Claude Code ships (`general-purpose`, `Explore`,
-/// `Plan`, ...), or "unknown" for a transcript with no attribution line at
-/// all. Same scan cache the rest of the spend view reads; no rescan.
+/// `Plan`, ...), or an empty name for a transcript with no attribution line
+/// at all (a `.md` definition's own stem is never empty, so that can never
+/// collide with a real agent's name). Same scan cache the rest of the spend
+/// view reads; no rescan -- and reuses `enriched_inventory`'s own rows
+/// instead of a fresh one when `get_inventory` just computed them (see
+/// `AGENT_SPEND_CACHE_TTL`), since the frontend calls both on every
+/// Inventory open.
 #[tauri::command]
 async fn get_agent_spend() -> Result<Vec<spend::AgentSpend>, String> {
-    tauri::async_runtime::spawn_blocking(|| spend::agent_spend(30))
-        .await
-        .map_err(|e| format!("agent spend: {e}"))
+    tauri::async_runtime::spawn_blocking(|| {
+        if let Ok(slot) = AGENT_SPEND_CACHE.lock() {
+            if let Some((captured, rows)) = slot.as_ref() {
+                if cache_is_fresh(*captured, AGENT_SPEND_CACHE_TTL, std::time::Instant::now()) {
+                    return rows.clone();
+                }
+            }
+        }
+        spend::agent_spend(30)
+    })
+    .await
+    .map_err(|e| format!("agent spend: {e}"))
 }
 
 /// Shows a session's log file in the OS file manager. Read-only, and the
@@ -3845,6 +3886,16 @@ mod tests {
         assert!(super::refresh_due(0, 2 * min, 1), "never fetched is due");
         assert!(super::refresh_due(99 * min, 10 * min, 1), "a timestamp from the future is due, not a permanent off");
         assert!(super::refresh_due(10 * min, 11 * min, 0), "an interval of 0 is treated as a minute");
+    }
+
+    #[test]
+    fn agent_spend_cache_freshness_window() {
+        let ttl = std::time::Duration::from_secs(10);
+        let captured = std::time::Instant::now();
+        assert!(super::cache_is_fresh(captured, ttl, captured), "just captured");
+        assert!(super::cache_is_fresh(captured, ttl, captured + std::time::Duration::from_secs(5)), "inside the window");
+        assert!(!super::cache_is_fresh(captured, ttl, captured + std::time::Duration::from_secs(10)), "exactly at the edge is no longer fresh");
+        assert!(!super::cache_is_fresh(captured, ttl, captured + std::time::Duration::from_secs(11)), "past the window");
     }
 
     #[test]
