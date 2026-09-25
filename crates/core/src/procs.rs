@@ -502,7 +502,7 @@ pub fn agents_from(raw: &[RawProc], cwds: &HashMap<u32, String>) -> Vec<RunningA
             (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
         };
     }
-    out.sort_by(|a, b| b.elapsed_secs.cmp(&a.elapsed_secs));
+    out.sort_by_key(|a| std::cmp::Reverse(a.elapsed_secs));
     out
 }
 
@@ -649,7 +649,7 @@ pub fn opportunities(running: &[RunningServer]) -> Vec<Opportunity> {
     };
 
     let mut dupes: Vec<&RunningServer> = running.iter().filter(|s| s.instances >= MANY_COPIES).collect();
-    dupes.sort_by(|a, b| b.rss_bytes.cmp(&a.rss_bytes));
+    dupes.sort_by_key(|a| std::cmp::Reverse(a.rss_bytes));
     if let Some(worst) = dupes.first() {
         let names = dupes.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ");
         let wasted: u64 = dupes.iter().map(|s| s.rss_bytes - s.rss_bytes / s.instances as u64).sum();
@@ -685,7 +685,7 @@ pub fn opportunities(running: &[RunningServer]) -> Vec<Opportunity> {
     let total: u64 = running.iter().map(|s| s.rss_bytes).sum();
     if total >= HEAVY_TOTAL_BYTES {
         let mut by_size: Vec<&RunningServer> = running.iter().collect();
-        by_size.sort_by(|a, b| b.rss_bytes.cmp(&a.rss_bytes));
+        by_size.sort_by_key(|a| std::cmp::Reverse(a.rss_bytes));
         let top = by_size.first().expect("non-empty: total is above the floor");
         let process_total = running.iter().map(|s| s.pids.len()).sum::<usize>() as i64;
         push(
@@ -891,7 +891,7 @@ mod tests {
         // Everything a real command line can carry, planted at once.
         let table = "900 1 2048 01:00 npx obsidian-mcp@2 serve --vault /Users/dana/Private Vault \
                      --api-key sk-ant-SECRET --token ghp_SECRET2 --url https://user:pw@example.com/x\n";
-        let got = group(&parse_ps(&table), &[server("notes", Some("obsidian-mcp"))]);
+        let got = group(&parse_ps(table), &[server("notes", Some("obsidian-mcp"))]);
         let json = serde_json::to_string(&got).expect("serializes");
         for secret in
             ["sk-ant-SECRET", "ghp_SECRET2", "Private Vault", "/Users/dana", "user:pw", "example.com", "--vault"]
@@ -1116,7 +1116,7 @@ mod tests {
         // A's ppid is B and B's ppid is A -- an impossible but adversarial
         // process table. `host_ancestor_pid`'s walk is already bounded
         // (see its own comment), so this returns None instead of hanging.
-        let raw = vec![
+        let raw = [
             RawProc { pid: 1, ppid: 2, rss_bytes: 0, elapsed_secs: 0, package: None, binary: "sh".into(), cpu_percent: None },
             RawProc { pid: 2, ppid: 1, rss_bytes: 0, elapsed_secs: 0, package: None, binary: "sh".into(), cpu_percent: None },
         ];

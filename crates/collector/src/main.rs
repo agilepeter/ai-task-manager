@@ -64,7 +64,7 @@ fn load_all(dir: &Path) -> Vec<SeatReport> {
         .filter_map(|e| std::fs::read_to_string(e.path()).ok())
         .filter_map(|raw| seat::parse(&raw).ok())
         .collect();
-    out.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
+    out.sort_by_key(|a| a.label.to_lowercase());
     out
 }
 

@@ -185,7 +185,7 @@ fn extra_ledger_homes_from(
     let mut seen_dirs: Vec<PathBuf> = Vec::new();
     let mut out = Vec::new();
     for dir in extras {
-        if same_dir(&dir, &default) {
+        if same_dir(&dir, default) {
             continue;
         }
         if seen_dirs.iter().any(|d| same_dir(d, &dir)) {
@@ -598,20 +598,23 @@ fn utc_date(year: i32, month: u32, day: u32, h: u32, m: u32, s: u32, ms: u32) ->
         .unwrap_or(0.0)
 }
 
-/// (timestamp ms, cost $, tokens, model, provider) of every priced
-/// message, any provider — this is money spent through OpenCode, used by
-/// Total Spend. The provider id lets the spend engine split gateway
-/// providers (AihubMix) into their own slice.
-pub fn collect_cost_events() -> Vec<(f64, f64, f64, String, String)> {
+/// (timestamp ms, cost $, tokens, model, provider) of one priced message.
+type CostEvent = (f64, f64, f64, String, String);
+
+/// Every priced message, any provider — this is money spent through
+/// OpenCode, used by Total Spend. The provider id lets the spend engine
+/// split gateway providers (AihubMix) into their own slice.
+pub fn collect_cost_events() -> Vec<CostEvent> {
     collect_cost_events_in(&data_dir())
 }
 
-pub fn collect_cost_events_in(dir: &Path) -> Vec<(f64, f64, f64, String, String)> {
+pub fn collect_cost_events_in(dir: &Path) -> Vec<CostEvent> {
     use std::sync::Mutex;
     use std::time::SystemTime;
     type Stamp = (SystemTime, u64);
-    type Row = (f64, f64, f64, String, String);
-    static CACHE: Mutex<Vec<(PathBuf, Stamp, Stamp, Vec<Row>)>> = Mutex::new(Vec::new());
+    // db path, its (mtime, len) stamp, its WAL's, the rows read at that stamp.
+    type CacheEntry = (PathBuf, Stamp, Stamp, Vec<CostEvent>);
+    static CACHE: Mutex<Vec<CacheEntry>> = Mutex::new(Vec::new());
 
     let db_path = dir.join("opencode.db");
     if !db_path.exists() {
@@ -635,7 +638,7 @@ pub fn collect_cost_events_in(dir: &Path) -> Vec<(f64, f64, f64, String, String)
         }
     }
 
-    let rows = match with_live_db(dir, |db| read_recent_cost_events(db)) {
+    let rows = match with_live_db(dir, read_recent_cost_events) {
         Ok(rows) => rows,
         Err(_) => {
             // A failed read must not cache empty — the next stamp hit
@@ -659,7 +662,7 @@ pub fn collect_cost_events_in(dir: &Path) -> Vec<(f64, f64, f64, String, String)
     rows
 }
 
-fn rows_in_spend_window(rows: &[(f64, f64, f64, String, String)]) -> Vec<(f64, f64, f64, String, String)> {
+fn rows_in_spend_window(rows: &[CostEvent]) -> Vec<CostEvent> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let cutoff_ms = (now_ms - 31 * 86_400 * 1_000) as f64;
     rows.iter()
@@ -676,7 +679,7 @@ fn rows_in_spend_window(rows: &[(f64, f64, f64, String, String)]) -> Vec<(f64, f
 
 /// Spend only needs ~31 days. The quota card still uses `read_messages`
 /// for the monthly Go cycle; this path must not pull that whole ledger.
-fn read_recent_cost_events(db: &Path) -> Result<Vec<(f64, f64, f64, String, String)>, String> {
+fn read_recent_cost_events(db: &Path) -> Result<Vec<CostEvent>, String> {
     let conn = super::open_readonly_sqlite(db)?;
     let now_ms = chrono::Utc::now().timestamp_millis();
     let cutoff_ms = now_ms - 31 * 86_400 * 1_000;
@@ -712,7 +715,7 @@ fn read_recent_cost_events(db: &Path) -> Result<Vec<(f64, f64, f64, String, Stri
 }
 
 /// One assistant cost row, or None when the blob is junk / not spend.
-fn message_cost_event(time_created: i64, data: &str) -> Option<(f64, f64, f64, String, String)> {
+fn message_cost_event(time_created: i64, data: &str) -> Option<CostEvent> {
     let msg = serde_json::from_str::<Value>(data).ok()?;
     if msg.get("role").and_then(Value::as_str) != Some("assistant") {
         return None;

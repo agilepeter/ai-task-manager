@@ -420,8 +420,10 @@ pub fn credential_string(target: &str) -> Option<String> {
     let text = String::from_utf8(blob.clone()).ok().or_else(|| {
         if blob.len() % 2 == 0 {
             let utf16: Vec<u16> = blob
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_le_bytes(*c))
                 .collect();
             String::from_utf16(&utf16).ok()
         } else {
@@ -512,7 +514,6 @@ fn expected_credit_meter_generation(provider: &str) -> u64 {
 /// purchased-credit pools (Codex Extra credits, Devin's extra balance)
 /// meter identically but shouldn't all be called "Credits used", and some
 /// carry an extra unit in the caption ("· N credits").
-
 pub fn credit_meter_labeled(
     provider: &str,
     sign: &str,

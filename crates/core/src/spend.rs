@@ -1226,13 +1226,13 @@ fn file_days_inner(
                 let mut discard = FileData::default();
                 let (warm_ok, _) =
                     parse_jsonl_reader(&mut reader, parse, &mut discard, warm_pos, Some(from));
-                if !warm_ok || reader.seek(SeekFrom::Start(from)).is_err() {
-                    if reader.seek(SeekFrom::Start(from)).is_err() {
-                        PROBES.with(|p| {
-                            p.borrow_mut().take();
-                        });
-                        return data;
-                    }
+                if (!warm_ok || reader.seek(SeekFrom::Start(from)).is_err())
+                    && reader.seek(SeekFrom::Start(from)).is_err()
+                {
+                    PROBES.with(|p| {
+                        p.borrow_mut().take();
+                    });
+                    return data;
                 }
             }
             Some(_) => {}
@@ -4716,7 +4716,7 @@ mod tests {
 
         let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
         use std::io::Write;
-        write!(f, "{}\n", line(4_000.0)).unwrap();
+        writeln!(f, "{}", line(4_000.0)).unwrap();
         drop(f);
 
         let second = file_days(&path, &mut |line, data| kimi_line(line, data));
@@ -4733,7 +4733,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pane-codex-warm-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
         let path = dir.join("rollout.jsonl");
-        let head = vec![
+        let head = [
             json!({"timestamp": "2026-09-10T10:00:00Z", "type": "turn_context",
                    "payload": {"model": "gpt-5.6-terra"}})
             .to_string(),
@@ -4791,7 +4791,7 @@ mod tests {
 
         let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
         use std::io::Write;
-        write!(f, "{}\n", &second_line[12..]).unwrap();
+        writeln!(f, "{}", &second_line[12..]).unwrap();
         drop(f);
 
         let second = file_days(&path, &mut |line, data| kimi_line(line, data));
@@ -4886,7 +4886,7 @@ mod tests {
 
         let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
         use std::io::Write;
-        write!(f, "{}\n", line("msg_1", "req_1", 100.0)).unwrap();
+        writeln!(f, "{}", line("msg_1", "req_1", 100.0)).unwrap();
         drop(f);
         let second = claude_file(&path);
         let _ = fs::remove_dir_all(&dir);
@@ -4930,7 +4930,7 @@ mod tests {
 
         let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
         use std::io::Write;
-        write!(f, "{}\n", &second_line[12..]).unwrap();
+        writeln!(f, "{}", &second_line[12..]).unwrap();
         drop(f);
 
         let second = file_days(&path, &mut |line, data| kimi_line(line, data));
@@ -5016,7 +5016,7 @@ mod tests {
 
         let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
         use std::io::Write;
-        write!(f, "{}\n", line(4_000.0)).unwrap();
+        writeln!(f, "{}", line(4_000.0)).unwrap();
         drop(f);
 
         let second = file_days(&path, &mut |line, data| kimi_line(line, data));
@@ -5553,7 +5553,7 @@ mod tests {
     #[test]
     fn a_session_id_finds_its_own_log_and_nothing_else() {
         let root = PathBuf::from("/h/.claude/projects");
-        let paths = vec![
+        let paths = [
             root.join("-w-acme").join("abc").with_extension("jsonl"),
             root.join("-w-acme").join("def").with_extension("jsonl"),
             // Same stem, other tools' logs: the cache has these too.
@@ -5569,7 +5569,7 @@ mod tests {
         assert_eq!(find("../def"), None, "a stem never contains a separator, so a path cannot pass as an id");
         assert_eq!(find(""), None);
         // Nothing outside the projects root can be named, whatever the stem.
-        let outside = vec![PathBuf::from("/h/.codex/sessions/def.jsonl")];
+        let outside = [PathBuf::from("/h/.codex/sessions/def.jsonl")];
         assert_eq!(session_path_among(&root, outside.iter(), "def"), None);
     }
 

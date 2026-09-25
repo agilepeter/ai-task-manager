@@ -757,8 +757,12 @@ fn other_app_servers(home: &Path) -> Vec<McpServer> {
     out
 }
 
+/// One entry in `KNOWN_TOOLS`: display name, its config folder under home or
+/// app data (if any), and the command to look for on PATH (if any).
+type KnownTool = (&'static str, Option<(Base, &'static str)>, Option<&'static str>);
+
 /// Known AI tools: (name, config folder under home or app data, command).
-const KNOWN_TOOLS: &[(&str, Option<(Base, &str)>, Option<&str>)] = &[
+const KNOWN_TOOLS: &[KnownTool] = &[
     ("Claude Code", Some((Base::Home, ".claude")), Some("claude")),
     ("Claude Desktop", Some((Base::AppData, "Claude")), None),
     ("Codex", Some((Base::Home, ".codex")), Some("codex")),
@@ -1162,7 +1166,7 @@ mod tests {
         std::fs::write(bin.join(if cfg!(windows) { "aider.exe" } else { "aider" }), "").unwrap();
         std::fs::create_dir_all(bin.join("ollama")).unwrap(); // a folder is not a command
         let servers = vec![McpServer { client: "Codex".into(), ..server("docs", None, "stdio", 0) }];
-        let found = find_tools(&home, &[bin.clone()], &servers);
+        let found = find_tools(&home, std::slice::from_ref(&bin), &servers);
         let by = |n: &str| found.iter().find(|t| t.name == n).cloned();
         assert_eq!(by("Codex"), Some(AiTool { name: "Codex".into(), kind: "app".into(), mcp_servers: 1 }));
         assert_eq!(by("Aider"), Some(AiTool { name: "Aider".into(), kind: "cli".into(), mcp_servers: 0 }));

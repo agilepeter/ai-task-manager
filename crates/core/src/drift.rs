@@ -254,7 +254,7 @@ fn recent_session_files() -> Vec<PathBuf> {
             files.push((meta.modified().unwrap_or(std::time::UNIX_EPOCH), path));
         }
     }
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
     files.truncate(MAX_FILES);
     files.into_iter().map(|(_, p)| p).collect()
 }
@@ -273,7 +273,7 @@ pub fn scan() -> Vec<Check> {
             samples.extend(parse_cost_state(&line));
         }
     }
-    compare(&samples, |m| pricing::lookup(m))
+    compare(&samples, pricing::lookup)
 }
 
 /// Is the gap a stale rate, or a token this comparison is not counting?

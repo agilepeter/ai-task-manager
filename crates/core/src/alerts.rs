@@ -161,7 +161,7 @@ const BURN_MIN_SPAN_MS: i64 = 2 * 60_000;
 fn burn_rise(history: &[(i64, f64)], now: i64, used: f64) -> Option<(f64, i64)> {
     let (at, then) = *history.iter().find(|(at, _)| now - at <= BURN_WINDOW_MS)?;
     let span = now - at;
-    (span >= BURN_MIN_SPAN_MS).then(|| (used - then, span / 60_000))
+    (span >= BURN_MIN_SPAN_MS).then_some((used - then, span / 60_000))
 }
 
 pub fn evaluate(snapshots: &[Snapshot], cfg: &Value) -> Vec<Alert> {

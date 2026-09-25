@@ -37,7 +37,7 @@ pub async fn snapshot() -> Snapshot {
     }
 
     match try_cloud().await {
-        CloudResult::Ok(snap) => snap,
+        CloudResult::Ok(snap) => *snap,
         CloudResult::AuthExpired => Snapshot::error(
             ID,
             NAME,
@@ -265,7 +265,7 @@ async fn try_language_server(server: &LanguageServer) -> Option<Snapshot> {
 // ---------------------------------------------------------------------------
 
 enum CloudResult {
-    Ok(Snapshot),
+    Ok(Box<Snapshot>),
     AuthExpired,
     Unavailable,
     NoCredentials,
@@ -419,7 +419,7 @@ async fn try_cloud() -> CloudResult {
     let mut auth_failed = false;
     for token in &candidates {
         match cloud_snapshot(token).await {
-            Ok(Some(snap)) => return CloudResult::Ok(snap),
+            Ok(Some(snap)) => return CloudResult::Ok(Box::new(snap)),
             Ok(None) => return CloudResult::Unavailable,
             Err(_) => auth_failed = true,
         }
@@ -434,7 +434,7 @@ async fn try_cloud() -> CloudResult {
             Refresh::Refreshed(access, expires_at) => {
                 save_cached_refresh(&access, expires_at);
                 match cloud_snapshot(&access).await {
-                    Ok(Some(snap)) => CloudResult::Ok(snap),
+                    Ok(Some(snap)) => CloudResult::Ok(Box::new(snap)),
                     Ok(None) => CloudResult::Unavailable,
                     Err(_) => CloudResult::AuthExpired,
                 }
