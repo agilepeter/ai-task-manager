@@ -133,3 +133,49 @@ test("buildDuplicateProcessesRow() returns null when nothing is running more tha
   const { buildDuplicateProcessesRow } = await loadSyntheticModule();
   assert.equal(buildDuplicateProcessesRow([{ name: "solo", instances: 1, rssBytes: 1048576 }]), null);
 });
+
+// mcp-remote's audit check and Inventory opportunity share one id, so plain
+// id equality already keeps it from being lifted twice -- that case is
+// covered by "already-listed" above. agent-model and agents-model-unset
+// are the pair that does NOT share an id (see AUDIT_ID_ALIASES's own
+// comment for why), so it needs its own case: without the alias, this
+// fixture would wrongly lift a second "inherits the session model" card.
+test("buildUsageRows() skips a check aliased to an existing Inventory opportunity under a different id", async () => {
+  const { buildUsageRows, AUDIT_ID_ALIASES } = await loadSyntheticModule();
+  assert.equal(
+    AUDIT_ID_ALIASES["agent-model"],
+    "agents-model-unset",
+    "this test's fixture below assumes agent-model's alias is agents-model-unset",
+  );
+  const sections = [
+    {
+      checks: [
+        {
+          id: "agent-model",
+          status: "consider",
+          title: "1 agent inherits whatever model runs it",
+          detail: "An agent with no model line runs on the caller's model, often the most expensive one. Pin a cheaper model where the task allows it.",
+          titleMsg: { key: "check.agent-model.consider.title", vars: {}, count: 1 },
+          detailMsg: { key: "check.agent-model.consider.detail", vars: {}, count: null },
+        },
+        {
+          id: "mix-top-heavy",
+          status: "consider",
+          title: "80% of spend is on the largest models",
+          detail: "$1063 of $1329 in 30 days went to the top tier.",
+          titleMsg: { key: "finding.mix-top-heavy.title", vars: { pct: "80" }, count: null },
+          detailMsg: { key: "finding.mix-top-heavy.detail", vars: { top: "$1063", known: "$1329" }, count: null },
+        },
+      ],
+    },
+  ];
+  // opportunities already carry agents-model-unset (the Inventory-tab
+  // finding), never agent-model itself -- the two ids only line up
+  // through AUDIT_ID_ALIASES.
+  const rows = buildUsageRows(sections, new Set(["agents-model-unset"]));
+  assert.deepEqual(
+    rows.map((r) => r.id).sort(),
+    ["mix-top-heavy"],
+    "agent-model must be skipped via its agents-model-unset alias; mix-top-heavy must still be lifted",
+  );
+});

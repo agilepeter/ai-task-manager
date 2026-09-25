@@ -24,12 +24,26 @@ export type SyntheticOpportunity = {
 type AuditCheck = { id: string; status: string; title: string; detail: string; titleMsg: Msg; detailMsg?: Msg | null };
 type AuditSection = { checks: AuditCheck[] };
 
+/** Audit-check ids whose "consider" fact is already told, under a
+ *  *different* id, by an Inventory-tab opportunity -- so comparing ids
+ *  directly misses the overlap and the same fact shows up twice. A check
+ *  that shares its id with the opportunity it mirrors (mcp-remote, for
+ *  one) needs no entry: plain id equality already catches it. This map is
+ *  only for the pairs that drifted apart on purpose, such as agent-model:
+ *  the audit row stays a short id/title pointing at the Inventory tab,
+ *  while the agents-model-unset opportunity carries the longer
+ *  explanation and the learn link. Exported so the test can drive real
+ *  pairs instead of a hand-copied id string. */
+export const AUDIT_ID_ALIASES: Readonly<Record<string, string>> = {
+  "agent-model": "agents-model-unset",
+};
+
 /** The app adds the usage findings to the setup ones; the audit carries
  *  them, Msg and all, so they translate exactly as they do on that panel. */
 export function buildUsageRows(sections: readonly AuditSection[], existingIds: ReadonlySet<string>): SyntheticOpportunity[] {
   return sections
     .flatMap((sec) => sec.checks)
-    .filter((c) => c.status === "consider" && !existingIds.has(c.id))
+    .filter((c) => c.status === "consider" && !existingIds.has(c.id) && !existingIds.has(AUDIT_ID_ALIASES[c.id]))
     .map(
       (c): SyntheticOpportunity => ({
         id: c.id,
