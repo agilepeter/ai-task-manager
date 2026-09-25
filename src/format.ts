@@ -23,16 +23,39 @@ export function tokens(n: number): string {
   return String(Math.round(n));
 }
 
-/// "active today" / "active yesterday" / "last active {n} days ago": one
-/// day-bucketing rule for "how long since X happened", shared by the
-/// sessions list (src/detail.ts's lastActive()) and the per-agent spend
-/// line (src/inventory.ts's describeAgentSpend()) so the two can never
-/// disagree about where "today" ends. `nowMs` is a parameter, never
+/// Whole days between an earlier instant and now, floor-divided so any
+/// time-of-day within the same calendar span still lands in bucket 0
+/// ("today"). The one place that arithmetic lives, so relativeActivity()'s
+/// full sentence below and relativeDay()'s bare label can never disagree
+/// about where "today" ends, even though they read from two different
+/// families of locale keys. `nowMs` is always a parameter, never
 /// `Date.now()` read in here, so a test can pick any "now" and get a
 /// stable, repeatable answer.
+function dayBucket(nowMs: number, thenMs: number): number {
+  return Math.floor((nowMs - thenMs) / 86_400_000);
+}
+
+/// "active today" / "active yesterday" / "last active {n} days ago": the
+/// sessions list's own full sentence (src/detail.ts's lastActive()).
 export function relativeActivity(ms: number, nowMs: number): string {
-  const days = Math.floor((nowMs - ms) / 86_400_000);
+  const days = dayBucket(nowMs, ms);
   if (days <= 0) return t("detail.session.activeToday");
   if (days === 1) return t("detail.session.activeYesterday");
   return plural("detail.session.lastActive", days);
+}
+
+/// "today" / "yesterday" / "{count} days ago": a bare label for a caller
+/// that wraps it in its own sentence, e.g. describeAgentSpend()'s
+/// (src/inventory.ts) "last used {when}" -- splicing relativeActivity()'s
+/// full "active today" into that slot is how the sentence used to read
+/// "last used active today" in the first place. Not the same keys as the
+/// `time.today` / `time.tomorrow` pair above either: those always pair a
+/// day with a clock time ("today at {time}") for a different feature
+/// (main.ts/detail.ts's exact-timestamp formatting), and reusing them bare
+/// here would silently drop that time at their other call sites.
+export function relativeDay(nowMs: number, thenMs: number): string {
+  const days = dayBucket(nowMs, thenMs);
+  if (days <= 0) return t("time.relativeToday");
+  if (days === 1) return t("time.relativeYesterday");
+  return plural("time.relativeDaysAgo", days);
 }

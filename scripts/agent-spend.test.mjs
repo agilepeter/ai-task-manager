@@ -47,7 +47,7 @@ async function buildInventoryModule() {
     .replace('import { invoke } from "@tauri-apps/api/core";', "")
     .replace('import { showLedger } from "./ledger";', "")
     .replace('import { localeTag, plural, t, tm, type Msg } from "./i18n";', "")
-    .replace('import { money, relativeActivity, tokens } from "./format";', "")
+    .replace('import { money, relativeDay, tokens } from "./format";', "")
     .replace("function render(): void {", "function __unusedInventoryRender(): void {");
   if (stripped === inventorySource) throw new Error("no substitution matched -- src/inventory.ts's source shape moved under this test");
   const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${stripped}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
@@ -56,13 +56,13 @@ async function buildInventoryModule() {
 
 const { LOCALES } = await loadInventoryModule();
 
-// A fixed "now" so the day-bucketing inside relativeActivity() (src/format.ts)
+// A fixed "now" so the day-bucketing inside relativeDay() (src/format.ts)
 // is deterministic across runs rather than depending on when the suite runs.
 const NOW_MS = Date.UTC(2026, 8, 24, 12, 0, 0);
 
 // Three shapes: a used agent on a priced model a few days ago (exercises
 // money(), the runCount plural and the "N days ago" branch of
-// relativeActivity()), a used agent whose model has no public price so cost
+// relativeDay()), a used agent whose model has no public price so cost
 // is zero (exercises money(0) rather than an empty string), and an agent
 // with no AgentSpend row at all -- the 30-day scan never saw it run.
 const USED_PRICED = { name: "deploy-checker", runs: 12, cost: 4.2, tokens: 82_000, lastUsedMs: NOW_MS - 3 * 86_400_000, topModel: "claude-sonnet-5" };
@@ -106,6 +106,22 @@ test("describeAgentSpend() reads a zero-run or missing row as never run, in en",
 test("describeAgentSpend() names the run count, the cost and a relative last-used time, in en", async () => {
   const { describeAgentSpend, setActiveLocale } = await loadInventoryModule();
   setActiveLocale("en");
-  assert.equal(describeAgentSpend(USED_PRICED, NOW_MS), "30 days: 12 runs · $4.20 · last used last active 3 days ago");
-  assert.equal(describeAgentSpend(USED_UNPRICED, NOW_MS), "30 days: 1 run · $0.00 · last used active today");
+  assert.equal(describeAgentSpend(USED_PRICED, NOW_MS), "30 days: 12 runs · $4.20 · last used 3 days ago");
+  assert.equal(describeAgentSpend(USED_UNPRICED, NOW_MS), "30 days: 1 run · $0.00 · last used today");
+});
+
+test("builtInAgentRows() renders an unattributed row last, under its own label, for spend with no attribution line, in en", async () => {
+  const { builtInAgentRows, setActiveLocale, t } = await loadInventoryModule();
+  setActiveLocale("en");
+  // A named built-in and an "unknown" row together: proves the unknown row
+  // is not just shown but shown AFTER every named one, per the group's own
+  // "last row" contract.
+  const NAMED = { name: "Explore", runs: 5, cost: 2.5, tokens: 40_000, lastUsedMs: NOW_MS - 86_400_000, topModel: "claude-sonnet-5" };
+  const UNKNOWN = { name: "unknown", runs: 3, cost: 1.23, tokens: 9_000, lastUsedMs: NOW_MS - 3 * 86_400_000, topModel: "claude-sonnet-5" };
+  const html = builtInAgentRows([], [NAMED, UNKNOWN], NOW_MS);
+  const label = t("inventory.agents.unattributed");
+  assert.ok(html.includes(label), "the unattributed row's label never rendered");
+  assert.ok(html.includes("$1.23") && html.includes("3 days ago"), "the unattributed row's own spend line never rendered");
+  assert.ok(!/inv-name">unknown</.test(html), 'the raw "unknown" name leaked into a row instead of the unattributed label');
+  assert.ok(html.indexOf(label) > html.indexOf("Explore"), "the unattributed row must render after every named built-in");
 });

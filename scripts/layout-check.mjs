@@ -311,6 +311,18 @@ async function runCell(page, view, locale) {
     case 'inventory':
       await page.locator('[data-view="inventory"]').click();
       await page.waitForTimeout(800); // Inventory's async load + render
+      // Setup ships collapsed (its id is absent from openSections in
+      // src/inventory.ts), so without opening it here the agent rows this
+      // sweep exists to check -- Built-in agents included -- never render
+      // into the DOM at all. Checking aria-expanded first, same reasoning
+      // as openSettings() above, matters here for a different reason than
+      // there: openSections is a module-level Set that outlives every
+      // locale switch in this run (the page is never reloaded), so a
+      // second, unconditional click on the same button would re-close it
+      // on the very next locale's inventory cell instead of opening it.
+      if ((await page.locator('[data-toggle="setup"]').getAttribute('aria-expanded')) !== 'true') {
+        await page.locator('[data-toggle="setup"]').click();
+      }
       break;
     case 'audit':
       await page.locator('[data-view="inventory"]').click();

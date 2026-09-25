@@ -13,6 +13,32 @@ import json, os, random, shutil, subprocess, sys, tempfile, datetime, uuid, path
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 random.seed(20260921)
+
+def seeded_uuid4():
+    """A v4-shaped UUID drawn from the seeded `random` above, not from
+    uuid.uuid4()'s own os.urandom source, which random.seed() can never
+    reach. Every session/message id used to change on every run even with
+    a frozen clock and a fixed seed -- and since those ids end up as
+    HashMap keys on the Rust side, summing floats by iterating one back
+    reads them in a different order each time, silently perturbing a cost
+    total's last decimal place too. random.getrandbits() does read the
+    seeded stream, so building a UUID's 128 bits from it instead makes
+    ids, and every total added up by way of them, reproducible."""
+    return uuid.UUID(int=random.getrandbits(128), version=4)
+
+# The instant the whole synthetic month is generated relative to. A real
+# datetime.now() here used to make every fixture:demo run rewrite this
+# file's relative-day content (which weekday each synthetic day fell on
+# changes which random.random() calls the "skip some weekends" check below
+# consumes, which then reshuffles every later draw from the fixed seed
+# above) even though nothing about the scenario changed. A fixed instant
+# makes two consecutive runs byte-identical; bump it by hand (and re-run
+# `npm run fixture:demo`) whenever the demo should look freshly generated
+# again. Handed to the real engine as AITM_TODAY below, so its own "today"
+# (the last-30-days window, the trend window) agrees with the day these
+# logs were written relative to, instead of whatever day is real when this
+# script happens to run.
+FIXTURE_NOW = datetime.datetime(2026, 9, 25, 12, 0, 0, tzinfo=datetime.timezone.utc)
 # realpath: macOS temp folders sit behind a symlink (/var -> /private/var),
 # and the log walker will not follow symlinked paths.
 home = pathlib.Path(os.path.realpath(tempfile.mkdtemp(prefix="aitm-demo-home-")))
@@ -54,7 +80,7 @@ write(home / "Library/Application Support/Claude/claude_desktop_config.json",
 
 # --- a month of session logs ------------------------------------------------
 project_dir = claude / "projects" / "".join(c if c.isalnum() else "-" for c in str(work))
-now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+now = FIXTURE_NOW
 AREAS = [("acme-portal/web", 0.34), ("acme-portal/api", 0.18), ("northwind-api", 0.24), ("internal-tools", 0.14), ("blog", 0.04), ("", 0.06)]
 MODELS = [("claude-opus-5", 0.46, 1.9), ("claude-sonnet-5", 0.44, 0.5), ("claude-haiku-4-5-20251001", 0.10, 0.06)]
 
@@ -67,7 +93,7 @@ def pick(options):
     return (options[-1][0], *options[-1][2:])
 
 def session(start, turns, sticky_area=None):
-    sid = str(uuid.uuid4()); lines = []; t = start
+    sid = str(seeded_uuid4()); lines = []; t = start
     area = sticky_area if sticky_area is not None else pick(AREAS)[0]
     for i in range(turns):
         if i and random.random() < 0.08 and sticky_area is None:
@@ -79,8 +105,8 @@ def session(start, turns, sticky_area=None):
             break
         lines.append(compact({
             "type": "assistant", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": sid,
-            "cwd": str(work / area) if area else str(work), "requestId": f"req_{uuid.uuid4().hex[:12]}", "costUSD": cost,
-            "message": {"id": f"msg_{uuid.uuid4().hex[:16]}", "model": model, "content": [{"type": "text", "text": "."}],
+            "cwd": str(work / area) if area else str(work), "requestId": f"req_{seeded_uuid4().hex[:12]}", "costUSD": cost,
+            "message": {"id": f"msg_{seeded_uuid4().hex[:16]}", "model": model, "content": [{"type": "text", "text": "."}],
                         "usage": {"input_tokens": random.randint(800, 9000), "output_tokens": random.randint(150, 2200),
                                   "cache_read_input_tokens": random.randint(20000, 160000)}},
         }))
@@ -98,13 +124,13 @@ for day in range(29, -1, -1):
         session(start, random.randint(6, 40))
 # One session left open for weeks: the pattern the coaching is there to catch.
 long_start = now - datetime.timedelta(days=19)
-sid = str(uuid.uuid4()); lines = []; t = long_start
+sid = str(seeded_uuid4()); lines = []; t = long_start
 while t < now:
     t += datetime.timedelta(hours=random.uniform(5, 16))
     if t >= now: break
     lines.append(compact({"type": "assistant", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": sid,
-        "cwd": str(work / "northwind-api"), "requestId": f"req_{uuid.uuid4().hex[:12]}", "costUSD": round(random.uniform(0.9, 3.4), 4),
-        "message": {"id": f"msg_{uuid.uuid4().hex[:16]}", "model": "claude-opus-5", "content": [{"type": "text", "text": "."}],
+        "cwd": str(work / "northwind-api"), "requestId": f"req_{seeded_uuid4().hex[:12]}", "costUSD": round(random.uniform(0.9, 3.4), 4),
+        "message": {"id": f"msg_{seeded_uuid4().hex[:16]}", "model": "claude-opus-5", "content": [{"type": "text", "text": "."}],
                     "usage": {"input_tokens": 4000, "output_tokens": 900, "cache_read_input_tokens": 380000}}}))
 first = json.loads(lines[0]); first["cwd"] = str(work); lines[0] = compact(first)
 write(project_dir / f"{sid}.jsonl", "\n".join(lines) + "\n")
@@ -120,15 +146,15 @@ write(project_dir / f"{sid}.jsonl", "\n".join(lines) + "\n")
 # at all, which src/demo/mock.ts then serves from that same "area" array, so
 # a session outside this one area would never actually show up there.
 host_start = now - datetime.timedelta(days=2, hours=3)
-host_sid = str(uuid.uuid4())
+host_sid = str(seeded_uuid4())
 host_lines = []
 t = host_start
 for _ in range(5):
     t += datetime.timedelta(minutes=random.uniform(2, 6))
     host_lines.append(compact({
         "type": "assistant", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": host_sid,
-        "cwd": str(work / "northwind-api"), "requestId": f"req_{uuid.uuid4().hex[:12]}", "costUSD": round(random.uniform(0.1, 0.6), 4),
-        "message": {"id": f"msg_{uuid.uuid4().hex[:16]}", "model": "claude-sonnet-5", "content": [{"type": "text", "text": "."}],
+        "cwd": str(work / "northwind-api"), "requestId": f"req_{seeded_uuid4().hex[:12]}", "costUSD": round(random.uniform(0.1, 0.6), 4),
+        "message": {"id": f"msg_{seeded_uuid4().hex[:16]}", "model": "claude-sonnet-5", "content": [{"type": "text", "text": "."}],
                     "usage": {"input_tokens": random.randint(800, 4000), "output_tokens": random.randint(150, 900),
                               "cache_read_input_tokens": random.randint(10000, 60000)}},
     }))
@@ -144,9 +170,9 @@ def subagent_transcript(agent_name, start, turns, model):
         t += datetime.timedelta(minutes=random.uniform(1, 4))
         lines.append(compact({
             "type": "assistant", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": host_sid,
-            "cwd": str(work / "northwind-api"), "requestId": f"req_{uuid.uuid4().hex[:12]}", "costUSD": round(random.uniform(0.05, 0.4), 4),
+            "cwd": str(work / "northwind-api"), "requestId": f"req_{seeded_uuid4().hex[:12]}", "costUSD": round(random.uniform(0.05, 0.4), 4),
             "isSidechain": True, "attributionAgent": agent_name,
-            "message": {"id": f"msg_{uuid.uuid4().hex[:16]}", "model": model, "content": [{"type": "text", "text": "."}],
+            "message": {"id": f"msg_{seeded_uuid4().hex[:16]}", "model": model, "content": [{"type": "text", "text": "."}],
                         "usage": {"input_tokens": random.randint(500, 3000), "output_tokens": random.randint(100, 600),
                                   "cache_read_input_tokens": random.randint(5000, 40000)}},
         }))
@@ -159,7 +185,8 @@ write(sub_dir / "general-purpose.jsonl", subagent_transcript("general-purpose", 
 write(sub_dir / "explore.jsonl", subagent_transcript("Explore", host_start + datetime.timedelta(minutes=30), 4, "claude-haiku-4-5-20251001"))
 
 # --- run the real engine against it -----------------------------------------
-env = dict(os.environ, HOME=str(home), CLAUDE_CONFIG_DIR="", XDG_CONFIG_HOME="", AITM_AREA="northwind-api")
+env = dict(os.environ, HOME=str(home), CLAUDE_CONFIG_DIR="", XDG_CONFIG_HOME="", AITM_AREA="northwind-api",
+           AITM_TODAY=FIXTURE_NOW.strftime("%Y-%m-%d"))
 env.pop("CLAUDE_CONFIG_DIR"); env.pop("XDG_CONFIG_HOME")
 env["PATH"] = f"{os.path.expanduser('~')}/.cargo/bin:" + env["PATH"]
 env["CARGO_HOME"] = os.path.expanduser("~/.cargo"); env["RUSTUP_HOME"] = os.path.expanduser("~/.rustup")
@@ -185,10 +212,31 @@ fixture = {
     "audit": live("live_audit", '{"generatedAt"'),
     "agentSpend": live("live_agent_spend", "[{"),
 }
+def round_floats(obj, ndigits=6):
+    """The engine sums these by iterating a std HashMap, whose order is
+    freshly randomized (SipHash keyed from OS entropy) every time the
+    `cargo test` subprocess starts, even given byte-identical input and a
+    frozen clock and seed -- so a cost total can land a few floating-point
+    ULPs apart between two runs that agree on everything else, which is
+    invisible to a person but not to a byte-for-byte diff. Rounding well
+    past cent precision (every costUSD above was itself already rounded to
+    4 places) collapses that jitter to one value both times, without
+    reaching into the engine's own summation order to do it. A token count
+    already arrives as a whole-numbered float and is unaffected; an int
+    (a count, a score) fails the isinstance check below and passes through
+    completely untouched."""
+    if isinstance(obj, float):
+        return round(obj, ndigits)
+    if isinstance(obj, dict):
+        return {k: round_floats(v, ndigits) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [round_floats(v, ndigits) for v in obj]
+    return obj
+
 # The fictional home's path must not leak a real one, and reads better short.
 text = json.dumps(fixture).replace(str(home), "/Users/dana")
 assert os.path.expanduser("~") not in text, "the real home directory leaked into the fixture"
-write(ROOT / "src" / "demo-fixture.json", json.dumps(json.loads(text), indent=1))
+write(ROOT / "src" / "demo-fixture.json", json.dumps(round_floats(json.loads(text)), indent=1))
 shutil.rmtree(home, ignore_errors=True)
 f = json.loads(text)
 print("fixture written: %d MCP servers, %d tools, spend 30d $%.0f, %d areas, %d agent-spend rows, audit %s/100" % (

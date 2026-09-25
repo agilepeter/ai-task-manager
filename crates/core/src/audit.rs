@@ -608,7 +608,7 @@ mod tests {
         let spend = crate::spend::collect(None);
         let claude = spend.iter().find(|p| p.id == "claude");
         inv.opportunities.extend(crate::coaching::opportunities(claude, &crate::spend::claude_sessions(None, None, 500)));
-        let l = view(&crate::ledger::load_from(&crate::ledger::path()), chrono::Local::now().date_naive(), &HashMap::new());
+        let l = view(&crate::ledger::load_from(&crate::ledger::path()), crate::spend::today_naive_date(), &HashMap::new());
         let areas: std::collections::HashSet<&str> = spend.iter().flat_map(|p| p.projects.iter())
             .flat_map(|pr| pr.areas.iter()).map(|a| crate::spend::area_top(&a.area)).filter(|a| !a.starts_with('(')).collect();
         let r = run(&Inputs { inventory: &inv, ledger: &l, spend30: spend.iter().map(|p| p.last30.cost).sum(),

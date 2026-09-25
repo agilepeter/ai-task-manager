@@ -7,7 +7,7 @@
 //! Large logs are handled with a per-file cache keyed by (mtime, size):
 //! only files that changed since the last refresh are re-parsed.
 
-use chrono::{DateTime, Datelike, Local, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -21,6 +21,33 @@ use crate::pricing;
 use crate::providers;
 
 pub const TREND_DAYS: usize = 30;
+
+/// Which local calendar day counts as "today" for every day-bucketing
+/// cutoff in this module -- the last-30-days window, the trend window, a
+/// session's own recency filter. `Local::now().date_naive()` normally;
+/// `AITM_TODAY` (an ISO `YYYY-MM-DD` date), when set and parseable, stands
+/// in for it instead. Real users never set this, so nothing about a live
+/// install changes. It exists for scripts/make-demo-fixture.py, which
+/// writes a synthetic month of session logs dated relative to one fixed
+/// instant: without a matching override here, this function kept reading
+/// the real date while the log content stayed frozen, so the 30-day window
+/// would walk past the fixture's own data a little more every day real time
+/// moved on, and every unrelated regeneration reshuffled the fixture's
+/// weekday-dependent random draws along the way.
+pub fn today_naive_date() -> NaiveDate {
+    if let Ok(raw) = std::env::var("AITM_TODAY") {
+        if let Ok(d) = NaiveDate::parse_from_str(&raw, "%Y-%m-%d") {
+            return d;
+        }
+    }
+    Local::now().date_naive()
+}
+
+/// The CE-ordinal form of `today_naive_date()` -- what every day-bucketing
+/// cutoff in this file actually compares against.
+pub fn today_days_from_ce() -> i32 {
+    today_naive_date().num_days_from_ce()
+}
 
 #[derive(Serialize, Clone, serde::Deserialize)]
 pub struct ModelSpend {
@@ -644,7 +671,7 @@ fn finalize_models(raw: HashMap<String, (f64, f64)>, window_cost: f64) -> Vec<Mo
 }
 
 fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -> ProviderSpend {
-    let today = Local::now().date_naive().num_days_from_ce();
+    let today = today_days_from_ce();
     let mut unpriced_models: Vec<String> = data.unpriced.keys().cloned().collect();
     unpriced_models.sort();
     unpriced_models.truncate(5);
@@ -2057,7 +2084,7 @@ pub fn claude_sessions(area: Option<&str>, day: Option<&str>, limit: usize) -> V
         .map(|d| d.num_days_from_ce());
     let root = claude_projects_root();
     load_persisted_cache();
-    let today = Local::now().date_naive().num_days_from_ce();
+    let today = today_days_from_ce();
     let in_window = |d: i32| d > today - TREND_DAYS as i32 && d <= today;
     let known = crate::inventory::known_project_paths();
     let Ok(map) = cache().lock() else { return Vec::new() };
@@ -2180,11 +2207,10 @@ fn to_agent_entry(data: &FileData, claude: Option<ClaudeFileState>, mtime: Syste
 }
 
 /// `agent_spend`'s own grouping, pure: no cache lock, no filesystem, no
-/// clock read. `today` is the caller's own
-/// `Local::now().date_naive().num_days_from_ce()`, so a fixture test can
-/// pick any day it likes and still exercise the real window arithmetic. An
-/// entry with no `parent_session` is not a subagent transcript at all and
-/// is skipped, same as `agent_spend` always did.
+/// clock read. `today` is the caller's own `today_days_from_ce()`, so a
+/// fixture test can pick any day it likes and still exercise the real
+/// window arithmetic. An entry with no `parent_session` is not a subagent
+/// transcript at all and is skipped, same as `agent_spend` always did.
 fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u32, today: i32) -> Vec<AgentSpend> {
     let cutoff = today - days as i32;
     let in_window = |d: i32| d > cutoff && d <= today;
@@ -2265,7 +2291,7 @@ fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u
 /// over, and hands it off.
 pub fn agent_spend(days: u32) -> Vec<AgentSpend> {
     load_persisted_cache();
-    let today = Local::now().date_naive().num_days_from_ce();
+    let today = today_days_from_ce();
     // Scoped so the cache lock is held only long enough to copy entries out
     // of it -- `agent_spend_from` below does its own (unrelated) work and
     // has no business running while the cache stays locked.
@@ -2711,7 +2737,7 @@ fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData, FileData) {
             (resolve_project(&dir, &known), data)
         })
         .collect();
-    spend.projects = project_spends(per_project, Local::now().date_naive().num_days_from_ce());
+    spend.projects = project_spends(per_project, today_days_from_ce());
     (spend, minimax, qwen_via_aihubmix, kimi_routed)
 }
 

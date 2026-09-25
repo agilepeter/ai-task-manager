@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { showLedger } from "./ledger";
 import { localeTag, plural, t, tm, type Msg } from "./i18n";
-import { money, relativeActivity, tokens } from "./format";
+import { money, relativeDay, tokens } from "./format";
 
 const T = (k: string, v?: Record<string, string | number>) => t(`inventory.${k}`, v);
 
@@ -606,7 +606,7 @@ export function describeAgentSpend(s: AgentSpend | undefined, nowMs: number): st
   return T("agents.spend", {
     runs: plural("inventory.agents.runCount", s.runs),
     cost: money(s.cost),
-    when: relativeActivity(s.lastUsedMs, nowMs),
+    when: relativeDay(nowMs, s.lastUsedMs),
   });
 }
 
@@ -632,25 +632,26 @@ function agentRows(list: Definition[], spend: Map<string, AgentSpend>, nowMs: nu
 /// Definition, only ever a name a subagent transcript was stamped with.
 /// Excludes every custom agent's own name (`allAgents`, unfiltered by scope:
 /// a project-scoped row hidden by the current filter must still count as
-/// "already listed", not reappear here) and "unknown" (a transcript with no
-/// attribution line at all is missing data, not an agent to name).
-function builtInAgentRows(allAgents: Definition[], spend: AgentSpend[], nowMs: number): string {
+/// "already listed", not reappear here). "unknown" (a transcript with no
+/// attribution line at all) is still real spend, so it is never dropped --
+/// it renders as this group's last row, under its own label rather than the
+/// raw string "unknown", so that spend cannot go missing from the tab.
+export function builtInAgentRows(allAgents: Definition[], spend: AgentSpend[], nowMs: number): string {
   const customNames = new Set(allAgents.map((a) => a.name));
-  const builtIns = spend.filter((s) => s.name !== "unknown" && !customNames.has(s.name));
-  if (!builtIns.length) return "";
-  const rows = builtIns
-    .map(
-      (s) => `
+  const named = spend.filter((s) => s.name !== "unknown" && !customNames.has(s.name));
+  const unattributed = spend.find((s) => s.name === "unknown");
+  const total = named.length + (unattributed ? 1 : 0);
+  if (!total) return "";
+  const row = (label: string, s: AgentSpend) => `
       <div class="inv-row">
         <div class="inv-row-main">
-          <span class="inv-name">${esc(s.name)}</span>
+          <span class="inv-name">${esc(label)}</span>
           <span class="inv-sub">${esc(describeAgentSpend(s, nowMs))}</span>
         </div>
-      </div>`,
-    )
-    .join("");
+      </div>`;
+  const rows = named.map((s) => row(s.name, s)).join("") + (unattributed ? row(T("agents.unattributed"), unattributed) : "");
   return (
-    `<div class="inv-grouphead">${esc(T("agents.builtIn"))} <span class="inv-grouphead-n">${builtIns.length}</span></div>` +
+    `<div class="inv-grouphead">${esc(T("agents.builtIn"))} <span class="inv-grouphead-n">${total}</span></div>` +
     `<p class="inv-note">${esc(T("agents.builtInHint"))}</p>${rows}`
   );
 }

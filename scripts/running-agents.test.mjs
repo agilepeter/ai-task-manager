@@ -50,7 +50,7 @@ async function buildInventoryModule() {
     .replace('import { invoke } from "@tauri-apps/api/core";', "")
     .replace('import { showLedger } from "./ledger";', "")
     .replace('import { localeTag, plural, t, tm, type Msg } from "./i18n";', "")
-    .replace('import { money, relativeActivity, tokens } from "./format";', "")
+    .replace('import { money, relativeDay, tokens } from "./format";', "")
     .replace("function render(): void {", "function __unusedInventoryRender(): void {");
   if (stripped === inventorySource) throw new Error("no substitution matched -- src/inventory.ts's source shape moved under this test");
   const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${stripped}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
