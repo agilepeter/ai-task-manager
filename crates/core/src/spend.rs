@@ -361,7 +361,16 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 // "Scanning session logs…" every day.
 // ---------------------------------------------------------------------------
 
-const PERSIST_VERSION: u32 = 9; // bump on cache format *or* parser-logic changes
+/// Bump on any cache-format change or parser-logic change (`claude_line` /
+/// `codex_line` / `pi_line` / `sidechain_parent` / …) — the trust rules
+/// above explain why a mismatch discards the cache wholesale rather than
+/// trying to salvage it. 10: `sidechain_parent` now recognizes a workflow
+/// transcript nested under `subagents/workflows/<workflow-id>/`, not just
+/// directly under `subagents/`. Without this bump, a cache an older build
+/// already wrote would go on treating every one of those as its own
+/// phantom session forever, since `cache_unchanged` never re-parses a file
+/// whose mtime and size have not moved.
+const PERSIST_VERSION: u32 = 10;
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -374,7 +383,7 @@ fn touched() -> &'static Mutex<HashSet<PathBuf>> {
     TOUCHED.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 struct PersistEntry {
     path: PathBuf,
     /// mtime at full filesystem precision (NTFS is 100ns) — millisecond
@@ -438,53 +447,69 @@ fn persist_path() -> PathBuf {
 fn load_persisted_cache() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
-        let Ok(raw) = fs::read_to_string(persist_path()) else { return };
-        let Ok(doc) = serde_json::from_str::<PersistFile>(&raw) else { return };
-        if doc.version != PERSIST_VERSION || doc.corrections != pricing::corrections_rev() {
-            return;
-        }
-        let stamp_matches = doc.pricing_stamp == pricing::catalog_stamp();
-        if !stamp_matches {
-            // Kept entries get re-persisted under the fresh stamp even if
-            // no file re-parses this run.
-            CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-        let gen = pricing::generation();
-        let Ok(mut map) = cache().lock() else { return };
-        for e in doc.entries {
-            let mut data = FileData::default();
-            for (day, model, cost, tokens) in e.days {
-                data.days.insert((day, model), (cost, tokens));
-            }
-            for (day, area, cost, tokens) in e.areas {
-                data.areas.insert((day, area), (cost, tokens));
-            }
-            data.unpriced = e.unpriced.into_iter().collect();
-            data.parent_session = e.parent_session;
-            data.agent = e.agent;
-            if !stamp_matches && !probes_still_vouch(&e.probes, &data) {
-                continue; // a price this file used changed — re-parse it
-            }
-            let mtime = SystemTime::UNIX_EPOCH
-                + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
-            map.insert(
-                e.path,
-                FileEntry {
-                    mtime,
-                    size: e.size,
-                    gen,
-                    probes: e.probes,
-                    data,
-                    prefix_head: clip_fingerprint(e.prefix_head, PREFIX_HEAD),
-                    prefix_tail: clip_fingerprint(e.prefix_tail, PREFIX_TAIL),
-                    grok_models: clip_grok_models(e.grok_models.into_iter().collect()),
-                    codex: e.codex,
-                    claude: clip_claude_ckpt(e.claude),
-                    pi_seen: clip_pi_seen(e.pi_seen.into_iter().collect()),
-                },
-            );
-        }
+        load_persisted_cache_from(&persist_path());
     });
+}
+
+/// True when a persisted doc's format version and pricing-corrections
+/// revision both still match what this build writes. Those are the only
+/// two mismatches that discard a cache wholesale — a pricing-stamp
+/// mismatch alone instead replays price probes, in `load_persisted_cache_from`.
+fn persisted_is_current(doc: &PersistFile) -> bool {
+    doc.version == PERSIST_VERSION && doc.corrections == pricing::corrections_rev()
+}
+
+/// `load_persisted_cache`'s real work, parameterized by path so a test can
+/// exercise the keep/discard/replay decision against a throwaway file
+/// instead of this machine's own `spend_cache.json`. `load_persisted_cache`
+/// itself stays the once-per-run singleton that reads the real path.
+fn load_persisted_cache_from(path: &Path) {
+    let Ok(raw) = fs::read_to_string(path) else { return };
+    let Ok(doc) = serde_json::from_str::<PersistFile>(&raw) else { return };
+    if !persisted_is_current(&doc) {
+        return;
+    }
+    let stamp_matches = doc.pricing_stamp == pricing::catalog_stamp();
+    if !stamp_matches {
+        // Kept entries get re-persisted under the fresh stamp even if
+        // no file re-parses this run.
+        CACHE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    let gen = pricing::generation();
+    let Ok(mut map) = cache().lock() else { return };
+    for e in doc.entries {
+        let mut data = FileData::default();
+        for (day, model, cost, tokens) in e.days {
+            data.days.insert((day, model), (cost, tokens));
+        }
+        for (day, area, cost, tokens) in e.areas {
+            data.areas.insert((day, area), (cost, tokens));
+        }
+        data.unpriced = e.unpriced.into_iter().collect();
+        data.parent_session = e.parent_session;
+        data.agent = e.agent;
+        if !stamp_matches && !probes_still_vouch(&e.probes, &data) {
+            continue; // a price this file used changed — re-parse it
+        }
+        let mtime = SystemTime::UNIX_EPOCH
+            + std::time::Duration::new(e.mtime_secs, e.mtime_nanos);
+        map.insert(
+            e.path,
+            FileEntry {
+                mtime,
+                size: e.size,
+                gen,
+                probes: e.probes,
+                data,
+                prefix_head: clip_fingerprint(e.prefix_head, PREFIX_HEAD),
+                prefix_tail: clip_fingerprint(e.prefix_tail, PREFIX_TAIL),
+                grok_models: clip_grok_models(e.grok_models.into_iter().collect()),
+                codex: e.codex,
+                claude: clip_claude_ckpt(e.claude),
+                pi_seen: clip_pi_seen(e.pi_seen.into_iter().collect()),
+            },
+        );
+    }
 }
 
 /// Writes the cache back to disk (atomically, via temp + rename) when this
@@ -1677,18 +1702,25 @@ fn note_sidechain_session_mismatch() {
     SIDECHAIN_SESSION_MISMATCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// `Some(<session-uuid>)` when `path` is shaped like
-/// `<project>/<uuid>/subagents/<file>.jsonl` — a subagent transcript, never
-/// a session of its own. Pure path check: no filesystem access, and no
-/// validation that `<uuid>` actually looks like one — any directory name
-/// two levels up names the parent session.
+/// `Some(<session-uuid>)` when `path` sits anywhere underneath a directory
+/// literally named `subagents` — a subagent transcript, never a session of
+/// its own. Claude Code writes most of these one level down
+/// (`<uuid>/subagents/<file>.jsonl`), but a workflow run nests its own
+/// transcripts a folder deeper still
+/// (`<uuid>/subagents/workflows/<workflow-id>/<file>.jsonl`), so this walks
+/// up `path`'s ancestors looking for the nearest one named `subagents` and
+/// returns *that* component's own parent's name — the enclosing session,
+/// whatever the transcript's own nesting depth. Pure path check: no
+/// filesystem access, and no validation that the returned name actually
+/// looks like a uuid.
 fn sidechain_parent(path: &Path) -> Option<String> {
-    let subagents_dir = path.parent()?;
-    if subagents_dir.file_name()?.to_str()? != "subagents" {
-        return None;
+    for ancestor in path.ancestors() {
+        if ancestor.file_name().and_then(|n| n.to_str()) == Some("subagents") {
+            let session_dir = ancestor.parent()?;
+            return session_dir.file_name()?.to_str().map(str::to_string);
+        }
     }
-    let session_dir = subagents_dir.parent()?;
-    session_dir.file_name()?.to_str().map(str::to_string)
+    None
 }
 
 fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
@@ -2123,15 +2155,39 @@ pub struct AgentSpend {
     pub top_model: Option<String>,
 }
 
-/// `agent_spend` groups this many days of subagent activity, read from the
-/// same persisted scan cache `claude_sessions` reads — no second scan.
-/// Sorted by cost, highest first.
-pub fn agent_spend(days: u32) -> Vec<AgentSpend> {
-    load_persisted_cache();
-    let today = Local::now().date_naive().num_days_from_ce();
+/// The `PersistEntry` shape `agent_spend_from` groups over, built straight
+/// from a scan result rather than read back off the persisted cache. Only
+/// the fields the grouping actually reads are filled in — everything else
+/// (`path`, `probes`, `prefix_head`/`tail`, …) stays its `Default`, because
+/// grouping never looks at them. `agent_spend`'s own wrapper below, and any
+/// test that wants the real parser's output without touching `cache()`'s
+/// pre-existing contents, both build their input through this.
+fn to_agent_entry(data: &FileData, claude: Option<ClaudeFileState>, mtime: SystemTime) -> PersistEntry {
+    let since_epoch = mtime.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
+    PersistEntry {
+        mtime_secs: since_epoch.as_secs(),
+        mtime_nanos: since_epoch.subsec_nanos(),
+        days: data
+            .days
+            .iter()
+            .map(|((day, model), (cost, tokens))| (*day, model.clone(), *cost, *tokens))
+            .collect(),
+        claude,
+        parent_session: data.parent_session.clone(),
+        agent: data.agent.clone(),
+        ..Default::default()
+    }
+}
+
+/// `agent_spend`'s own grouping, pure: no cache lock, no filesystem, no
+/// clock read. `today` is the caller's own
+/// `Local::now().date_naive().num_days_from_ce()`, so a fixture test can
+/// pick any day it likes and still exercise the real window arithmetic. An
+/// entry with no `parent_session` is not a subagent transcript at all and
+/// is skipped, same as `agent_spend` always did.
+fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u32, today: i32) -> Vec<AgentSpend> {
     let cutoff = today - days as i32;
     let in_window = |d: i32| d > cutoff && d <= today;
-    let Ok(map) = cache().lock() else { return Vec::new() };
 
     struct Group {
         runs: usize,
@@ -2141,13 +2197,13 @@ pub fn agent_spend(days: u32) -> Vec<AgentSpend> {
         by_model: HashMap<String, f64>,
     }
     let mut groups: HashMap<String, Group> = HashMap::new();
-    for entry in map.values() {
-        if entry.data.parent_session.is_none() {
+    for entry in entries {
+        if entry.parent_session.is_none() {
             continue; // not a subagent transcript at all
         }
         let (mut cost, mut tokens) = (0.0, 0.0);
         let mut by_model: HashMap<String, f64> = HashMap::new();
-        for ((d, model), (c, t)) in &entry.data.days {
+        for (d, model, c, t) in &entry.days {
             if !in_window(*d) {
                 continue;
             }
@@ -2158,14 +2214,12 @@ pub fn agent_spend(days: u32) -> Vec<AgentSpend> {
         if cost <= 0.0 && tokens <= 0.0 {
             continue; // no activity in the requested window
         }
-        let last_used_ms = entry.claude.as_ref().and_then(|c| c.last_ms).unwrap_or_else(|| {
-            entry
-                .mtime
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0)
-        });
-        let name = entry.data.agent.clone().unwrap_or_else(|| "unknown".to_string());
+        let last_used_ms = entry
+            .claude
+            .as_ref()
+            .and_then(|c| c.last_ms)
+            .unwrap_or_else(|| entry.mtime_secs as i64 * 1000 + entry.mtime_nanos as i64 / 1_000_000);
+        let name = entry.agent.clone().unwrap_or_else(|| "unknown".to_string());
         let g = groups.entry(name).or_insert_with(|| Group {
             runs: 0,
             cost: 0.0,
@@ -2202,6 +2256,23 @@ pub fn agent_spend(days: u32) -> Vec<AgentSpend> {
         .collect();
     out.sort_by(|a, b| b.cost.total_cmp(&a.cost).then_with(|| a.name.cmp(&b.name)));
     out
+}
+
+/// `agent_spend` groups this many days of subagent activity, read from the
+/// same persisted scan cache `claude_sessions` reads — no second scan.
+/// Sorted by cost, highest first. A thin wrapper: locks the cache, converts
+/// each subagent-transcript entry to the shape `agent_spend_from` groups
+/// over, and hands it off.
+pub fn agent_spend(days: u32) -> Vec<AgentSpend> {
+    load_persisted_cache();
+    let today = Local::now().date_naive().num_days_from_ce();
+    let Ok(map) = cache().lock() else { return Vec::new() };
+    let entries: Vec<PersistEntry> = map
+        .values()
+        .filter(|e| e.data.parent_session.is_some())
+        .map(|e| to_agent_entry(&e.data, e.claude.clone(), e.mtime))
+        .collect();
+    agent_spend_from(entries.iter(), days, today)
 }
 
 // ---------------------------------------------------------------------------
@@ -2260,12 +2331,23 @@ pub fn live_session_for_cwd(cwd: &str, now_ms: i64) -> Option<LivePace> {
     live_session_in(&dir, now_ms)
 }
 
+/// How many directory levels `jsonl_files_under` will descend beneath a
+/// session's `subagents/` folder. Claude Code itself only nests one level
+/// further, for a workflow run (`subagents/workflows/<workflow-id>/`), so 6
+/// is generous headroom against a future nesting change, never a depth
+/// anything real is expected to reach -- it exists so a pathological or
+/// cyclic tree can't turn a live-pace poll into an unbounded walk.
+const SUBAGENT_WALK_DEPTH: u32 = 6;
+
 /// The newest write across a project's top-level `<uuid>.jsonl` session
-/// files and, one level deeper, each session's own `<uuid>/subagents/*.jsonl`
-/// transcripts -- a Task-tool fan-out keeps its parent uuid live even while
-/// the parent's own file sits idle. Never recurses past `subagents/`, and a
-/// subagent file's write only ever promotes the *enclosing* `<uuid>`: it is
-/// never itself picked as the live session.
+/// files and, anywhere beneath each session's own `<uuid>/subagents/`
+/// directory however deeply nested (a Task-tool fan-out writes one level
+/// down; a workflow run nests its own transcripts a folder deeper still,
+/// under `subagents/workflows/<workflow-id>/`) -- so a fan-out or a
+/// workflow run keeps its parent uuid live even while the parent's own
+/// file sits idle. The walk under `subagents/` is depth-bounded (see
+/// `SUBAGENT_WALK_DEPTH`), and a transcript's write only ever promotes the
+/// *enclosing* `<uuid>`: it is never itself picked as the live session.
 fn live_session_in(dir: &Path, now_ms: i64) -> Option<LivePace> {
     let mut newest: Option<(String, SystemTime)> = None;
     for entry in fs::read_dir(dir).ok()?.flatten() {
@@ -2286,17 +2368,10 @@ fn live_session_in(dir: &Path, now_ms: i64) -> Option<LivePace> {
             }
         } else if ftype.is_dir() {
             let Some(uuid) = path.file_name().and_then(|s| s.to_str()) else { continue };
-            let Ok(sub_entries) = fs::read_dir(path.join("subagents")) else { continue };
-            for sub in sub_entries.flatten() {
-                let sub_path = sub.path();
-                if sub_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                    continue;
-                }
-                let Ok(sftype) = sub.file_type() else { continue };
-                if !sftype.is_file() {
-                    continue;
-                }
-                let Ok(mtime) = sub.metadata().and_then(|m| m.modified()) else { continue };
+            let mut sub_files = Vec::new();
+            jsonl_files_under(&path.join("subagents"), SUBAGENT_WALK_DEPTH, &mut sub_files);
+            for sub_path in sub_files {
+                let Ok(mtime) = fs::metadata(&sub_path).and_then(|m| m.modified()) else { continue };
                 let better = match &newest {
                     Some((_, best)) => mtime > *best,
                     None => true,
@@ -2319,28 +2394,43 @@ fn live_session_in(dir: &Path, now_ms: i64) -> Option<LivePace> {
     // is attributed to the parent uuid; `pace_from_lines` sums and dedupes
     // across the combined lines exactly as it would within one file.
     let mut lines = tail_lines(&dir.join(format!("{uuid}.jsonl")));
-    if let Ok(sub_entries) = fs::read_dir(dir.join(&uuid).join("subagents")) {
-        for sub in sub_entries.flatten() {
-            let sub_path = sub.path();
-            if sub_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                continue;
-            }
-            let Ok(sftype) = sub.file_type() else { continue };
-            if !sftype.is_file() {
-                continue;
-            }
-            let Ok(sub_mtime) = sub.metadata().and_then(|m| m.modified()) else { continue };
-            let sub_ms = sub_mtime
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0);
-            if now_ms.saturating_sub(sub_ms) > LIVE_FRESH_MS {
-                continue;
-            }
-            lines.extend(tail_lines(&sub_path));
+    let mut sub_files = Vec::new();
+    jsonl_files_under(&dir.join(&uuid).join("subagents"), SUBAGENT_WALK_DEPTH, &mut sub_files);
+    for sub_path in sub_files {
+        let Ok(sub_mtime) = fs::metadata(&sub_path).and_then(|m| m.modified()) else { continue };
+        let sub_ms = sub_mtime
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if now_ms.saturating_sub(sub_ms) > LIVE_FRESH_MS {
+            continue;
         }
+        lines.extend(tail_lines(&sub_path));
     }
     pace_from_lines(lines.iter().map(String::as_str), &uuid, now_ms)
+}
+
+/// Every `.jsonl` file anywhere under `dir`, however deeply nested.
+/// Depth-bounded so a runaway or cyclic tree can't turn a live-pace poll
+/// into an unbounded walk; only directories are recursed into, and
+/// anything unreadable (including a missing `dir` itself) is silently
+/// skipped, same as every other best-effort read in this module.
+fn jsonl_files_under(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
+    if depth == 0 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(ftype) = entry.file_type() else { continue };
+        if ftype.is_file() {
+            if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                out.push(path);
+            }
+        } else if ftype.is_dir() {
+            jsonl_files_under(&path, depth - 1, out);
+        }
+    }
 }
 
 /// The last `LIVE_TAIL_BYTES` of `path` (or the whole file when it is
@@ -4321,16 +4411,37 @@ mod tests {
         assert_ne!(doc.version, PERSIST_VERSION);
     }
 
-    /// The cache format moved from 8 to 9 when subagent transcripts gained
-    /// `parent_session` / `agent`: a cache an older build wrote must not be
-    /// trusted, or every subagent transcript it already parsed would go on
-    /// looking like its own session forever.
+    /// The cache format moved from 9 to 10 when `sidechain_parent` learned
+    /// to recognize a workflow transcript nested under
+    /// `subagents/workflows/<workflow-id>/`, not just directly under
+    /// `subagents/`: a cache an older build wrote must not be trusted, or
+    /// every one of those transcripts it already parsed would go on looking
+    /// like its own phantom session forever. Exercises the real decision
+    /// (`load_persisted_cache_from`) rather than just comparing version
+    /// numbers: a version-9 doc's own entry must never reach the live map.
     #[test]
-    fn persist_version_9_discards_a_version_8_cache() {
-        assert_eq!(PERSIST_VERSION, 9, "the cache-format version this fix shipped under");
-        let v8 = r#"{"version":8,"pricing_stamp":"x","corrections":0,"entries":[]}"#;
-        let doc: PersistFile = serde_json::from_str(v8).unwrap();
-        assert_ne!(doc.version, PERSIST_VERSION, "a version-8 cache must be treated as stale");
+    fn persist_version_10_discards_a_version_9_cache() {
+        assert_eq!(PERSIST_VERSION, 10, "the cache-format version this fix shipped under");
+        let fake_path = PathBuf::from("/pane-test-fixture/persist-version-10-discard/uuid.jsonl");
+        let v9 = PersistFile {
+            version: 9,
+            pricing_stamp: "x".to_string(),
+            // Matches the live revision on purpose, so the version mismatch
+            // alone is what's under test -- not an incidental
+            // corrections-revision mismatch riding along with it.
+            corrections: pricing::corrections_rev(),
+            entries: vec![PersistEntry {
+                path: fake_path.clone(),
+                days: vec![(19_000, "claude-haiku-4-5".to_string(), 1.0, 10.0)],
+                ..Default::default()
+            }],
+        };
+        let tmp = std::env::temp_dir().join(format!("pane-persist-v9-discard-{}.json", std::process::id()));
+        fs::write(&tmp, serde_json::to_string(&v9).unwrap()).unwrap();
+        load_persisted_cache_from(&tmp);
+        let _ = fs::remove_file(&tmp);
+        let map = cache().lock().unwrap_or_else(|e| e.into_inner());
+        assert!(!map.contains_key(&fake_path), "a version-9 cache's entries must never reach the live map");
     }
 
     /// SWE/Penguin + V4.1 Flash baked rates bumped CORRECTIONS_REV. A
@@ -5393,13 +5504,18 @@ mod tests {
         Value::Object(obj).to_string()
     }
 
-    /// Serializes the tests below: they all build a fixture using the same
-    /// `attributionAgent` name ("Explore"), so two of them alive at once
-    /// would double up in `agent_spend`'s grouping by name, same as two
-    /// real subagents sharing an agent definition would — but here the
-    /// tests would then be racing each other's setup instead of describing
-    /// real concurrent usage. cargo test's default parallelism otherwise
-    /// overlaps them.
+    /// Serializes every test that still injects a fixture into the real,
+    /// shared `cache()` (via `build_subagent_fixture` / `inject_scanned`).
+    /// `agent_spend`'s own grouping is now tested with in-memory
+    /// `PersistEntry` fixtures and no longer touches this cache at all, but
+    /// `claude_sessions` still reads it directly, so the tests that check
+    /// `claude_sessions` (fold, privacy, the outside-the-window case, token
+    /// totals) still build their fixture on disk and inject it. cargo
+    /// test's default parallelism would otherwise let two of those construct
+    /// or tear down a fixture at once and trip over each other's -- the
+    /// general "tests share process-wide state" hazard, not the original
+    /// same-`attributionAgent`-name collision this lock was first written
+    /// to guard `agent_spend`'s grouping against.
     fn subagent_fixture_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
@@ -5536,52 +5652,144 @@ mod tests {
     }
 
     #[test]
-    fn agent_spend_groups_by_attribution_agent_and_labels_the_rest_unknown() {
-        // "Explore" and "unknown" are real, common buckets: this developer's
-        // own machine may already have genuine entries in them (loaded from
-        // the persisted cache), and another test's fixture could otherwise
-        // come and go between a "before" read and this one. So the lock
-        // (normally scoped to one fixture's lifetime) is held from before
-        // that read through to the end of this test, and this measures what
-        // the fixture *adds*, never an absolute total.
+    fn a_sidechain_whose_parent_is_outside_the_window_is_listed_nowhere() {
         let lock = subagent_fixture_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let find = |agents: &[AgentSpend], name: &str| {
-            agents.iter().find(|a| a.name == name).map(|a| (a.runs, a.cost)).unwrap_or((0, 0.0))
-        };
-        let (explore_runs_before, explore_cost_before) = find(&agent_spend(30), "Explore");
-        let (unknown_runs_before, unknown_cost_before) = find(&agent_spend(30), "unknown");
+        let root = std::env::temp_dir().join(format!("pane-parent-outside-window-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let project = "proj-outside-window".to_string();
+        let uuid = "77777777-7777-7777-7777-777777777777".to_string();
+        let sub_dir = root.join(&project).join(&uuid).join("subagents");
+        fs::create_dir_all(&sub_dir).unwrap();
 
-        let (root, project, uuid, fake_paths) = build_subagent_fixture_unlocked("agent-groups");
-        let fx = SubagentFixture { root, project, uuid, fake_paths, _lock: lock };
-        let agents = agent_spend(30);
+        // The parent's own activity is 60 days old -- outside the 30-day
+        // TREND_DAYS window `session_from` requires before it lists anything.
+        let parent_path = root.join(&project).join(format!("{uuid}.jsonl"));
+        fs::write(
+            &parent_path,
+            format!(
+                "{}\n",
+                json!({
+                    "type": "assistant",
+                    "timestamp": (Utc::now() - chrono::Duration::days(60)).to_rfc3339(),
+                    "cwd": "/w", "requestId": "r-p1", "costUSD": 5.0,
+                    "message": {"id": "p1", "model": "claude-haiku-4-5",
+                                "usage": {"input_tokens": 10.0, "output_tokens": 5.0}}
+                }),
+            ),
+        )
+        .unwrap();
+
+        // Its sidechain, though, wrote something inside the window.
+        let sub_path = sub_dir.join("a.jsonl");
+        fs::write(
+            &sub_path,
+            format!(
+                "{}\n",
+                json!({
+                    "type": "assistant",
+                    "timestamp": (Utc::now() - chrono::Duration::hours(1)).to_rfc3339(),
+                    "cwd": "/w", "requestId": "r-a1", "sessionId": uuid, "isSidechain": true, "costUSD": 3.0,
+                    "message": {"id": "a1", "model": "claude-haiku-4-5",
+                                "usage": {"input_tokens": 10.0, "output_tokens": 5.0}}
+                }),
+            ),
+        )
+        .unwrap();
+
+        let real_root = claude_projects_root();
+        let fake_parent = real_root.join(&project).join(format!("{uuid}.jsonl"));
+        let fake_sub = real_root.join(&project).join(&uuid).join("subagents").join("a.jsonl");
+        inject_scanned(&parent_path, &fake_parent);
+        inject_scanned(&sub_path, &fake_sub);
+        let fx = SubagentFixture { root, project, uuid: uuid.clone(), fake_paths: vec![fake_parent, fake_sub], _lock: lock };
+
+        // Totals are out of scope here -- only presence/absence in the list.
+        let sessions = claude_sessions(None, None, 10_000);
+        assert!(
+            sessions.iter().all(|s| s.id != fx.uuid),
+            "the parent's own activity is outside the window, so it must not be listed just to host its sidechain's cost"
+        );
+        assert!(sessions.iter().all(|s| s.id != "a"), "a subagent transcript is never listed as its own session");
+    }
+
+    #[test]
+    fn agent_spend_groups_by_attribution_agent_and_labels_the_rest_unknown() {
+        // Pure: PersistEntry fixtures built entirely in memory, fed straight
+        // to agent_spend_from -- no before/after delta and no dependence on
+        // this machine's real cache or spend_cache.json, because the
+        // fixture below is the *only* data agent_spend_from ever sees here.
+        let today = 20_000; // arbitrary day number; only relative offsets matter
+        let entry = |parent: &str, agent: Option<&str>, day: i32, cost: f64| PersistEntry {
+            parent_session: Some(parent.to_string()),
+            agent: agent.map(str::to_string),
+            days: vec![(day, "claude-haiku-4-5".to_string(), cost, 15.0)],
+            ..Default::default()
+        };
+        let entries = vec![
+            entry("uuid-a", Some("Explore"), today, 0.5),
+            entry("uuid-b", Some("Explore"), today, 0.3),
+            entry("uuid-c", None, today, 0.2),
+            // Outside the 30-day window: must not count toward Explore.
+            entry("uuid-d", Some("Explore"), today - 40, 99.0),
+            // Not a subagent transcript at all (no parent_session): must
+            // never reach any group, however large its own cost.
+            PersistEntry {
+                parent_session: None,
+                agent: Some("Explore".to_string()),
+                days: vec![(today, "claude-haiku-4-5".to_string(), 999.0, 999.0)],
+                ..Default::default()
+            },
+        ];
+        let agents = agent_spend_from(entries.iter(), 30, today);
 
         let explore = agents.iter().find(|a| a.name == "Explore").expect("Explore group present");
-        assert_eq!(explore.runs, explore_runs_before + 1, "one more file: a.jsonl");
-        assert!(
-            (explore.cost - (explore_cost_before + 0.8)).abs() < 1e-6,
-            "a1 (deduped) + a2 = 0.8 added on top of whatever this machine already had, got a delta of {}",
-            explore.cost - explore_cost_before
-        );
+        assert_eq!(explore.runs, 2, "uuid-a and uuid-b attribute to Explore; uuid-d is outside the window");
+        assert!((explore.cost - 0.8).abs() < 1e-9, "0.5 + 0.3, got {}", explore.cost);
 
         let unknown = agents.iter().find(|a| a.name == "unknown").expect("unknown group present");
-        assert_eq!(unknown.runs, unknown_runs_before + 1, "one more file: b.jsonl");
-        assert!(
-            (unknown.cost - (unknown_cost_before + 0.2)).abs() < 1e-6,
-            "b.jsonl (no attributionAgent) = 0.2 added on top of whatever this machine already had, got a delta of {}",
-            unknown.cost - unknown_cost_before
-        );
+        assert_eq!(unknown.runs, 1);
+        assert!((unknown.cost - 0.2).abs() < 1e-9, "got {}", unknown.cost);
 
         assert!(
-            agents.iter().all(|a| a.name != fx.project && a.name != fx.uuid),
-            "agent names come only from attributionAgent, never from a path"
+            agents.iter().all(|a| a.name != "uuid-a" && a.name != "uuid-b" && a.name != "uuid-c"),
+            "agent names come only from attributionAgent, never from a path or uuid"
+        );
+        let total: f64 = agents.iter().map(|a| a.cost).sum();
+        assert!(
+            (total - 1.0).abs() < 1e-9,
+            "the out-of-window and non-subagent entries (99 and 999) must never reach any group, got total {total}"
         );
     }
 
     #[test]
     fn agent_spend_never_carries_prompt_text_or_titles() {
-        let _fx = build_subagent_fixture("agent-privacy");
-        let agents_json = serde_json::to_string(&agent_spend(30)).unwrap();
+        let fx = build_subagent_fixture("agent-privacy");
+
+        // agent_spend: re-scan the fixture's own files with the real parser
+        // and feed the results straight into agent_spend_from -- same idea
+        // as sidechain_tokens_count_once_in_project_totals below, so this
+        // still proves the real claude_line parse never leaks into
+        // AgentSpend, without depending on this machine's persisted cache
+        // or whatever real entries it already holds.
+        let mut files = Vec::new();
+        recent_jsonl_files(&fx.root, &mut files);
+        let today = Local::now().date_naive().num_days_from_ce();
+        let entries: Vec<PersistEntry> = files
+            .iter()
+            .map(|f| {
+                let data = claude_file(f);
+                let mtime = fs::metadata(f).and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
+                to_agent_entry(&data, None, mtime)
+            })
+            .collect();
+        let agents_json = serde_json::to_string(&agent_spend_from(entries.iter(), 30, today)).unwrap();
+
+        // claude_sessions still reads the real, shared cache:
+        // build_subagent_fixture injects under a path shaped like the real
+        // projects root, which project_of/claude_sessions need to resolve a
+        // project at all -- unaffected by the agent_spend purification above.
         let sessions_json = serde_json::to_string(&claude_sessions(None, None, 10_000)).unwrap();
+
         for planted in [PLANTED_PROMPT, PLANTED_TITLE, PLANTED_TEXT] {
             assert!(!agents_json.contains(planted), "{planted} leaked into AgentSpend: {agents_json}");
             assert!(!sessions_json.contains(planted), "{planted} leaked into SessionSpend: {sessions_json}");
@@ -5759,6 +5967,38 @@ mod tests {
     }
 
     #[test]
+    fn a_workflow_transcript_two_levels_down_is_a_sidechain_of_its_session() {
+        let root = Path::new("/h/.claude/projects/-w-acme");
+        let uuid = "11111111-1111-1111-1111-111111111111";
+        // A workflow run nests its own transcripts a folder deeper than a
+        // plain Task-tool subagent: still the enclosing session's sidechain.
+        assert_eq!(
+            sidechain_parent(
+                &root.join(uuid).join("subagents").join("workflows").join("wf-1").join("a1b2c3.jsonl")
+            )
+            .as_deref(),
+            Some(uuid),
+            "two folders under subagents/ still belongs to the enclosing session"
+        );
+        // The walk isn't hardcoded to exactly one extra level -- any depth
+        // under the nearest `subagents` component resolves the same way.
+        assert_eq!(
+            sidechain_parent(
+                &root
+                    .join(uuid)
+                    .join("subagents")
+                    .join("workflows")
+                    .join("wf-1")
+                    .join("attempts")
+                    .join("2")
+                    .join("x.jsonl")
+            )
+            .as_deref(),
+            Some(uuid)
+        );
+    }
+
+    #[test]
     fn claude_synthetic_model_never_priced() {
         let bare = json!({"type": "assistant", "timestamp": "2026-07-10T10:00:00Z",
             "requestId": "req_1",
@@ -5929,6 +6169,34 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(got.session_id, uuid);
         assert_eq!(got.tokens_10m, 120, "only the subagent's in-window line counts; the parent's is 20 minutes old");
+    }
+
+    #[test]
+    fn live_pace_follows_a_workflow_transcript_two_levels_down() {
+        // Same shape as live_pace_follows_a_session_whose_only_fresh_write_is_a_subagent,
+        // but the only fresh write sits two folders under subagents/ --
+        // subagents/workflows/<workflow-id>/ -- the way a workflow run nests
+        // its own transcripts, rather than directly under subagents/.
+        let dir = std::env::temp_dir().join(format!("pane-live-pace-workflow-{}", std::process::id()));
+        let uuid = "66666666-6666-6666-6666-666666666666";
+        let workflow_dir = dir.join(uuid).join("subagents").join("workflows").join("wf-1");
+        let _ = fs::create_dir_all(&workflow_dir);
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        // The parent's own file has gone quiet well past the freshness
+        // window (and its one line sits outside the 10-minute pace window
+        // too) -- identical setup to the one-level-down test above.
+        let parent_path = dir.join(format!("{uuid}.jsonl"));
+        fs::write(&parent_path, format!("{}\n", live_line("p1", "/w", LIVE_PACE_MODEL, now - 20 * 60_000, None))).unwrap();
+        set_mtime(&parent_path, now - 20 * 60_000);
+        // Only its workflow transcript, two levels under subagents/, is
+        // still being written.
+        let workflow_path = workflow_dir.join("a.jsonl");
+        fs::write(&workflow_path, format!("{}\n", live_line("a1", "/w", LIVE_PACE_MODEL, now - 5_000, None))).unwrap();
+        set_mtime(&workflow_path, now);
+        let got = live_session_in(&dir, now).expect("the workflow transcript's write keeps the parent live");
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(got.session_id, uuid, "attributed to the enclosing session, never the workflow id or the transcript's own stem");
+        assert_eq!(got.tokens_10m, 120, "only the workflow transcript's in-window line counts; the parent's is 20 minutes old");
     }
 
     #[test]

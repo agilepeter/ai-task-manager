@@ -12,11 +12,18 @@ release history is kept verbatim in
 
 - **Subagent transcripts no longer appear as sessions.** Claude Code writes
   each subagent (Task-tool) run to its own log file under
-  `<session>/subagents/`; the scanner was listing every one of those as its
-  own phantom session instead of recognizing it as part of the session that
-  spawned it. Its cost is now folded into the session that spawned it, and
-  a new agent-spend view groups subagent runs by which agent ran them.
+  `<session>/subagents/`, and a workflow run nests its own transcripts a
+  folder deeper still, under `subagents/workflows/<workflow-id>/`; the
+  scanner was listing every one of those as its own phantom session instead
+  of recognizing it as part of the session that spawned it. Its cost is now
+  folded into the session that spawned it, at any of those nesting depths,
+  and a new agent-spend view groups subagent runs by which agent ran them.
+  The Running-now pace follows the same writes, including workflow
+  transcripts, so a session waiting on a subagent no longer reads as idle.
   Project and day totals are unchanged: they already counted this spend.
+  Recognizing the deeper workflow nesting bumped the local scan-cache
+  format, so the next launch re-scans session logs once to pick up
+  transcripts an older build had already cached as their own sessions.
 
 ## 0.1.0 — 2026-09-24
 
