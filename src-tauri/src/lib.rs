@@ -888,7 +888,9 @@ fn draw_tray_numbers(values: &[u32]) -> Vec<u8> {
 }
 
 /// The menu bar text for the starred metrics: "33 · 48". Percent left, the
-/// same numbers the Windows tray draws into its icon.
+/// same numbers the Windows tray draws into its icon. Only macOS paints a
+/// text title, so only macOS (and the tests) compile this.
+#[cfg(any(target_os = "macos", test))]
 fn menu_bar_title(remaining: &[u32]) -> Option<String> {
     let parts: Vec<String> = remaining.iter().take(3).map(|v| (*v).min(100).to_string()).collect();
     (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
