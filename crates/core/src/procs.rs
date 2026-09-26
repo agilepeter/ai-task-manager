@@ -370,7 +370,10 @@ pub struct RunningAgent {
     /// only when nothing in the group ever reported one (which is every
     /// group on Windows, where `RawProc::cpu_percent` is always `None`).
     pub cpu_percent: Option<f32>,
-    /// `None` on Windows, or when `lsof` had nothing for this pid.
+    /// `None` when the read was refused rather than answered: `lsof` had
+    /// nothing for this pid on macOS, or on Windows the process belonged to
+    /// another user, was protected, or was a cross-bitness target this
+    /// reader will not guess at.
     pub cwd: Option<String>,
     /// The most recent work area this agent's live session's tool calls
     /// touched. `None` when `cwd` is unknown, there is no live session for
@@ -464,12 +467,217 @@ fn cwd_of_pids(pids: &[u32]) -> HashMap<u32, String> {
         .unwrap_or_default()
 }
 
+/// Mirrors `UNICODE_STRING` (`Length`, `MaximumLength`, `Buffer`) with no
+/// dependency on the `windows` crate, which is a Windows-only dependency and
+/// so cannot appear in a struct this file also builds under plain
+/// `cfg(test)` -- see `ProcessParametersHead` below for why that matters.
+#[cfg(any(windows, test))]
+#[repr(C)]
+#[derive(Default)]
+struct RawUnicodeString {
+    length: u16,
+    maximum_length: u16,
+    buffer: *mut u16,
+}
+
+/// A `CURDIR`: the current-directory half of a process's parameters block,
+/// a path plus a handle the kernel keeps open on it.
+#[cfg(any(windows, test))]
+#[repr(C)]
+#[derive(Default)]
+struct CurDir {
+    dos_path: RawUnicodeString,
+    handle: *mut core::ffi::c_void,
+}
+
+/// The head of the real, undocumented x64 `RTL_USER_PROCESS_PARAMETERS`,
+/// carried far enough to reach `CurrentDirectory.DosPath`: four `u32`s
+/// (`MaximumLength`, `Length`, `Flags`, `DebugFlags`), then `ConsoleHandle`,
+/// `ConsoleFlags`, `StandardInput`/`Output`/`Error`, then `CurrentDirectory`
+/// itself. windows-rs's own typed version of this struct stops before any
+/// of this and folds it into an opaque `Reserved2: [*mut c_void; 10]`, which
+/// has no field for `CurrentDirectory` at all -- this hand-rolled layout is
+/// why `cwd_of_pid` below is not reading windows-rs's own struct.
+///
+/// Built on Windows (where `cwd_of_pid` reads a real one) and under plain
+/// `cfg(test)`, so the offset test below can check this arithmetic on every
+/// platform, including the one that can never run the syscalls that would
+/// otherwise exercise it.
+#[cfg(any(windows, test))]
+#[repr(C)]
+#[derive(Default)]
+struct ProcessParametersHead {
+    maximum_length: u32,
+    length: u32,
+    flags: u32,
+    debug_flags: u32,
+    console_handle: *mut core::ffi::c_void,
+    // The compiler pads out to the next field's 8-byte alignment right
+    // here, exactly as the real, C-compiled NT struct does; neither side
+    // names that gap.
+    console_flags: u32,
+    standard_input: *mut core::ffi::c_void,
+    standard_output: *mut core::ffi::c_void,
+    standard_error: *mut core::ffi::c_void,
+    current_directory: CurDir,
+}
+
+/// Working directories for these pids, read one process at a time through
+/// each one's own PEB: Windows has no batch query like `lsof`. A pid this
+/// reader cannot open, or cannot make sense of once opened, is simply
+/// absent from the result -- exactly like a refused `lsof` entry today.
 #[cfg(windows)]
-fn cwd_of_pids(_pids: &[u32]) -> HashMap<u32, String> {
-    // Win32_Process carries no cwd for another process, and reading one
-    // through its PEB needs native calls this app does not make yet -- a gap,
-    // not a guess.
-    HashMap::new()
+fn cwd_of_pids(pids: &[u32]) -> HashMap<u32, String> {
+    pids.iter().filter_map(|&pid| cwd_of_pid(pid).map(|cwd| (pid, cwd))).collect()
+}
+
+/// A Windows path is at most 32,767 UTF-16 code units even in its extended
+/// `\\?\` form; `DosPath.Length` is a byte count of UTF-16 units, so this is
+/// the byte-length ceiling a genuine value can reach. Bounds the read in
+/// `cwd_of_pid` against a corrupt or hostile `Length` before it sizes
+/// anything.
+#[cfg(windows)]
+const MAX_DOS_PATH_BYTES: usize = 32_767 * 2;
+
+/// One agent host's own working folder, read the way a debugger reads it:
+/// `OpenProcess` for a handle, `NtQueryInformationProcess` for the PEB
+/// address, `ReadProcessMemory` of the PEB for `ProcessParameters`, of that
+/// for `CurrentDirectory.DosPath`, then of the UTF-16 path itself. Refusal
+/// at any step -- the handle, either query, either read, or a `DosPath` this
+/// function will not trust -- returns `None` rather than a guess.
+///
+/// x64 only: `ProcessParametersHead` mirrors the long-stable x64 shape of
+/// the undocumented `RTL_USER_PROCESS_PARAMETERS`, which does not describe a
+/// 32-bit target's own struct (laid out for 32-bit pointers throughout, at
+/// different offsets). The `ProcessWow64Information` check below exists to
+/// catch exactly that case -- a 32-bit process running under WOW64 on
+/// 64-bit Windows -- and refuse it instead of misreading it with the wrong
+/// shape.
+#[cfg(windows)]
+fn cwd_of_pid(pid: u32) -> Option<String> {
+    use windows::Wdk::System::Threading::{
+        NtQueryInformationProcess, ProcessBasicInformation, ProcessWow64Information,
+    };
+    use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+    use windows::Win32::System::Threading::{
+        OpenProcess, PEB, PROCESS_BASIC_INFORMATION, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+    };
+
+    // SAFETY: `OpenProcess` hands back an owned handle only when it
+    // succeeds; there is nothing to close on the `?` path below. Once
+    // wrapped, `ProcessHandle` closes it on every path out of this
+    // function, including every early return that follows.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid) }.ok()?;
+    let handle = ProcessHandle(handle);
+
+    // A non-null result here is the target's own 32-bit PEB address, which
+    // only matters as a signal that this is a WOW64 process; refuse before
+    // reading further with this reader's x64-shaped structs.
+    let mut wow64_peb_address: usize = 0;
+    // SAFETY: the output buffer is a local `usize`, sized exactly to the
+    // length passed in; this call only ever queries the handle, never
+    // writes through it.
+    let wow64_status = unsafe {
+        NtQueryInformationProcess(
+            handle.0,
+            ProcessWow64Information,
+            (&mut wow64_peb_address as *mut usize).cast(),
+            std::mem::size_of::<usize>() as u32,
+            std::ptr::null_mut(),
+        )
+    };
+    if wow64_status.is_err() || wow64_peb_address != 0 {
+        return None;
+    }
+
+    let mut basic_info = PROCESS_BASIC_INFORMATION::default();
+    // SAFETY: `basic_info` is sized exactly to `PROCESS_BASIC_INFORMATION`,
+    // matching the length this call is told it may write.
+    let basic_status = unsafe {
+        NtQueryInformationProcess(
+            handle.0,
+            ProcessBasicInformation,
+            (&mut basic_info as *mut PROCESS_BASIC_INFORMATION).cast(),
+            std::mem::size_of::<PROCESS_BASIC_INFORMATION>() as u32,
+            std::ptr::null_mut(),
+        )
+    };
+    if basic_status.is_err() || basic_info.PebBaseAddress.is_null() {
+        return None;
+    }
+
+    let mut peb = PEB::default();
+    // SAFETY: reads exactly `size_of::<PEB>()` bytes from an address the
+    // kernel itself just gave us for this process, into a same-sized local.
+    // `ReadProcessMemory` fails outright on a short or unmapped range rather
+    // than partially filling `peb`, so a half-read PEB is never used below.
+    let peb_read = unsafe {
+        ReadProcessMemory(
+            handle.0,
+            basic_info.PebBaseAddress.cast(),
+            (&mut peb as *mut PEB).cast(),
+            std::mem::size_of::<PEB>(),
+            None,
+        )
+    };
+    if peb_read.is_err() || peb.ProcessParameters.is_null() {
+        return None;
+    }
+
+    let mut params = ProcessParametersHead::default();
+    // SAFETY: same reasoning as the PEB read above -- sized exactly to
+    // `ProcessParametersHead` and read from the pointer the PEB just gave us.
+    let params_read = unsafe {
+        ReadProcessMemory(
+            handle.0,
+            peb.ProcessParameters.cast(),
+            (&mut params as *mut ProcessParametersHead).cast(),
+            std::mem::size_of::<ProcessParametersHead>(),
+            None,
+        )
+    };
+    if params_read.is_err() {
+        return None;
+    }
+
+    // `Length` is the kernel's own UTF-16 byte count for `DosPath`. Reject
+    // it before it drives the size of the read below: odd means not a whole
+    // number of UTF-16 units, zero leaves nothing to read, and anything past
+    // the NT path ceiling cannot be a real path.
+    let dos_path = &params.current_directory.dos_path;
+    let length = dos_path.length as usize;
+    if length == 0 || length % 2 != 0 || length > MAX_DOS_PATH_BYTES || dos_path.buffer.is_null() {
+        return None;
+    }
+
+    let mut units = vec![0u16; length / 2];
+    // SAFETY: `units` was just allocated to hold exactly `length` bytes'
+    // worth of `u16`s, matching the length passed to the call.
+    let path_read = unsafe {
+        ReadProcessMemory(handle.0, dos_path.buffer.cast(), units.as_mut_ptr().cast(), length, None)
+    };
+    if path_read.is_err() {
+        return None;
+    }
+    Some(String::from_utf16_lossy(&units))
+}
+
+/// Closes the handle `cwd_of_pid` opened, on every path out of that
+/// function -- including an early `return None` -- since nothing else in it
+/// ever closes one.
+#[cfg(windows)]
+struct ProcessHandle(windows::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for ProcessHandle {
+    fn drop(&mut self) {
+        // SAFETY: this handle came from a successful `OpenProcess` call
+        // owned solely by this guard, and nothing uses it after this runs.
+        use windows::Win32::Foundation::CloseHandle;
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
 }
 
 /// Every agent host running right now, its plain subprocesses folded in and
@@ -1015,6 +1223,51 @@ mod tests {
         assert_eq!(got.len(), 2, "the malformed pid record contributes nothing");
         assert_eq!(got.get(&500).map(String::as_str), Some("/Users/dana/project"));
         assert_eq!(got.get(&600).map(String::as_str), Some("/Users/dana/other"));
+    }
+
+    #[test]
+    fn process_parameters_head_offsets_match_the_nt_layout() {
+        // The long-stable x64 shape of the undocumented
+        // `RTL_USER_PROCESS_PARAMETERS`: four `u32`s (16 bytes), then
+        // ConsoleHandle, ConsoleFlags (padded out to the next pointer),
+        // StandardInput/Output/Error, then CurrentDirectory itself -- which
+        // lands its DosPath at 0x38. Checked here, on every platform,
+        // because the syscalls that would otherwise exercise this
+        // arithmetic can only ever run on Windows.
+        assert_eq!(
+            std::mem::offset_of!(ProcessParametersHead, current_directory.dos_path),
+            0x38,
+            "CurrentDirectory.DosPath must land at the long-documented x64 offset"
+        );
+        assert_eq!(
+            std::mem::size_of::<RawUnicodeString>(),
+            16,
+            "UNICODE_STRING is two u16s plus a pointer padded out to 8-byte alignment"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn own_process_cwd_matches_current_dir() {
+        let pid = std::process::id();
+        let cwds = cwd_of_pids(&[pid]);
+        let got = cwds.get(&pid).expect("this process's own working folder must be readable");
+        let want = std::env::current_dir().expect("the test process must have a current directory");
+        // `DosPath` carries a trailing separator that `current_dir()` makes
+        // no promise to match; casing is normalised too, defensively.
+        let normalise = |p: &str| p.trim_end_matches('\\').to_ascii_lowercase();
+        assert_eq!(normalise(got), normalise(&want.display().to_string()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_refused_pid_is_absent_not_empty() {
+        // Pid 0 names no real process; pid 4 is the System process, which
+        // refuses PROCESS_VM_READ to a normal, unelevated caller. Neither
+        // should appear in the map at all, empty string or otherwise.
+        let cwds = cwd_of_pids(&[0, 4]);
+        assert!(cwds.get(&0).is_none());
+        assert!(cwds.get(&4).is_none());
     }
 
     #[test]
