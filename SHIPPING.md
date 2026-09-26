@@ -32,6 +32,12 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
 - **v0.1.1 was published on 2026-09-25** from tag `v0.1.1` (commit ae37786, run 36189989082) by the
   same recipe, and the site's embedded demo and llms rows were refreshed with
   `scripts/sync-demo-to-site.sh` in the same pass (the step 0.1.0 had skipped).
+- **v0.1.2 was published on 2026-09-26** from tag `v0.1.2` (commit 2231ca3, run 36260026506),
+  the first release the `publish` job published by itself: it checked the draft (the three
+  installers, `latest.json` at version 0.1.2 with all seven platform entries signed and pointing
+  at this tag, a dated CHANGELOG section), composed the notes, published, and confirmed the
+  feed redirect and every installer URL. Confirmed by hand afterwards as intended: the release
+  page read correctly, and the downloaded dmg mounted as the 0.1.2 bundle.
 
 ## Not yet on, and why
 
@@ -70,9 +76,9 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
    without publishing, which is also how to diagnose a run that failed. Fix whatever it
    named, then re-run the publish job from the Actions tab, or run the script by hand
    (without `--dry-run`) against the still-draft release -- a failed check leaves the
-   draft exactly as it was, so nothing needs re-tagging or re-pushing. The first tag cut
-   after this pipeline shipped is still confirmed by hand once the job reports it published:
-   open the release page and read it the way an installer would.
+   draft exactly as it was, so nothing needs re-tagging or re-pushing. v0.1.2 was the first
+   tag through this job and was confirmed by hand; later tags need only a glance at the
+   release page after the job reports it published.
 4. Refresh the site's embedded demo and its SEO files: `scripts/sync-demo-to-site.sh`
    rebuilds the demo itself, copies `dist-demo/` into
    `staasfund/task-manager/demo/` and bump the page's iframe `?v=`; bring the AI Task
