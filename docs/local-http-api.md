@@ -142,7 +142,6 @@ specific and already published by the two feeds above, so they do go out:
     "area": "site/client-a",
     "client": "Acme",
     "pace": {
-      "sessionId": "b6b4b9b2-27d1-4a52-9c2e-1a9a7a6f2e10",
       "tokens10m": 5400,
       "cost10m": 0.18,
       "priced": true,

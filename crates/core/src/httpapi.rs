@@ -75,7 +75,9 @@ pub fn agents_feed(spend: &[crate::spend::AgentSpend], running: &[crate::procs::
 /// over loopback, and an agent has no End task that would ever need its
 /// pid. `area` and `client` do go out — the same, less specific, folder-
 /// and customer-derived facts `/v1/spend/areas` and `/v1/spend/clients`
-/// already publish.
+/// already publish. The pace is reduced the same way, for the same reason:
+/// a session id is the name of a transcript file on this disk, which is a
+/// sharper identifier than the pid this struct already refuses.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentFeedRunning {
@@ -85,7 +87,7 @@ struct AgentFeedRunning {
     cpu_percent: Option<f32>,
     area: Option<String>,
     client: Option<String>,
-    pace: Option<crate::spend::LivePace>,
+    pace: Option<AgentFeedPace>,
 }
 
 impl From<&crate::procs::RunningAgent> for AgentFeedRunning {
@@ -97,7 +99,35 @@ impl From<&crate::procs::RunningAgent> for AgentFeedRunning {
             cpu_percent: a.cpu_percent,
             area: a.area.clone(),
             client: a.client.clone(),
-            pace: a.pace.clone(),
+            pace: a.pace.as_ref().map(AgentFeedPace::from),
+        }
+    }
+}
+
+/// The live pace, reduced for the wire. Everything here is a rate or a
+/// label; the session id that names the transcript behind it stays home.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentFeedPace {
+    tool: String,
+    tokens_10m: u64,
+    cost_10m: f64,
+    priced: bool,
+    idle_secs: u64,
+    model: Option<String>,
+    area: Option<String>,
+}
+
+impl From<&crate::spend::LivePace> for AgentFeedPace {
+    fn from(p: &crate::spend::LivePace) -> Self {
+        AgentFeedPace {
+            tool: p.tool.clone(),
+            tokens_10m: p.tokens_10m,
+            cost_10m: p.cost_10m,
+            priced: p.priced,
+            idle_secs: p.idle_secs,
+            model: p.model.clone(),
+            area: p.area.clone(),
         }
     }
 }
@@ -364,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn agents_feed_never_carries_cwd_or_pid() {
+    fn agents_feed_never_carries_cwd_pid_or_session_id() {
         let running = RunningAgent {
             tool: "Claude Code".into(),
             pid: 918_273,
@@ -374,14 +404,30 @@ mod tests {
             cwd: Some("/Users/example/CWD-MARKER-should-never-leave".into()),
             area: Some("site/client-a".into()),
             client: Some("Acme".into()),
-            pace: None,
+            pace: Some(crate::spend::LivePace {
+                session_id: "SESSION-MARKER-should-never-leave".into(),
+                tokens_10m: 1_200,
+                cost_10m: 0.42,
+                priced: true,
+                idle_secs: 3,
+                model: Some("claude-sonnet-5".into()),
+                area: Some("site/client-a".into()),
+                tool: "Claude Code".into(),
+            }),
         };
         let value = agents_feed(&[], &[running]);
         assert!(value["running"][0].get("cwd").is_none(), "cwd must never appear");
         assert!(value["running"][0].get("pid").is_none(), "pid must never appear");
+        assert!(
+            value["running"][0]["pace"].get("sessionId").is_none(),
+            "a session id names a transcript on this disk and must never appear"
+        );
         let raw = value.to_string();
         assert!(!raw.contains("CWD-MARKER-should-never-leave"), "local HTTP leaked the folder: {raw}");
         assert!(!raw.contains("918273"), "local HTTP leaked the pid: {raw}");
+        assert!(!raw.contains("SESSION-MARKER-should-never-leave"), "local HTTP leaked the session id: {raw}");
+        // The rate itself is fine to publish.
+        assert_eq!(value["running"][0]["pace"]["tokens10m"], 1_200);
         // Less specific than the folder, and published the same way
         // `/v1/spend/areas` and `/v1/spend/clients` already publish them.
         assert_eq!(value["running"][0]["area"], "site/client-a");
@@ -410,7 +456,6 @@ mod tests {
                 "area": "site/client-a",
                 "client": "Acme",
                 "pace": {
-                    "sessionId": "b6b4b9b2-27d1-4a52-9c2e-1a9a7a6f2e10",
                     "tokens10m": 5400,
                     "cost10m": 0.18,
                     "priced": true,
