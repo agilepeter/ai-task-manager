@@ -183,18 +183,22 @@ fn hook_event_names(hooks: &[crate::inventory::HookEvent]) -> Vec<String> {
 /// unattributed marker alike -- sums into one row named "custom" so no such
 /// name ever leaves a seat. Sorted by cost, highest first, then name, so
 /// the same input always renders in the same order.
-fn seat_agent_spend(rows: &[AgentSpend]) -> Vec<SeatAgentSpend> {
+fn fold_agent_rows(rows: impl Iterator<Item = (String, usize, f64)>) -> Vec<SeatAgentSpend> {
     let mut by_name: std::collections::HashMap<String, (usize, f64)> = std::collections::HashMap::new();
-    for row in rows {
-        let name = if BUILTIN_AGENTS.contains(&row.name.as_str()) { row.name.clone() } else { "custom".to_string() };
+    for (name, runs, cost) in rows {
+        let name = if BUILTIN_AGENTS.contains(&name.as_str()) { name } else { "custom".to_string() };
         let entry = by_name.entry(name).or_insert((0, 0.0));
-        entry.0 += row.runs;
-        entry.1 += row.cost;
+        entry.0 += runs;
+        entry.1 += cost;
     }
     let mut out: Vec<SeatAgentSpend> =
         by_name.into_iter().map(|(name, (runs, cost))| SeatAgentSpend { name, runs, cost }).collect();
     out.sort_by(|a, b| b.cost.total_cmp(&a.cost).then_with(|| a.name.cmp(&b.name)));
     out
+}
+
+fn seat_agent_spend(rows: &[AgentSpend]) -> Vec<SeatAgentSpend> {
+    fold_agent_rows(rows.iter().map(|r| (r.name.clone(), r.runs, r.cost)))
 }
 
 pub fn build(
@@ -282,10 +286,18 @@ pub fn parse(raw: &str) -> Result<SeatReport, String> {
         || report.tools.len() > 100
         || report.findings.len() > 100
         || report.limits.len() > 100
-        || report.agent_spend.len() > BUILTIN_AGENTS.len() + 1
+        || report.agent_spend.len() > 100
     {
         return Err("report has too many entries".into());
     }
+    // Fold the wire's own rows through the same allowlist the seat used. A
+    // seat folds its custom names away before sending, but anyone holding the
+    // shared token can post a report claiming anything, and this is the one
+    // place every stored report passes through. Folding here also means a
+    // newer seat naming a built-in this build has never heard of degrades to
+    // "custom" instead of having its whole report refused.
+    report.agent_spend =
+        fold_agent_rows(report.agent_spend.drain(..).map(|a| (a.name, a.runs, a.cost)));
     // A real machine registers a handful of hook events; nothing about a
     // long list makes the rest of the report untrustworthy, but the
     // dashboard joins this one straight into a table cell on every load, so
@@ -527,6 +539,28 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn parse_folds_a_forged_custom_agent_name_away() {
+        // Anyone holding the collector's shared token can post a report
+        // claiming anything, so the guarantee has to hold at the door too.
+        let mut report = build("seat-abcdefgh", "Dana's MacBook", 1, &Inventory::default(), &[]);
+        report.agent_spend = vec![
+            SeatAgentSpend { name: "northwind-intake-reviewer".into(), runs: 3, cost: 2.0 },
+            SeatAgentSpend { name: "general-purpose".into(), runs: 1, cost: 1.0 },
+            SeatAgentSpend { name: "General-Purpose".into(), runs: 5, cost: 4.0 },
+        ];
+        let wire = serde_json::to_string(&report).expect("serialises");
+        let parsed = parse(&wire).expect("parses");
+        assert!(
+            !wire.is_empty() && !parsed.agent_spend.iter().any(|a| a.name.contains("northwind")),
+            "a forged custom name must not survive the door"
+        );
+        let custom = parsed.agent_spend.iter().find(|a| a.name == "custom").expect("folded into custom");
+        // The case variant is not the built-in, so it folds too: 3 + 5 runs.
+        assert_eq!(custom.runs, 8);
+        assert_eq!(parsed.agent_spend.iter().find(|a| a.name == "general-purpose").map(|a| a.runs), Some(1));
+    }
+
     fn a_schema_one_report_without_agent_spend_still_parses() {
         let (inv, spend) = inputs();
         let mut old = serde_json::to_value(build("seat-abcdefgh", "x", 1, &inv, &spend)).unwrap();
