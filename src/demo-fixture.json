@@ -137,7 +137,12 @@
     "mcpServers": 1
    },
    {
-    "name": "Gemini CLI",
+    "name": "Codex",
+    "kind": "cli",
+    "mcpServers": 0
+   },
+   {
+    "name": "Cursor",
     "kind": "cli",
     "mcpServers": 0
    }
@@ -3001,12 +3006,12 @@
      {
       "id": "tools",
       "status": "info",
-      "title": "3 AI tools found",
-      "detail": "Claude Code, Claude Desktop, Gemini CLI",
+      "title": "4 AI tools found",
+      "detail": "Claude Code, Claude Desktop, Codex, Cursor",
       "titleMsg": {
        "key": "check.tools.info.title",
        "vars": {},
-       "count": 3
+       "count": 4
       },
       "detailMsg": null
      },

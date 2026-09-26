@@ -213,18 +213,82 @@ write(sub_dir / "deploy-checker-2.jsonl", subagent_transcript("deploy-checker", 
 write(sub_dir / "general-purpose.jsonl", subagent_transcript("general-purpose", host_start + datetime.timedelta(minutes=20), 2, "claude-sonnet-5"))
 write(sub_dir / "explore.jsonl", subagent_transcript("Explore", host_start + datetime.timedelta(minutes=30), 4, "claude-haiku-4-5-20251001"))
 
+# --- curated PATH for the fictional machine ---------------------------------
+# Every read so far is already hermetic: dirs::home_dir() and friends honour
+# the HOME override below, so the config folders and logs above only ever
+# describe this fictional machine. PATH is the one exception --
+# inventory::find_tools/on_path (crates/core/src/inventory.rs) probes it for
+# `claude`, `codex`, `cursor-agent`, `code`, `gemini`, `aider`, `opencode`,
+# `ollama` and `goose` -- so whatever the real machine running this script
+# happens to have installed used to leak into a fixture that is supposed to
+# show one fixed, invented machine. on_path() only checks that a same-named
+# file sits in a PATH directory (it never runs it or checks the executable
+# bit), so a curated bin/ folder of one-line stubs reads exactly like the
+# real CLIs to the code under test, and pointing PATH at only that folder
+# for the run below removes the leak.
+#
+# Dana's machine gets exactly the two CLI tools the rest of this demo
+# already tells that story about: src/demo/mock.ts's Subscriptions tab
+# bills her for "Cursor Pro" and "Codex Plus", and its Running-now and
+# connect-a-provider mocks both name Codex and Cursor by hand. (Those same
+# mocks also mention Copilot, but KNOWN_TOOLS has no PATH command for it --
+# only a config folder this script never writes -- so no stub can make it
+# appear in Inventory.) Claude Code needs no stub of its own: the `.claude`
+# folder written above already makes it show up as an "app", independent of
+# PATH.
+bin_dir = home / "bin"
+bin_dir.mkdir(parents=True, exist_ok=True)
+for cli in ("codex", "cursor-agent"):
+    stub = bin_dir / cli
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.chmod(0o755)  # not required by on_path(), set anyway so the stub actually looks like a CLI
+
 # --- run the real engine against it -----------------------------------------
+def build_test_binary():
+    """Compiles the aitm-core lib test binary once, in the real environment
+    (the system linker and cargo's own toolchain lookup need the real PATH
+    here -- it is only the run below that must be hermetic). live_scan,
+    live_spend, live_sessions, live_audit and live_agent_spend all live in
+    this one lib crate, so this single build backs every run_ignored_test()
+    call further down. `--no-run` compiles the whole lib test target no
+    matter what filter it is given, so none is passed here."""
+    build_env = dict(os.environ)
+    build_env["PATH"] = f"{os.path.expanduser('~')}/.cargo/bin:" + build_env["PATH"]
+    build_env["CARGO_HOME"] = os.path.expanduser("~/.cargo"); build_env["RUSTUP_HOME"] = os.path.expanduser("~/.rustup")
+    proc = subprocess.run(
+        ["cargo", "test", "-p", "aitm-core", "--lib", "--release", "--no-run", "--message-format=json"],
+        cwd=ROOT, env=build_env, capture_output=True, text=True,
+    )
+    exe = None
+    for line in proc.stdout.splitlines():
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if msg.get("executable"):
+            exe = msg["executable"]
+    if not exe:
+        sys.exit(f"cargo test --no-run exited {proc.returncode} with no test executable. Last stderr:\n"
+                  + "\n".join(proc.stderr.splitlines()[-20:]))
+    return exe
+
+TEST_BIN = build_test_binary()
+
+# HOME, AITM_AREA and AITM_TODAY are what make the run itself hermetic, same
+# as before. PATH now points at only the curated bin/ directory above --
+# no cargo, no system folders, nothing this script did not put there itself.
 env = dict(os.environ, HOME=str(home), CLAUDE_CONFIG_DIR="", XDG_CONFIG_HOME="", AITM_AREA="northwind-api",
-           AITM_TODAY=FIXTURE_NOW.strftime("%Y-%m-%d"))
+           AITM_TODAY=FIXTURE_NOW.strftime("%Y-%m-%d"), PATH=str(bin_dir))
 env.pop("CLAUDE_CONFIG_DIR"); env.pop("XDG_CONFIG_HOME")
-env["PATH"] = f"{os.path.expanduser('~')}/.cargo/bin:" + env["PATH"]
-env["CARGO_HOME"] = os.path.expanduser("~/.cargo"); env["RUSTUP_HOME"] = os.path.expanduser("~/.rustup")
 
 FIXTURE_BEGIN, FIXTURE_END = "AITM_FIXTURE_BEGIN", "AITM_FIXTURE_END"
 
 def run_ignored_test(test):
-    """Runs one #[ignore]d fixture test under --nocapture and returns its stdout, split into lines."""
-    out = subprocess.run(["cargo", "test", "-p", "aitm-core", "--lib", "--release", test, "--", "--ignored", "--nocapture"],
+    """Runs one already-built #[ignore]d fixture test directly against the
+    curated PATH above and returns its stdout, split into lines. `--exact`
+    matches on the fully qualified name (module::tests::fn) rather than a
+    substring, which is why every caller below spells the whole path out."""
+    out = subprocess.run([TEST_BIN, test, "--ignored", "--exact", "--nocapture"],
                          cwd=ROOT, env=env, capture_output=True, text=True).stdout
     return out.splitlines()
 
@@ -256,11 +320,11 @@ def live_fixture(test):
     sys.exit(f"{test} printed no {FIXTURE_BEGIN}/{FIXTURE_END} sentinel pair. Last output:\n" + "\n".join(lines[-8:]))
 
 fixture = {
-    "inventory": live("live_scan", "\x00"),
-    "spend": live_fixture("live_spend"),
-    "sessions": live("live_sessions", '{"area"'),
-    "audit": live("live_audit", '{"generatedAt"'),
-    "agentSpend": live_fixture("live_agent_spend"),
+    "inventory": live("inventory::tests::live_scan", "\x00"),
+    "spend": live_fixture("spend::tests::live_spend"),
+    "sessions": live("spend::tests::live_sessions", '{"area"'),
+    "audit": live("audit::tests::live_audit", '{"generatedAt"'),
+    "agentSpend": live_fixture("spend::tests::live_agent_spend"),
 }
 def round_floats(obj, ndigits=6):
     """The engine sums these by iterating a std HashMap, whose order is
