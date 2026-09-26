@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
+use crate::clients::{self, ClientRule};
 use crate::pricing;
 use crate::providers;
 
@@ -2199,6 +2200,12 @@ pub struct AgentSpend {
     /// checkpoint that predates the span fields.
     pub last_used_ms: i64,
     pub top_model: Option<String>,
+    /// This agent's in-window cost by client (`clients::client_of`,
+    /// `clients::UNASSIGNED` for an area no rule claims), largest cost
+    /// first, top five only -- the same matching `clients::rollup` uses for
+    /// the ledger, so a name here never disagrees with what the Clients tab
+    /// shows for the same areas.
+    pub by_client: Vec<(String, f64)>,
 }
 
 /// The `PersistEntry` shape `agent_spend_from` groups over, built straight
@@ -2218,6 +2225,11 @@ fn to_agent_entry(data: &FileData, claude: Option<ClaudeFileState>, mtime: Syste
             .iter()
             .map(|((day, model), (cost, tokens))| (*day, model.clone(), *cost, *tokens))
             .collect(),
+        areas: data
+            .areas
+            .iter()
+            .map(|((day, area), (cost, tokens))| (*day, area.clone(), *cost, *tokens))
+            .collect(),
         claude,
         parent_session: data.parent_session.clone(),
         agent: data.agent.clone(),
@@ -2228,9 +2240,14 @@ fn to_agent_entry(data: &FileData, claude: Option<ClaudeFileState>, mtime: Syste
 /// `agent_spend`'s own grouping, pure: no cache lock, no filesystem, no
 /// clock read. `today` is the caller's own `today_days_from_ce()`, so a
 /// fixture test can pick any day it likes and still exercise the real
-/// window arithmetic. An entry with no `parent_session` is not a subagent
-/// transcript at all and is skipped, same as `agent_spend` always did.
-fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u32, today: i32) -> Vec<AgentSpend> {
+/// window arithmetic. `rules` is the caller's already-loaded `clients.json`
+/// -- passed in rather than read here, which is what keeps this function
+/// pure -- and is matched with the exact same `clients::client_of` the
+/// ledger's own rollup uses, so the two views can never name a client
+/// differently for the same area. An entry with no `parent_session` is not
+/// a subagent transcript at all and is skipped, same as `agent_spend`
+/// always did.
+fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u32, today: i32, rules: &[ClientRule]) -> Vec<AgentSpend> {
     let cutoff = today - days as i32;
     let in_window = |d: i32| d > cutoff && d <= today;
 
@@ -2240,6 +2257,7 @@ fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u
         tokens: f64,
         last_used_ms: i64,
         by_model: HashMap<String, f64>,
+        by_client: HashMap<String, f64>,
     }
     let mut groups: HashMap<String, Group> = HashMap::new();
     for entry in entries {
@@ -2259,6 +2277,17 @@ fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u
         if cost <= 0.0 && tokens <= 0.0 {
             continue; // no activity in the requested window
         }
+        // Same-shaped second view of `days` (see `FileData::areas`), so this
+        // never adds spend beyond what was already counted above -- only
+        // attributes it to a client.
+        let mut by_client: HashMap<String, f64> = HashMap::new();
+        for (d, area, c, _) in &entry.areas {
+            if !in_window(*d) {
+                continue;
+            }
+            let client = clients::client_of(area, rules).unwrap_or(clients::UNASSIGNED);
+            *by_client.entry(client.to_string()).or_insert(0.0) += c;
+        }
         let last_used_ms = entry
             .claude
             .as_ref()
@@ -2274,6 +2303,7 @@ fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u
             tokens: 0.0,
             last_used_ms: 0,
             by_model: HashMap::new(),
+            by_client: HashMap::new(),
         });
         g.runs += 1;
         g.cost += cost;
@@ -2281,6 +2311,9 @@ fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u
         g.last_used_ms = g.last_used_ms.max(last_used_ms);
         for (model, c) in by_model {
             *g.by_model.entry(model).or_insert(0.0) += c;
+        }
+        for (client, c) in by_client {
+            *g.by_client.entry(client).or_insert(0.0) += c;
         }
     }
 
@@ -2292,6 +2325,9 @@ fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u
                 .into_iter()
                 .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
                 .map(|(m, _)| m);
+            let mut by_client: Vec<(String, f64)> = g.by_client.into_iter().collect();
+            by_client.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            by_client.truncate(5);
             AgentSpend {
                 name,
                 runs: g.runs,
@@ -2299,6 +2335,7 @@ fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u
                 tokens: g.tokens.round() as u64,
                 last_used_ms: g.last_used_ms,
                 top_model,
+                by_client,
             }
         })
         .collect();
@@ -2328,7 +2365,8 @@ pub fn agent_spend(days: u32) -> Vec<AgentSpend> {
             .map(|e| to_agent_entry(&e.data, e.claude.clone(), e.mtime))
             .collect()
     };
-    agent_spend_from(entries.iter(), days, today)
+    let rules = clients::load_from(&clients::path());
+    agent_spend_from(entries.iter(), days, today, &rules)
 }
 
 // ---------------------------------------------------------------------------
@@ -6186,7 +6224,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let agents = agent_spend_from(entries.iter(), 30, today);
+        let agents = agent_spend_from(entries.iter(), 30, today, &[]);
 
         let explore = agents.iter().find(|a| a.name == "Explore").expect("Explore group present");
         assert_eq!(explore.runs, 2, "uuid-a and uuid-b attribute to Explore; uuid-d is outside the window");
@@ -6220,10 +6258,128 @@ mod tests {
         // plain cost-descending sort would put it first. It must still land
         // last, because a named row is always the more actionable one.
         let entries = [entry("uuid-a", Some("Explore"), 0.1), entry("uuid-b", None, 99.0)];
-        let agents = agent_spend_from(entries.iter(), 30, today);
+        let agents = agent_spend_from(entries.iter(), 30, today, &[]);
         assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].name, "Explore");
         assert_eq!(agents.last().map(|a| a.name.as_str()), Some(""), "the unattributed row must sort last regardless of cost");
+    }
+
+    #[test]
+    fn to_agent_entry_keeps_areas() {
+        // The gap this closes: to_agent_entry used to list every field
+        // agent_spend_from reads except this one, so a subagent transcript's
+        // own work-area data never survived the trip from FileData into the
+        // PersistEntry shape grouping runs over, and by_client had nothing
+        // to group.
+        let mut data = FileData::default();
+        data.areas.insert((800_000, "acme-portal/web".to_string()), (12.5, 4000.0));
+        data.parent_session = Some("uuid-x".to_string());
+        let entry = to_agent_entry(&data, None, SystemTime::UNIX_EPOCH);
+        assert_eq!(entry.areas, vec![(800_000, "acme-portal/web".to_string(), 12.5, 4000.0)]);
+    }
+
+    #[test]
+    fn by_client_is_top_five_by_cost() {
+        let today = 20_000;
+        // Seven distinct one-pattern clients so two of them can be made to
+        // tie on cost -- proving both the truncation and the name tie-break.
+        let rules: Vec<ClientRule> = (0..7)
+            .map(|i| ClientRule { client: format!("Client{i}"), patterns: vec![format!("area{i}")], monthly_budget: None })
+            .collect();
+        let entry = PersistEntry {
+            parent_session: Some("uuid-a".to_string()),
+            agent: Some("Explore".to_string()),
+            days: vec![(today, "claude-haiku-4-5".to_string(), 27.0, 100.0)],
+            areas: vec![
+                (today, "area0".to_string(), 1.0, 0.0),
+                (today, "area1".to_string(), 2.0, 0.0),
+                (today, "area2".to_string(), 3.0, 0.0),
+                (today, "area3".to_string(), 4.0, 0.0),
+                (today, "area4".to_string(), 5.0, 0.0),
+                (today, "area5".to_string(), 6.0, 0.0),
+                (today, "area6".to_string(), 6.0, 0.0), // ties area5 on cost
+            ],
+            ..Default::default()
+        };
+        let agents = agent_spend_from(std::slice::from_ref(&entry).iter(), 30, today, &rules);
+        let explore = agents.iter().find(|a| a.name == "Explore").expect("Explore group present");
+        assert_eq!(
+            explore.by_client,
+            vec![
+                ("Client5".to_string(), 6.0),
+                ("Client6".to_string(), 6.0),
+                ("Client4".to_string(), 5.0),
+                ("Client3".to_string(), 4.0),
+                ("Client2".to_string(), 3.0),
+            ],
+            "top five by cost, a tie broken by name, Client0 and Client1 dropped"
+        );
+    }
+
+    #[test]
+    fn agent_spend_by_client_uses_the_same_rules_as_the_ledger() {
+        // The same areas, fed through both agent_spend_from's per-agent
+        // grouping and clients::rollup's ledger-wide one, must agree on how
+        // many dollars each client owns -- proving they share the exact
+        // same clients::client_of matching and the exact same Unassigned
+        // label rather than two rollups that could quietly drift apart.
+        let today = 20_000;
+        let today_date = NaiveDate::from_num_days_from_ce_opt(today).expect("valid CE day number");
+        let rules = vec![
+            ClientRule { client: "Acme".to_string(), patterns: vec!["acme-portal".to_string()], monthly_budget: None },
+            ClientRule { client: "Northwind".to_string(), patterns: vec!["northwind-api".to_string()], monthly_budget: None },
+        ];
+        let entries = [
+            PersistEntry {
+                parent_session: Some("uuid-a".to_string()),
+                agent: Some("deploy-checker".to_string()),
+                days: vec![(today, "claude-sonnet-5".to_string(), 12.0, 500.0)],
+                areas: vec![
+                    (today, "acme-portal/web".to_string(), 9.0, 0.0),
+                    (today, "northwind-api".to_string(), 3.0, 0.0),
+                ],
+                ..Default::default()
+            },
+            PersistEntry {
+                parent_session: Some("uuid-b".to_string()),
+                agent: Some("Explore".to_string()),
+                days: vec![(today, "claude-haiku-4-5".to_string(), 6.0, 200.0)],
+                // No rule claims this one: must fold into Unassigned on both sides.
+                areas: vec![(today, "billing-tools".to_string(), 6.0, 0.0)],
+                ..Default::default()
+            },
+        ];
+        let agents = agent_spend_from(entries.iter(), 30, today, &rules);
+        let mut from_agents: HashMap<String, f64> = HashMap::new();
+        for a in &agents {
+            for (client, cost) in &a.by_client {
+                *from_agents.entry(client.clone()).or_insert(0.0) += cost;
+            }
+        }
+
+        // The same three areas' 30-day totals, this time through the
+        // ledger's own rollup.
+        let area = |name: &str, cost: f64| AreaSpend {
+            area: name.to_string(),
+            today: Window::default(),
+            yesterday: Window::default(),
+            last30: Window { cost, tokens: 0.0, models: Vec::new() },
+            daily_cost: Vec::new(),
+            week: None,
+        };
+        let areas = [area("acme-portal/web", 9.0), area("northwind-api", 3.0), area("billing-tools", 6.0)];
+        let rollup = clients::rollup(&areas, &rules, today_date);
+
+        assert_eq!(from_agents.len(), rollup.len(), "the same set of clients owns money in both views");
+        for row in &rollup {
+            let got = from_agents.get(&row.client).copied().unwrap_or(0.0);
+            assert!(
+                (got - row.last30.cost).abs() < 1e-9,
+                "{}: agent_spend_from totals {got}, clients::rollup totals {}",
+                row.client,
+                row.last30.cost
+            );
+        }
     }
 
     #[test]
@@ -6247,7 +6403,7 @@ mod tests {
                 to_agent_entry(&data, None, mtime)
             })
             .collect();
-        let agents_json = serde_json::to_string(&agent_spend_from(entries.iter(), 30, today)).unwrap();
+        let agents_json = serde_json::to_string(&agent_spend_from(entries.iter(), 30, today, &[])).unwrap();
 
         // claude_sessions still reads the real, shared cache:
         // build_subagent_fixture injects under a path shaped like the real

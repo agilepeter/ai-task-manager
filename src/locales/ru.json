@@ -618,6 +618,7 @@
   "inventory.agents.builtIn": "Встроенные агенты",
   "inventory.agents.builtInHint": "Агенты, которые идут вместе с Claude Code. Их стоимость реальна, но файла для редактирования нет.",
   "inventory.agents.unattributed": "Непривязанные запуски субагентов",
+  "inventory.agents.mostlyFor": "в основном для {client}",
   "inventory.mcp.runsLocally": "работает локально",
   "inventory.mcp.remote": "удалённо · {transport}",
   "inventory.mcp.credentials.one": "{n} ключ доступа",

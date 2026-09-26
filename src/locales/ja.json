@@ -592,6 +592,7 @@
   "inventory.agents.builtIn": "組み込みエージェント",
   "inventory.agents.builtInHint": "Claude Code に同梱されているエージェントです。コストは実際に発生しますが、編集できるファイルはありません。",
   "inventory.agents.unattributed": "帰属先不明のサブエージェント実行",
+  "inventory.agents.mostlyFor": "主に{client} 向け",
   "inventory.mcp.runsLocally": "ローカルで実行",
   "inventory.mcp.remote": "リモート · {transport}",
   "inventory.mcp.credentials.other": "{n} 件の認証情報",

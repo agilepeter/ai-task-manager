@@ -605,6 +605,7 @@
   "inventory.agents.builtIn": "Built-in agents",
   "inventory.agents.builtInHint": "Agents Claude Code ships with. Their cost is real; there is no file to edit.",
   "inventory.agents.unattributed": "Unattributed subagent runs",
+  "inventory.agents.mostlyFor": "mostly for {client}",
   "inventory.mcp.runsLocally": "runs locally",
   "inventory.mcp.remote": "remote · {transport}",
   "inventory.mcp.credentials.one": "{n} credential",

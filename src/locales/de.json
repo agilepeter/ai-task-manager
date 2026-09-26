@@ -605,6 +605,7 @@
   "inventory.agents.builtIn": "Eingebaute Agenten",
   "inventory.agents.builtInHint": "Agenten, die mit Claude Code mitgeliefert werden. Ihre Kosten sind real; es gibt keine Datei zum Bearbeiten.",
   "inventory.agents.unattributed": "Nicht zugeordnete Subagenten-Ausführungen",
+  "inventory.agents.mostlyFor": "größtenteils für {client}",
   "inventory.mcp.runsLocally": "läuft lokal",
   "inventory.mcp.remote": "Remote · {transport}",
   "inventory.mcp.credentials.one": "{n} Anmeldeinformation",

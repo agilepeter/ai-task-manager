@@ -64,15 +64,31 @@ const NOW_MS = Date.UTC(2026, 8, 24, 12, 0, 0);
 // money(), the runCount plural and the "N days ago" branch of
 // relativeDay()), a used agent whose model has no public price so cost
 // is zero (exercises money(0) rather than an empty string), and an agent
-// with no AgentSpend row at all -- the 30-day scan never saw it run.
-const USED_PRICED = { name: "deploy-checker", runs: 12, cost: 4.2, tokens: 82_000, lastUsedMs: NOW_MS - 3 * 86_400_000, topModel: "claude-sonnet-5" };
-const USED_UNPRICED = { name: "release-notes", runs: 1, cost: 0, tokens: 5_100, lastUsedMs: NOW_MS - 20 * 60_000, topModel: "some-unpriced-model" };
+// with no AgentSpend row at all -- the 30-day scan never saw it run. Neither
+// carries client data, so neither ever grows a "mostly for" clause.
+const USED_PRICED = { name: "deploy-checker", runs: 12, cost: 4.2, tokens: 82_000, lastUsedMs: NOW_MS - 3 * 86_400_000, topModel: "claude-sonnet-5", byClient: [] };
+const USED_UNPRICED = { name: "release-notes", runs: 1, cost: 0, tokens: 5_100, lastUsedMs: NOW_MS - 20 * 60_000, topModel: "some-unpriced-model", byClient: [] };
 const NEVER_RUN = undefined;
+
+// Two more shapes for the "mostly for {client}" clause: one client strictly
+// over half the 30-day cost (Acme Co's 7 of 10 -- must be named), and an
+// even split (5 of 10 each -- exactly half is not a majority, so neither is
+// named). byClient arrives sorted largest first, same as the real engine.
+const USED_DOMINANT_CLIENT = {
+  name: "deploy-checker", runs: 8, cost: 10, tokens: 60_000, lastUsedMs: NOW_MS - 86_400_000, topModel: "claude-sonnet-5",
+  byClient: [["Acme Co", 7], ["Northwind", 3]],
+};
+const USED_NO_DOMINANT_CLIENT = {
+  name: "general-purpose", runs: 4, cost: 10, tokens: 20_000, lastUsedMs: NOW_MS - 2 * 86_400_000, topModel: "claude-haiku-4-5",
+  byClient: [["Acme Co", 5], ["Northwind", 5]],
+};
 
 const FIXTURES = [
   ["used, priced, a few days ago", USED_PRICED],
   ["used, unpriced model, just now", USED_UNPRICED],
   ["never run (no spend row at all)", NEVER_RUN],
+  ["used, one client strictly over half the cost", USED_DOMINANT_CLIENT],
+  ["used, an even split between two clients", USED_NO_DOMINANT_CLIENT],
 ];
 
 function hasLeftoverBraces(s) {
@@ -110,14 +126,28 @@ test("describeAgentSpend() names the run count, the cost and a relative last-use
   assert.equal(describeAgentSpend(USED_UNPRICED, NOW_MS), "30 days: 1 run · $0.00 · last used today");
 });
 
+test("describeAgentSpend() names the dominant client when one holds strictly more than half the cost, in en", async () => {
+  const { describeAgentSpend, setActiveLocale } = await loadInventoryModule();
+  setActiveLocale("en");
+  assert.equal(describeAgentSpend(USED_DOMINANT_CLIENT, NOW_MS), "30 days: 8 runs · $10 · last used yesterday mostly for Acme Co");
+});
+
+test("describeAgentSpend() names no client on an even split, in en", async () => {
+  const { describeAgentSpend, setActiveLocale } = await loadInventoryModule();
+  setActiveLocale("en");
+  const line = describeAgentSpend(USED_NO_DOMINANT_CLIENT, NOW_MS);
+  assert.equal(line, "30 days: 4 runs · $10 · last used 2 days ago");
+  assert.ok(!line.includes("mostly for"), `an even split must never name a client: "${line}"`);
+});
+
 test("builtInAgentRows() renders an unattributed row last, under its own label, for spend with no attribution line, in en", async () => {
   const { builtInAgentRows, setActiveLocale, t } = await loadInventoryModule();
   setActiveLocale("en");
   // A named built-in and an empty-name row together: proves the empty-name
   // row is not just shown but shown AFTER every named one, per the group's
   // own "last row" contract.
-  const NAMED = { name: "Explore", runs: 5, cost: 2.5, tokens: 40_000, lastUsedMs: NOW_MS - 86_400_000, topModel: "claude-sonnet-5" };
-  const UNATTRIBUTED = { name: "", runs: 3, cost: 1.23, tokens: 9_000, lastUsedMs: NOW_MS - 3 * 86_400_000, topModel: "claude-sonnet-5" };
+  const NAMED = { name: "Explore", runs: 5, cost: 2.5, tokens: 40_000, lastUsedMs: NOW_MS - 86_400_000, topModel: "claude-sonnet-5", byClient: [] };
+  const UNATTRIBUTED = { name: "", runs: 3, cost: 1.23, tokens: 9_000, lastUsedMs: NOW_MS - 3 * 86_400_000, topModel: "claude-sonnet-5", byClient: [] };
   const html = builtInAgentRows([], [NAMED, UNATTRIBUTED], NOW_MS);
   const label = t("inventory.agents.unattributed");
   assert.ok(html.includes(label), "the unattributed row's label never rendered");

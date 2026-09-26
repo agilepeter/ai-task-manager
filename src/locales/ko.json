@@ -592,6 +592,7 @@
   "inventory.agents.builtIn": "기본 제공 에이전트",
   "inventory.agents.builtInHint": "Claude Code에 기본 포함된 에이전트입니다. 비용은 실제로 발생하지만 수정할 파일은 없습니다.",
   "inventory.agents.unattributed": "귀속되지 않은 서브에이전트 실행",
+  "inventory.agents.mostlyFor": "주로 {client}용",
   "inventory.mcp.runsLocally": "로컬에서 실행",
   "inventory.mcp.remote": "원격 · {transport}",
   "inventory.mcp.credentials.other": "자격 증명 {n}개",

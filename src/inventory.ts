@@ -105,6 +105,11 @@ interface AgentSpend {
   tokens: number;
   lastUsedMs: number;
   topModel: string | null;
+  /** This agent's in-window cost by client, largest first, top five only --
+   *  `clients::UNASSIGNED`'s own spelling for an area no rule claims. Same
+   *  rules the Clients tab's own rollup uses, so a name here never disagrees
+   *  with it. */
+  byClient: [string, number][];
 }
 
 interface Opportunity {
@@ -604,11 +609,17 @@ function defRows(list: Definition[]): string {
 /// same reading as a row that carries one with zero runs.
 export function describeAgentSpend(s: AgentSpend | undefined, nowMs: number): string {
   if (!s || s.runs <= 0) return T("agents.neverRun");
-  return T("agents.spend", {
+  const base = T("agents.spend", {
     runs: plural("inventory.agents.runCount", s.runs),
     cost: money(s.cost),
     when: relativeDay(nowMs, s.lastUsedMs),
   });
+  if (s.byClient.length === 0) return base;
+  // by_client arrives sorted largest first, so the head is always the
+  // biggest spender -- called out only when it is a true majority, never a
+  // mere plurality among several smaller clients.
+  const [topClient, topCost] = s.byClient[0];
+  return topCost > s.cost / 2 ? `${base} ${T("agents.mostlyFor", { client: topClient })}` : base;
 }
 
 /// Custom agent rows, each with its 30-day spend line underneath the name --

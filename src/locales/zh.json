@@ -592,6 +592,7 @@
   "inventory.agents.builtIn": "内置智能体",
   "inventory.agents.builtInHint": "Claude Code 自带的智能体。它们的花费是真实的，但没有文件可编辑。",
   "inventory.agents.unattributed": "未归因的子智能体运行",
+  "inventory.agents.mostlyFor": "主要属于 {client}",
   "inventory.mcp.runsLocally": "本地运行",
   "inventory.mcp.remote": "远程 · {transport}",
   "inventory.mcp.credentials.other": "{n} 个凭据",

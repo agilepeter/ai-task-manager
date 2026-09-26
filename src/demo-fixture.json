@@ -135,6 +135,11 @@
     "name": "Claude Desktop",
     "kind": "app",
     "mcpServers": 1
+   },
+   {
+    "name": "Gemini CLI",
+    "kind": "cli",
+    "mcpServers": 0
    }
   ],
   "opportunities": [
@@ -236,13 +241,13 @@
    "id": "claude",
    "name": "Claude",
    "today": {
-    "cost": 0.3418,
-    "tokens": 44439.0,
+    "cost": 0.3416,
+    "tokens": 52343.0,
     "models": [
      {
       "model": "claude-haiku-4-5-20251001",
-      "cost": 0.3418,
-      "tokens": 44439.0
+      "cost": 0.3416,
+      "tokens": 52343.0
      }
     ]
    },
@@ -268,8 +273,8 @@
     ]
    },
    "last30": {
-    "cost": 1581.7942,
-    "tokens": 160065804.0,
+    "cost": 1582.5106,
+    "tokens": 160156235.0,
     "models": [
      {
       "model": "claude-opus-5",
@@ -278,13 +283,13 @@
      },
      {
       "model": "claude-sonnet-5",
-      "cost": 302.8557,
-      "tokens": 60953690.0
+      "cost": 303.5895,
+      "tokens": 61018197.0
      },
      {
       "model": "Other",
-      "cost": 9.089,
-      "tokens": 14741469.0
+      "cost": 9.0716,
+      "tokens": 14767393.0
      }
     ]
    },
@@ -316,9 +321,9 @@
     11677944.0,
     7788237.0,
     2848750.0,
-    7278261.0,
+    7360788.0,
     6687100.0,
-    44439.0
+    52343.0
    ],
    "unpriced": 0,
    "unpriced_models": [],
@@ -350,16 +355,16 @@
     122.5065,
     72.6604,
     27.6527,
-    78.4812,
+    79.1978,
     69.7025,
-    0.3418
+    0.3416
    ],
    "projects": [
     {
      "project": "/Users/dana/work",
      "today": {
-      "cost": 0.3418,
-      "tokens": 44439.0,
+      "cost": 0.3416,
+      "tokens": 52343.0,
       "models": []
      },
      "yesterday": {
@@ -368,8 +373,8 @@
       "models": []
      },
      "last30": {
-      "cost": 1581.7942,
-      "tokens": 160065804.0,
+      "cost": 1582.5106,
+      "tokens": 160156235.0,
       "models": []
      },
      "areas": [
@@ -386,8 +391,8 @@
         "models": []
        },
        "last30": {
-        "cost": 536.6956,
-        "tokens": 53329092.0,
+        "cost": 537.7619,
+        "tokens": 53435958.0,
         "models": []
        },
        "daily_cost": [
@@ -418,21 +423,21 @@
         50.4288,
         13.3302,
         14.6176,
-        29.1274,
+        30.1937,
         13.551,
         0.0
        ],
        "week": {
-        "thisWeek": 150.6364,
+        "thisWeek": 151.7027,
         "lastWeek": 93.2977,
-        "changePercent": 61.457785
+        "changePercent": 62.600686
        }
       },
       {
        "area": "northwind-api",
        "today": {
-        "cost": 0.0,
-        "tokens": 0.0,
+        "cost": 0.1702,
+        "tokens": 11703.0,
         "models": []
        },
        "yesterday": {
@@ -441,8 +446,8 @@
         "models": []
        },
        "last30": {
-        "cost": 479.5797,
-        "tokens": 52915601.0,
+        "cost": 480.7542,
+        "tokens": 53054434.0,
         "models": []
        },
        "daily_cost": [
@@ -473,14 +478,14 @@
         11.2238,
         45.498,
         5.3334,
-        33.5953,
+        34.5996,
         6.2566,
-        0.0
+        0.1702
        ],
        "week": {
-        "thisWeek": 121.7516,
+        "thisWeek": 122.9261,
         "lastWeek": 92.1979,
-        "changePercent": 32.054635
+        "changePercent": 33.328525
        }
       },
       {
@@ -596,8 +601,8 @@
       {
        "area": "(unsorted)",
        "today": {
-        "cost": 0.3418,
-        "tokens": 44439.0,
+        "cost": 0.1714,
+        "tokens": 40640.0,
         "models": []
        },
        "yesterday": {
@@ -606,8 +611,8 @@
         "models": []
        },
        "last30": {
-        "cost": 157.6106,
-        "tokens": 14007697.0,
+        "cost": 156.0862,
+        "tokens": 13852429.0,
         "models": []
        },
        "daily_cost": [
@@ -638,14 +643,14 @@
         2.79,
         4.2379,
         0.3265,
-        4.8294,
+        3.4754,
         31.6067,
-        0.3418
+        0.1714
        ],
        "week": {
-        "thisWeek": 52.2925,
+        "thisWeek": 50.7681,
         "lastWeek": 15.5781,
-        "changePercent": 235.679576
+        "changePercent": 225.894044
        }
       },
       {
@@ -707,9 +712,9 @@
     }
    ],
    "week": {
-    "thisWeek": 457.5603,
+    "thisWeek": 458.2767,
     "lastWeek": 259.3926,
-    "changePercent": 76.396821
+    "changePercent": 76.673005
    }
   }
  ],
@@ -2985,9 +2990,9 @@
  },
  "audit": {
   "generatedAt": 1,
-  "passed": 8,
-  "attention": 6,
-  "score": 57,
+  "passed": 9,
+  "attention": 5,
+  "score": 64,
   "sections": [
    {
     "name": "Setup",
@@ -2996,12 +3001,12 @@
      {
       "id": "tools",
       "status": "info",
-      "title": "2 AI tools found",
-      "detail": "Claude Code, Claude Desktop",
+      "title": "3 AI tools found",
+      "detail": "Claude Code, Claude Desktop, Gemini CLI",
       "titleMsg": {
        "key": "check.tools.info.title",
        "vars": {},
-       "count": 2
+       "count": 3
       },
       "detailMsg": null
      },
@@ -3348,18 +3353,18 @@
      },
      {
       "id": "clients",
-      "status": "attention",
-      "title": "Work areas are not mapped to clients",
-      "detail": "4 work areas exist. Mapping them turns spend into a per-client figure you can bill or justify.",
+      "status": "pass",
+      "title": "2 client rules set",
+      "detail": "Spend rolls up to who the work was for.",
       "titleMsg": {
-       "key": "check.clients.attention.title",
+       "key": "check.clients.pass.title",
        "vars": {},
-       "count": null
+       "count": 2
       },
       "detailMsg": {
-       "key": "check.clients.attention.detail",
+       "key": "check.clients.pass.detail",
        "vars": {},
-       "count": 4
+       "count": null
       }
      }
     ]
@@ -3370,26 +3375,60 @@
   {
    "name": "deploy-checker",
    "runs": 2,
-   "cost": 1.2445,
-   "tokens": 114680,
-   "lastUsedMs": 1790316263096,
-   "topModel": "claude-sonnet-5"
+   "cost": 1.6929,
+   "tokens": 180799,
+   "lastUsedMs": 1790316446153,
+   "topModel": "claude-sonnet-5",
+   "byClient": [
+    [
+     "Acme Co",
+     1.0663
+    ],
+    [
+     "Unassigned",
+     0.4564
+    ],
+    [
+     "Northwind",
+     0.1702
+    ]
+   ]
   },
   {
    "name": "Explore",
    "runs": 1,
-   "cost": 0.8635,
-   "tokens": 85334,
-   "lastUsedMs": 1790156464760,
-   "topModel": "claude-haiku-4-5-20251001"
+   "cost": 0.8463,
+   "tokens": 103354,
+   "lastUsedMs": 1790156504369,
+   "topModel": "claude-haiku-4-5-20251001",
+   "byClient": [
+    [
+     "Northwind",
+     0.7164
+    ],
+    [
+     "Unassigned",
+     0.1299
+    ]
+   ]
   },
   {
    "name": "general-purpose",
    "runs": 1,
-   "cost": 0.2782,
-   "tokens": 54416,
-   "lastUsedMs": 1790155494322,
-   "topModel": "claude-sonnet-5"
+   "cost": 0.5634,
+   "tokens": 60708,
+   "lastUsedMs": 1790155454502,
+   "topModel": "claude-sonnet-5",
+   "byClient": [
+    [
+     "Northwind",
+     0.2879
+    ],
+    [
+     "Unassigned",
+     0.2755
+    ]
+   ]
   }
  ]
 }

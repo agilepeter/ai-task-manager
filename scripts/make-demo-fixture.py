@@ -83,6 +83,19 @@ for folder in ["acme-portal/web", "acme-portal/api", "northwind-api", "internal-
     (work / folder).mkdir(parents=True, exist_ok=True)
 write(home / "Library/Application Support/Claude/claude_desktop_config.json",
       json.dumps({"mcpServers": {"notes": {"command": "uvx", "args": ["notes-mcp"]}}}))
+# The engine's own client rules, read by clients::load_from at clients::path()
+# (HOME is this fictional home, so that resolves under it same as any other
+# config file here). Same two clients, same patterns and budget src/demo/
+# mock.ts's own clientRules hand-carries for the Clients tab -- keeping both
+# in step is on the person editing either one, since nothing checks they
+# still agree. Acme Co and Northwind are this demo's only fictional clients;
+# never a real one.
+write(home / "Library/Application Support/AITaskManager/clients.json", json.dumps({
+    "rules": [
+        {"client": "Acme Co", "patterns": ["acme-portal"], "monthlyBudget": 600},
+        {"client": "Northwind", "patterns": ["northwind-api"]},
+    ],
+}))
 
 # --- a month of session logs ------------------------------------------------
 project_dir = claude / "projects" / "".join(c if c.isalnum() else "-" for c in str(work))
@@ -151,6 +164,10 @@ write(project_dir / f"{sid}.jsonl", "\n".join(lines) + "\n")
 # src/detail.ts's main Sessions list calls get_sessions with no area filter
 # at all, which src/demo/mock.ts then serves from that same "area" array, so
 # a session outside this one area would never actually show up there.
+# deploy-checker's own fan-out is the one exception: its first run moves to
+# an Acme Co area (below) so that agent's 30-day cost spans two clients,
+# Acme in the majority -- the shape the Inventory tab's "mostly for {client}"
+# clause needs at least one real row to show.
 host_start = now - datetime.timedelta(days=2, hours=3)
 host_sid = str(seeded_uuid4())
 host_lines = []
@@ -167,25 +184,31 @@ for _ in range(5):
 first = json.loads(host_lines[0]); first["cwd"] = str(work); host_lines[0] = compact(first)
 write(project_dir / f"{host_sid}.jsonl", "\n".join(host_lines) + "\n")
 
-def subagent_transcript(agent_name, start, turns, model):
+def subagent_transcript(agent_name, start, turns, model, area="northwind-api"):
     """A sidechain transcript stamped with attributionAgent, same line shape
-    the real engine parses (crates/core/src/spend.rs's claude_line)."""
+    the real engine parses (crates/core/src/spend.rs's claude_line). Like
+    every other log this script writes, the first line sits at the project
+    root: claude_area's own "root" for a file is whatever cwd its first line
+    carries, so without this every later line's identical cwd would compute
+    as relative-to-itself (empty) instead of as `area`, and the whole file
+    would book to (unsorted) no matter which folder it names."""
     lines = []
     t = start
     for _ in range(turns):
         t += datetime.timedelta(minutes=random.uniform(1, 4))
         lines.append(compact({
             "type": "assistant", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": host_sid,
-            "cwd": str(work / "northwind-api"), "requestId": f"req_{seeded_uuid4().hex[:12]}", "costUSD": round(random.uniform(0.05, 0.4), 4),
+            "cwd": str(work / area), "requestId": f"req_{seeded_uuid4().hex[:12]}", "costUSD": round(random.uniform(0.05, 0.4), 4),
             "isSidechain": True, "attributionAgent": agent_name,
             "message": {"id": f"msg_{seeded_uuid4().hex[:16]}", "model": model, "content": [{"type": "text", "text": "."}],
                         "usage": {"input_tokens": random.randint(500, 3000), "output_tokens": random.randint(100, 600),
                                   "cache_read_input_tokens": random.randint(5000, 40000)}},
         }))
+    first = json.loads(lines[0]); first["cwd"] = str(work); lines[0] = compact(first)
     return "\n".join(lines) + "\n"
 
 sub_dir = project_dir / host_sid / "subagents"
-write(sub_dir / "deploy-checker-1.jsonl", subagent_transcript("deploy-checker", host_start + datetime.timedelta(minutes=10), 3, "claude-sonnet-5"))
+write(sub_dir / "deploy-checker-1.jsonl", subagent_transcript("deploy-checker", host_start + datetime.timedelta(minutes=10), 6, "claude-sonnet-5", area="acme-portal/web"))
 write(sub_dir / "deploy-checker-2.jsonl", subagent_transcript("deploy-checker", now - datetime.timedelta(hours=6), 2, "claude-haiku-4-5-20251001"))
 write(sub_dir / "general-purpose.jsonl", subagent_transcript("general-purpose", host_start + datetime.timedelta(minutes=20), 2, "claude-sonnet-5"))
 write(sub_dir / "explore.jsonl", subagent_transcript("Explore", host_start + datetime.timedelta(minutes=30), 4, "claude-haiku-4-5-20251001"))
