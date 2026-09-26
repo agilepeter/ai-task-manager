@@ -272,9 +272,15 @@ and shows which of those servers are actually running, grouped by runner, with
 their memory, and lets you end one; it also lists every running agent host
 (Claude Code, Codex, Gemini CLI, Cursor Agent, Aider, OpenCode, Goose, Copilot
 CLI) with its folder, client and live token pace -- ending one is deliberately
-not offered. Inventory's agent rows carry thirty days of spend too, your own
-custom agents and Claude Code's built-ins alike, so one nobody has run shows up
-as an opportunity instead of going unnoticed. **Audit** scores the whole setup,
+not offered. That folder now resolves on Windows too, read one process at a
+time through its own PEB the way a debugger reads it; live pace comes from
+each tool's own newest session file, so Codex and Gemini CLI show real
+numbers alongside Claude Code rather than just a folder and client. Inventory's
+agent rows carry thirty days of spend too, your own custom agents and Claude
+Code's built-ins alike, so one nobody has run shows up as an opportunity
+instead of going unnoticed, and each row names the client its spend mostly
+went to, the same matching the Clients tab uses -- only when one client is a
+true majority, never a mere plurality. **Audit** scores the whole setup,
 including three guardrail checks on agents (no tools allowlist, no shell in the
 deny list, no model pinned): every finding is computed from your machine,
 states its own numbers, and disappears when it no longer applies. Nothing is
@@ -309,7 +315,13 @@ each seat reported: allowed packages, blocked packages, pinned versions, no
 remote servers, a minimum deny-rule count, allowed AI tools, a tools allowlist
 on every custom agent, the shell itself denied, and required hook events --
 nine rules in all. Seats never receive the policy, and a broken file just
-means no policy.
+means no policy. The same engine also serves agent spend at `/v1/agents` on
+the local API, for your own scripts rather than a team: opt-in and
+loopback-only like the other feeds, a running row carries a tool's pace,
+work area and client, and never the working folder, the process id or the
+session id. On the collector, built-in agent names are totalled across every
+seat as themselves; anything a seat named itself is folded into one `custom`
+row before it ever leaves that seat.
 
 ## Privacy and security
 
@@ -337,9 +349,11 @@ including every network call the app can make and the greps that prove it, is
   never published to the local HTTP API by default; the extra feeds that would
   expose them are opt-in and loopback-only, with a DNS-rebinding host check so
   a web page cannot read them through your browser.
-- **Running now reads a live agent's working folder with `lsof`, on macOS
-  only.** A local read; the folder never leaves the app and is never part of
-  the seat report or the local HTTP API.
+- **Running now reads a live agent's working folder with `lsof` on macOS and
+  through the process's own PEB on Windows.** Both are local reads; the
+  folder never leaves the app, and the opt-in `/v1/agents` feed's own
+  allowlist keeps it, the process id and the session id off the wire even
+  while that feed is on.
 - **The app changes your machine in exactly two places, both behind an explicit
   confirmed click**: ending a running MCP server, and pinning an unpinned MCP
   package to a version. The second takes its version from your local package

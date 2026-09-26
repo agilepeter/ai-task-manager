@@ -80,9 +80,11 @@ directory with upstream Pane would let the two apps overwrite each other.
 - **Folder and client names stay local.** Work areas are your directory names
   and clients are your customers' names. Neither is published anywhere by
   default.
-- **Running now asks `lsof` for each live agent's working folder, on macOS.**
-  A local read: nothing leaves the machine. The folder is shown in the app
-  only, and is never part of the seat report or the local HTTP API.
+- **Running now reads each live agent's working folder with `lsof` on macOS
+  and through the process's own PEB on Windows.** Both are local reads:
+  nothing leaves the machine. The folder is shown in the app only, and is
+  never part of the seat report, and kept out of the `/v1/agents` feed below
+  even while that feed is on.
 
 ## What the app writes outside its own folder
 
@@ -116,10 +118,12 @@ overlays can read your usage.
   rebinding.
 - **Usage numbers only.** Never credentials, keys, dashboard URLs or origins.
 - **The extra feeds are opt-in and off by default** (`apiFeeds`, in Settings >
-  Advanced): `/v1/spend`, `/v1/spend/areas`, `/v1/spend/clients` and
-  `/v1/subscriptions`. Work areas are your folder names and clients are your
-  customers', so while that switch is off those paths return **404 rather than
-  an empty result**: nothing is published at all.
+  Advanced): `/v1/spend`, `/v1/spend/areas`, `/v1/spend/clients`,
+  `/v1/subscriptions` and `/v1/agents`. Work areas are your folder names and
+  clients are your customers', so while that switch is off those paths return
+  **404 rather than an empty result**: nothing is published at all.
+  `/v1/agents` adds each running agent's tool, pace, area and client; its
+  working folder, process id and session id never reach that feed at all.
 
 Details: [local-http-api.md](local-http-api.md).
 

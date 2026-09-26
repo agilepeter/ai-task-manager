@@ -46,10 +46,13 @@ file under `crates/core/src/providers/` and port it by hand.
   the Trust Index into a per-package query. Anything else that would leave the machine needs
   the same explicit, documented decision.
 - **The local API's extra feeds are opt-in** (`apiFeeds`, Settings > Advanced): `/v1/spend`,
-  `/v1/spend/areas`, `/v1/spend/clients`, `/v1/subscriptions`. Areas and clients are folder
-  and customer names, so while the switch is off nothing is published at all (the paths are
-  404, not hidden). Loopback only, and the DNS-rebinding host check covers them. This
+  `/v1/spend/areas`, `/v1/spend/clients`, `/v1/subscriptions`, `/v1/agents`. Areas and clients
+  are folder and customer names, so while the switch is off nothing is published at all (the
+  paths are 404, not hidden). Loopback only, and the DNS-rebinding host check covers them. This
   supersedes the earlier "never on the API" note for areas, by the owner's decision.
+  `/v1/agents`' running rows are the tightest of the five: area and client may leave on
+  loopback, same as the other feeds, but the working folder, the process id and the session id
+  never do.
 - **Refreshing is driven from Rust, not the webview** (`spawn_background_refresh`). macOS
   suspends JavaScript timers in a hidden webview, and a tray app is hidden nearly always:
   history, alerts, reminders and feeds stalled for hours. The loop yields to an open window
@@ -314,6 +317,14 @@ and computed Opportunities). Usage stays the default view.
   rows: `AGENT_HOSTS` matches a process by its binary or its extracted package, never argv, so
   command lines stay out of this module for agents too. There is no End task for an agent, only
   for the MCP servers it starts.
+  An agent's working folder resolves on Windows too, one process at a time through its own
+  PEB -- a hand-rolled mirror of the undocumented `RTL_USER_PROCESS_PARAMETERS` layout, since
+  windows-rs's own typed version stops short of the field needed.
+  `process_parameters_head_offsets_match_the_nt_layout` checks that layout under plain
+  `cfg(test)` too, so the arithmetic is checked on every platform even though only Windows ever
+  runs the syscalls around it. A refused process or a 32-bit target reads "folder unknown", same
+  as a refused `lsof` entry, and this was Windows-only code's first time meeting a linter, on the
+  CI runner rather than this machine.
 - **Sign-ins** (`crates/core/src/diagnose.rs`): why a card is empty. Lists every place each
   locally-signed-in provider reads and whether it is there, so "you are not signed in" and
   "we looked in the wrong place" stop looking the same — on macOS Peter has no

@@ -6,6 +6,49 @@ numbering at 0.1.0, so the numbers here do not continue upstream's. Pane's own
 release history is kept verbatim in
 [docs/upstream-changelog.md](docs/upstream-changelog.md).
 
+## 0.1.2 — Unreleased
+
+### Added
+
+- **Agent folders resolve on Windows too.** Running now reads a live agent's
+  working folder through its own PEB, one process at a time, the way a
+  debugger does, since Windows has no batch call like `lsof`. A process that
+  refuses the read, and any 32-bit target, still reads "folder unknown"
+  rather than a guess.
+- **Agent spend names the client it mostly went to.** Inventory's thirty-day
+  agent rows roll each agent's cost up to a client the same way the Clients
+  tab does, and say so only when one client is a true majority -- never a
+  mere plurality among several smaller ones.
+- **An opt-in `/v1/agents` feed.** Thirty days of agent spend alongside who
+  is running right now, behind the same loopback-only switch as the other
+  local feeds. A running row carries a tool's pace, work area and client;
+  the working folder, the process id and the session id never reach it.
+- **Team-wide agent spend on the collector.** Built-in agent names (Explore,
+  Plan and the rest) come through as themselves; anything a seat named
+  itself is folded into one `custom` row before it ever leaves that seat, so
+  a name you chose yourself never leaves the machine that reported it. The
+  collector re-applies the same fold to whatever a client actually posts.
+- **Two new usage findings, and a third promoted to the audit.**
+  `cache-read-share` fires when at least 90% of the last 30 days' tokens
+  were cache re-reads and at least $50 of Claude spend sits behind it -- the
+  share alone is just how Claude Code works, so the dollar floor is what
+  decides whether it is worth reading. `subagent-share` fires when
+  subagents account for at least 10% of the last 30 days' spend, and at
+  least $5. `perm-deny-only`, until now shown only in Inventory, also
+  reaches the audit. All three are educational, not scored: unscored
+  "consider" entries that stay quiet on a machine with nothing to say.
+
+### Changed
+
+- **The local scan cache re-scans once.** The new re-read finding needed a
+  day-by-day cache-read count the persisted cache did not keep before, so
+  the first launch after updating re-reads session logs once to backfill
+  it; every other total is unaffected.
+- **Live token pace now covers Codex and Gemini CLI, not only Claude Code.**
+  Running now's pace reads each tool's own newest session file for that
+  folder, cached by tool and folder together, so two different tools
+  sharing one folder can never show each other's numbers.
+
 ## 0.1.1 — 2026-09-25
 
 ### Added
