@@ -160,8 +160,8 @@ fn billing_error_category(what: &str, err: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        backfill_missing_display_units, key_cards_at, refresh_clients,
-        schedule_backfill_missing_display_units, snapshot_key, DisplayUnit, KeyCard,
+        backfill_missing_display_units, key_cards_at, refresh_clients, snapshot_key,
+        DisplayUnit, KeyCard,
     };
     use crate::providers::onenewapi::store;
     use crate::providers::onenewapi::url::normalize_base_url;
@@ -171,7 +171,7 @@ mod tests {
     use std::io::{ErrorKind, Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
@@ -744,10 +744,8 @@ mod tests {
     #[test]
     fn backfill_skips_write_after_origin_change() {
         let tmp = TempStore::new();
-        let release = Arc::new(AtomicBool::new(false));
-        let status_hits = Arc::new(AtomicUsize::new(0));
-        let hits = Arc::clone(&status_hits);
-        let gate = Arc::clone(&release);
+        let (probe_tx, probe_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
         let body = json!({
             "success": true,
             "data": {"version": "1", "quota_display_type": "CNY"}
@@ -755,14 +753,11 @@ mod tests {
         .to_string();
         let (origin, join) = spawn_billing_server(1, move |_origin, req| {
             if path_of(req) == "/api/status" {
-                hits.fetch_add(1, Ordering::SeqCst);
-                let deadline = Instant::now() + Duration::from_secs(5);
-                while !gate.load(Ordering::SeqCst) {
-                    if Instant::now() > deadline {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
-                }
+                let _ = probe_tx.send(());
+                // Held shut until the test has changed the site's origin out
+                // from under this in-flight probe; the timeout is a deadlock
+                // failsafe, never part of the assertion.
+                let _ = release_rx.recv_timeout(Duration::from_secs(10));
                 return tiny_http::Response::from_string(body.clone()).with_status_code(200);
             }
             tiny_http::Response::from_string("nope").with_status_code(404)
@@ -786,11 +781,9 @@ mod tests {
         let backfill = std::thread::spawn(move || {
             crate::rt::block_on(backfill_missing_display_units(&path));
         });
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while status_hits.load(Ordering::SeqCst) == 0 {
-            assert!(Instant::now() < deadline, "status probe never arrived");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        probe_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("status probe never arrived");
         store::update_site(
             &tmp.path,
             "siteidabcdefghijkAAA",
@@ -799,7 +792,7 @@ mod tests {
             Some(DisplayUnit::Tokens),
         )
         .unwrap();
-        release.store(true, Ordering::SeqCst);
+        release_tx.send(()).expect("test release");
         backfill.join().unwrap();
         let _ = join.join();
         let loaded = store::load(&tmp.path).unwrap();
@@ -843,13 +836,24 @@ mod tests {
         assert_eq!(loaded.sites[0].display_unit, None);
     }
 
+    /// Mirrors `schedule_backfill_missing_display_units`'s fire-and-forget
+    /// dispatch (the same `crate::rt::spawn` call around the same
+    /// `backfill_missing_display_units` future), but also signals a channel
+    /// once the spawned task finishes. The production function hands back
+    /// nothing to join, so a test that must know when the background work is
+    /// truly done needs this instead of polling the store file on a sleep.
+    fn spawn_backfill_signal_done(path: PathBuf, done: std::sync::mpsc::Sender<()>) {
+        crate::rt::spawn(async move {
+            backfill_missing_display_units(&path).await;
+            let _ = done.send(());
+        });
+    }
+
     #[test]
     fn scheduled_backfill_does_not_block_key_cards() {
         let tmp = TempStore::new();
-        let release = Arc::new(AtomicBool::new(false));
-        let status_hits = Arc::new(AtomicUsize::new(0));
-        let hits = Arc::clone(&status_hits);
-        let gate = Arc::clone(&release);
+        let (probe_tx, probe_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
         let body = json!({
             "success": true,
             "data": {"version": "1", "quota_display_type": "CNY"}
@@ -857,14 +861,11 @@ mod tests {
         .to_string();
         let (origin, join) = spawn_billing_server(1, move |_origin, req| {
             if path_of(req) == "/api/status" {
-                hits.fetch_add(1, Ordering::SeqCst);
-                let deadline = Instant::now() + Duration::from_secs(5);
-                while !gate.load(Ordering::SeqCst) {
-                    if Instant::now() > deadline {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
-                }
+                let _ = probe_tx.send(());
+                // Held shut until the test has already read the key cards;
+                // the timeout is a deadlock failsafe, never part of the
+                // assertion.
+                let _ = release_rx.recv_timeout(Duration::from_secs(10));
                 return tiny_http::Response::from_string(body.clone()).with_status_code(200);
             }
             tiny_http::Response::from_string("nope").with_status_code(404)
@@ -888,30 +889,28 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let started = Instant::now();
-        schedule_backfill_missing_display_units(tmp.path.clone());
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        spawn_backfill_signal_done(tmp.path.clone(), done_tx);
+
+        // The status gate above is still shut, so the backfill cannot have
+        // reached the point of persisting a display unit yet: a foreground
+        // read that still sees the pre-backfill value proves this path never
+        // waits on the background task. No elapsed-time budget is involved.
         let cards = key_cards_at(&tmp.path).unwrap();
-        assert!(
-            started.elapsed() < Duration::from_millis(500),
-            "key card prepare waited on status backfill: {:?}",
-            started.elapsed()
-        );
         assert_eq!(cards[0].display, DisplayUnit::Usd);
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while status_hits.load(Ordering::SeqCst) == 0 {
-            assert!(Instant::now() < deadline, "status probe never arrived");
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        release.store(true, Ordering::SeqCst);
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            let loaded = store::load(&tmp.path).unwrap();
-            if loaded.sites[0].quota_display() == DisplayUnit::Cny {
-                break;
-            }
-            assert!(Instant::now() < deadline, "background backfill never persisted");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+
+        probe_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("status probe never arrived");
+        release_tx.send(()).expect("test release");
+
+        done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("background backfill never completed");
+        let loaded = store::load(&tmp.path).unwrap();
+        assert_eq!(loaded.sites[0].quota_display(), DisplayUnit::Cny);
+
         let _ = join.join();
     }
 

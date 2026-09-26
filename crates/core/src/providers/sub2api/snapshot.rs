@@ -876,22 +876,31 @@ mod tests {
     async fn concurrent_keys_keep_bearer_identity_and_bound_in_flight_requests() {
         use std::sync::{
             atomic::{AtomicUsize, Ordering},
-            Arc,
+            Arc, Barrier,
         };
+        // 16 keys through an 8-permit semaphore forces exactly two waves of
+        // 8. A barrier sized to the permit count needs all 8 members of a
+        // wave to arrive before any of them proceeds, which deterministically
+        // proves 8-way concurrency instead of hoping a fixed sleep makes that
+        // many requests overlap.
+        const KEYS: usize = 16;
+        const MAX_IN_FLIGHT: usize = 8;
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let origin = format!("http://{}", server.server_addr());
         let active = Arc::new(AtomicUsize::new(0));
         let maximum = Arc::new(AtomicUsize::new(0));
         let observed_maximum = maximum.clone();
+        let barrier = Arc::new(Barrier::new(MAX_IN_FLIGHT));
         let handle = std::thread::spawn(move || {
             let mut workers = Vec::new();
-            for _ in 0..20 {
+            for _ in 0..KEYS {
                 let request = server
-                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .recv_timeout(std::time::Duration::from_secs(10))
                     .unwrap()
                     .unwrap();
                 let active = active.clone();
                 let maximum = maximum.clone();
+                let barrier = barrier.clone();
                 workers.push(std::thread::spawn(move || {
                     assert_eq!(request.url(), "/v1/usage");
                     let count = active.fetch_add(1, Ordering::SeqCst) + 1;
@@ -904,7 +913,11 @@ mod tests {
                         .value
                         .as_str();
                     let index: usize = key.strip_prefix("Bearer secret-").unwrap().parse().unwrap();
-                    std::thread::sleep(std::time::Duration::from_millis(25));
+                    // Rendezvous with the rest of this wave before responding,
+                    // so none of the 8 can finish (and free a semaphore
+                    // permit for the next wave) before all 8 are provably
+                    // in flight together.
+                    barrier.wait();
                     active.fetch_sub(1, Ordering::SeqCst);
                     request
                         .respond(
@@ -926,7 +939,7 @@ mod tests {
         });
         let mut tasks = tokio::task::JoinSet::new();
         let client = http_no_redirect();
-        for index in 0..20 {
+        for index in 0..KEYS {
             let card = KeyCard {
                 id: format!("sub2api@{index}"),
                 name: format!("Key {index}"),
@@ -936,21 +949,36 @@ mod tests {
             let client = client.clone();
             tasks.spawn(async move { (index, snapshot_key_with_client(client, card).await) });
         }
-        while let Some(result) = tasks.join_next().await {
-            let (index, snapshot) = result.unwrap();
-            assert_eq!(snapshot.id, format!("sub2api@{index}"));
-            if index == 7 {
-                assert_eq!(snapshot.status, "error");
-            } else {
-                assert_eq!(
-                    metric(&snapshot, "Balance").value,
-                    Some(format!("${:.2}", index as f64))
-                );
+        // A generous failsafe: if the in-flight bound were ever tighter than
+        // MAX_IN_FLIGHT, a wave could never gather 8 waiters and this would
+        // hang instead of failing, so bound the wait rather than the
+        // rendezvous itself.
+        let drained = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            while let Some(result) = tasks.join_next().await {
+                let (index, snapshot) = result.unwrap();
+                assert_eq!(snapshot.id, format!("sub2api@{index}"));
+                if index == 7 {
+                    assert_eq!(snapshot.status, "error");
+                } else {
+                    assert_eq!(
+                        metric(&snapshot, "Balance").value,
+                        Some(format!("${:.2}", index as f64))
+                    );
+                }
             }
-        }
+        })
+        .await;
+        assert!(
+            drained.is_ok(),
+            "concurrent fetches never drained; likely an in-flight-bound regression"
+        );
         handle.join().unwrap();
-        assert!(observed_maximum.load(Ordering::SeqCst) <= 8);
-        assert!(observed_maximum.load(Ordering::SeqCst) > 1);
+        assert_eq!(
+            observed_maximum.load(Ordering::SeqCst),
+            MAX_IN_FLIGHT,
+            "the barrier proves at least {MAX_IN_FLIGHT} requests ran concurrently, \
+             and the semaphore must never let more than {MAX_IN_FLIGHT} through"
+        );
     }
 
     #[tokio::test]
