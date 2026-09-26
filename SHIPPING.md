@@ -54,12 +54,22 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
 
 ## Cutting a release
 
-1. Bump `version` in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, note it in
-   `CHANGELOG.md`, commit.
+1. Add a dated `## X.Y.Z - YYYY-MM-DD` section to `CHANGELOG.md` (not "Unreleased": the
+   publish job below refuses to run without one), bump `version` in
+   `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, commit.
 2. `git tag vX.Y.Z && git push --tags`. The workflow builds both platforms and opens a draft
-   release with the installers, the `.sig` files and `latest.json`.
-3. Check the draft's assets, then publish it. Installs with update checks on see it at their
-   next launch or popover open, or within four hours.
+   release with the installers, the `.sig` files and `latest.json`, same as before.
+3. Watch the run. A final job downloads the draft's own `latest.json` and checks it against
+   the draft's actual assets: the version matches the tag, every platform's `url` points at a
+   file really on the draft with a non-empty `signature`, and the dmg, the setup exe and the
+   msi are all present. It then checks that `CHANGELOG.md` has that dated section, and only
+   then writes release notes (the install instructions plus that section) and publishes the
+   release itself. Any check failing leaves the draft as a draft and fails the job loudly
+   instead of publishing something wrong. `scripts/verify-and-publish-release.sh vX.Y.Z
+   --dry-run` runs the same checks by hand against an existing draft and prints the notes
+   without publishing, which is also how to diagnose a run that failed. The first tag cut
+   after this pipeline shipped is still confirmed by hand once the job reports it published:
+   open the release page and read it the way an installer would.
 4. Refresh the site's embedded demo and its SEO files: `scripts/sync-demo-to-site.sh`
    rebuilds the demo itself, copies `dist-demo/` into
    `staasfund/task-manager/demo/` and bump the page's iframe `?v=`; bring the AI Task

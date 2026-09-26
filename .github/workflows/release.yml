@@ -1,8 +1,10 @@
 # Builds installers for a version tag and attaches them, with the updater
-# artifacts (.sig files and latest.json), to a DRAFT release. NOT run on
-# ordinary pushes. A manual run (workflow_dispatch, no tag) builds without
-# creating a release; that is how to rehearse. The repository is public,
-# so these runners cost nothing.
+# artifacts (.sig files and latest.json), to a DRAFT release, then checks
+# that draft against its own update-feed JSON and the changelog before
+# publishing it. NOT run on ordinary pushes. A manual run (workflow_dispatch,
+# no tag) builds without creating a release, and its draft (there isn't one)
+# can never reach the publish job either; that is how to rehearse. The
+# repository is public, so these runners cost nothing.
 #
 # What it can and cannot do today is in SHIPPING.md. In short: signing and
 # notarization switch on by adding the secrets listed there; no step here
@@ -88,3 +90,24 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # Only a real tag push reaches here: a workflow_dispatch rehearsal has no
+  # tag ref, so the condition below never lets it through, and the draft
+  # from a rehearsal (there isn't one) can never be auto-published either.
+  # This job reads the draft back the way an installer will -- its exact
+  # asset names, its own update-feed JSON, the changelog entry a person
+  # will read -- and only then flips it to published. Every check lives in
+  # the script so it can also be run by hand against an existing draft.
+  publish:
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the draft and publish it
+        run: scripts/verify-and-publish-release.sh "${{ github.ref_name }}"
