@@ -646,7 +646,11 @@ fn cwd_of_pid(pid: u32) -> Option<String> {
     // the NT path ceiling cannot be a real path.
     let dos_path = &params.current_directory.dos_path;
     let length = dos_path.length as usize;
-    if length == 0 || length % 2 != 0 || length > MAX_DOS_PATH_BYTES || dos_path.buffer.is_null() {
+    if length == 0
+        || !length.is_multiple_of(2)
+        || length > MAX_DOS_PATH_BYTES
+        || dos_path.buffer.is_null()
+    {
         return None;
     }
 
@@ -1266,8 +1270,8 @@ mod tests {
         // refuses PROCESS_VM_READ to a normal, unelevated caller. Neither
         // should appear in the map at all, empty string or otherwise.
         let cwds = cwd_of_pids(&[0, 4]);
-        assert!(cwds.get(&0).is_none());
-        assert!(cwds.get(&4).is_none());
+        assert!(!cwds.contains_key(&0));
+        assert!(!cwds.contains_key(&4));
     }
 
     #[test]
