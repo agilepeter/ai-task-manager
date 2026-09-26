@@ -145,7 +145,48 @@ pub async fn backfill_missing_display_units(path: &Path) {
         let Ok(unit) = super::fingerprint::probe(&origin).await else {
             continue;
         };
-        let _ = super::set_display_unit_at(path, &id, &origin, unit);
+        let _wrote = super::set_display_unit_at(path, &id, &origin, unit);
+        #[cfg(test)]
+        if matches!(_wrote, Ok(true)) {
+            notify_backfill_write(&id);
+        }
+    }
+}
+
+/// Test-only watch on a single site's backfill write. A test that needs to
+/// know when the fire-and-forget spawn in `schedule_backfill_missing_display_units`
+/// has actually persisted a display unit -- not merely probed for one --
+/// calls `watch_backfill_write` with the site id it is backfilling before
+/// dispatching, then blocks on the returned receiver; that function hands
+/// back nothing to join, so this is the only way to see the background work
+/// land without polling the store file on a sleep. The slot is keyed by
+/// site id rather than a bare on/off switch: this file runs several other
+/// backfill tests concurrently (`cargo test` default parallelism) whose
+/// writes would otherwise be able to satisfy a receiver that was waiting on
+/// a different site entirely. A slot nobody has installed, or a write for a
+/// site nobody is watching, makes the notify a no-op.
+#[cfg(test)]
+type BackfillWriteWatch = Option<(String, std::sync::mpsc::Sender<()>)>;
+
+#[cfg(test)]
+fn backfill_write_watch() -> &'static Mutex<BackfillWriteWatch> {
+    static WATCH: OnceLock<Mutex<BackfillWriteWatch>> = OnceLock::new();
+    WATCH.get_or_init(Default::default)
+}
+
+#[cfg(test)]
+fn watch_backfill_write(site_id: &str) -> std::sync::mpsc::Receiver<()> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    *backfill_write_watch().lock().unwrap() = Some((site_id.to_string(), tx));
+    rx
+}
+
+#[cfg(test)]
+fn notify_backfill_write(site_id: &str) {
+    if let Some((watched_id, tx)) = backfill_write_watch().lock().unwrap().as_ref() {
+        if watched_id == site_id {
+            let _ = tx.send(());
+        }
     }
 }
 
@@ -160,8 +201,9 @@ fn billing_error_category(what: &str, err: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        backfill_missing_display_units, key_cards_at, refresh_clients, snapshot_key,
-        DisplayUnit, KeyCard,
+        backfill_missing_display_units, key_cards_at, refresh_clients,
+        schedule_backfill_missing_display_units, snapshot_key, watch_backfill_write, DisplayUnit,
+        KeyCard,
     };
     use crate::providers::onenewapi::store;
     use crate::providers::onenewapi::url::normalize_base_url;
@@ -836,19 +878,6 @@ mod tests {
         assert_eq!(loaded.sites[0].display_unit, None);
     }
 
-    /// Mirrors `schedule_backfill_missing_display_units`'s fire-and-forget
-    /// dispatch (the same `crate::rt::spawn` call around the same
-    /// `backfill_missing_display_units` future), but also signals a channel
-    /// once the spawned task finishes. The production function hands back
-    /// nothing to join, so a test that must know when the background work is
-    /// truly done needs this instead of polling the store file on a sleep.
-    fn spawn_backfill_signal_done(path: PathBuf, done: std::sync::mpsc::Sender<()>) {
-        crate::rt::spawn(async move {
-            backfill_missing_display_units(&path).await;
-            let _ = done.send(());
-        });
-    }
-
     #[test]
     fn scheduled_backfill_does_not_block_key_cards() {
         let tmp = TempStore::new();
@@ -890,8 +919,8 @@ mod tests {
         )
         .unwrap();
 
-        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
-        spawn_backfill_signal_done(tmp.path.clone(), done_tx);
+        let wrote_rx = watch_backfill_write("siteidschedbackfillAA");
+        schedule_backfill_missing_display_units(tmp.path.clone());
 
         // The status gate above is still shut, so the backfill cannot have
         // reached the point of persisting a display unit yet: a foreground
@@ -905,7 +934,7 @@ mod tests {
             .expect("status probe never arrived");
         release_tx.send(()).expect("test release");
 
-        done_rx
+        wrote_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("background backfill never completed");
         let loaded = store::load(&tmp.path).unwrap();

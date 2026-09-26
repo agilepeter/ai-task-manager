@@ -897,7 +897,7 @@ mod tests {
                 let request = server
                     .recv_timeout(std::time::Duration::from_secs(10))
                     .unwrap()
-                    .unwrap();
+                    .expect("usage request never arrived");
                 let active = active.clone();
                 let maximum = maximum.clone();
                 let barrier = barrier.clone();
