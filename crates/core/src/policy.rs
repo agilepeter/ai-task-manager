@@ -115,6 +115,7 @@ mod tests {
             servers, agents: 0, skills: 0, hooks: 0, permission_mode: None, allow_rules: 0, ask_rules: 0,
             deny_rules: deny, spend: vec![], findings: vec![], limits: vec![],
             agents_unrestricted: 0, agents_model_unset: 0, deny_covers_shell: false, hook_events: vec![],
+            agent_spend: vec![],
         }
     }
 

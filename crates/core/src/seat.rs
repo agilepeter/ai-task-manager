@@ -13,10 +13,19 @@
 //! local credential: how much of each limit is used and when it resets.
 
 use crate::inventory::Inventory;
-use crate::spend::ProviderSpend;
+use crate::spend::{AgentSpend, ProviderSpend};
 use serde::{Deserialize, Serialize};
 
 pub const SCHEMA: u32 = 1;
+
+/// Agent names Claude Code ships with. A `Definition` file loaded from disk
+/// can never be named one of these (they have no `.md` file at all), so any
+/// other name reaching `seat_agent_spend` is a custom agent's own -- and
+/// gets folded into one "custom" row before a report ever leaves this
+/// machine, the same way a custom agent's name is kept off the wire
+/// everywhere else in this file.
+pub const BUILTIN_AGENTS: &[&str] =
+    &["general-purpose", "Explore", "Plan", "claude-code-guide", "statusline-setup", "workflow-subagent"];
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +68,18 @@ pub struct SeatFinding {
     pub id: String,
     pub kind: String,
     pub title: String,
+}
+
+/// One name's slice of team-wide agent spend: a `BUILTIN_AGENTS` entry, or
+/// exactly "custom" for every other agent folded into one row by
+/// `seat_agent_spend`, so a custom definition's own name -- which an
+/// organisation may have chosen to match a client -- never leaves a seat.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatAgentSpend {
+    pub name: String,
+    pub runs: usize,
+    pub cost: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -108,6 +129,12 @@ pub struct SeatReport {
     /// that predate it.
     #[serde(default)]
     pub hook_events: Vec<String>,
+    /// Team-wide agent spend, folded to a `BUILTIN_AGENTS` name or the
+    /// single word "custom" (see `seat_agent_spend`): never an actual
+    /// custom agent's own name. Absent in reports from agents that predate
+    /// it.
+    #[serde(default)]
+    pub agent_spend: Vec<SeatAgentSpend>,
 }
 
 fn pinned(package: &str) -> bool {
@@ -148,6 +175,26 @@ fn hook_event_names(hooks: &[crate::inventory::HookEvent]) -> Vec<String> {
     events.sort();
     events.dedup();
     events
+}
+
+/// Every `AgentSpend` row folded to what a seat may publish: a name in
+/// `BUILTIN_AGENTS` passes through unchanged, and everything else -- a
+/// custom definition's own name, possibly client-flavoured, and the empty,
+/// unattributed marker alike -- sums into one row named "custom" so no such
+/// name ever leaves a seat. Sorted by cost, highest first, then name, so
+/// the same input always renders in the same order.
+fn seat_agent_spend(rows: &[AgentSpend]) -> Vec<SeatAgentSpend> {
+    let mut by_name: std::collections::HashMap<String, (usize, f64)> = std::collections::HashMap::new();
+    for row in rows {
+        let name = if BUILTIN_AGENTS.contains(&row.name.as_str()) { row.name.clone() } else { "custom".to_string() };
+        let entry = by_name.entry(name).or_insert((0, 0.0));
+        entry.0 += row.runs;
+        entry.1 += row.cost;
+    }
+    let mut out: Vec<SeatAgentSpend> =
+        by_name.into_iter().map(|(name, (runs, cost))| SeatAgentSpend { name, runs, cost }).collect();
+    out.sort_by(|a, b| b.cost.total_cmp(&a.cost).then_with(|| a.name.cmp(&b.name)));
+    out
 }
 
 pub fn build(
@@ -213,6 +260,7 @@ pub fn build(
         agents_model_unset: inv.agents.iter().filter(|a| a.model.is_none()).count(),
         deny_covers_shell: inv.permissions.deny_covers_shell,
         hook_events: hook_event_names(&inv.hooks),
+        agent_spend: seat_agent_spend(&crate::spend::agent_spend(30)),
     }
 }
 
@@ -230,7 +278,12 @@ pub fn parse(raw: &str) -> Result<SeatReport, String> {
     if !id_ok {
         return Err("bad seat id".into());
     }
-    if report.servers.len() > 500 || report.tools.len() > 100 || report.findings.len() > 100 || report.limits.len() > 100 {
+    if report.servers.len() > 500
+        || report.tools.len() > 100
+        || report.findings.len() > 100
+        || report.limits.len() > 100
+        || report.agent_spend.len() > BUILTIN_AGENTS.len() + 1
+    {
         return Err("report has too many entries".into());
     }
     // A real machine registers a handful of hook events; nothing about a
@@ -396,6 +449,69 @@ mod tests {
     }
 
     #[test]
+    fn never_carries_custom_agent_names() {
+        let (inv, spend) = inputs();
+        let mut report = build("seat-abcdefgh", "Dana's MacBook", 1, &inv, &spend);
+        // A client-flavoured name a real organisation might give a custom
+        // agent, planted straight into the pre-fold input `build()` would
+        // otherwise carry through unchanged.
+        report.agent_spend = seat_agent_spend(&[
+            AgentSpend {
+                name: "northwind-intake-reviewer".into(),
+                runs: 3,
+                cost: 12.5,
+                tokens: 0,
+                last_used_ms: 0,
+                top_model: None,
+                by_client: vec![],
+            },
+            AgentSpend {
+                name: "general-purpose".into(),
+                runs: 2,
+                cost: 4.0,
+                tokens: 0,
+                last_used_ms: 0,
+                top_model: None,
+                by_client: vec![],
+            },
+        ]);
+        let wire = serde_json::to_string(&report).unwrap();
+        for secret in ["northwind-intake-reviewer", "northwind"] {
+            assert!(!wire.contains(secret), "{secret} leaked into {wire}");
+        }
+        let custom = report.agent_spend.iter().find(|a| a.name == "custom").expect("a custom row is present");
+        assert_eq!((custom.runs, custom.cost), (3, 12.5), "the folded-in name's runs and cost still land somewhere");
+    }
+
+    #[test]
+    fn seat_agent_spend_folds_custom_names_into_one_row() {
+        let row = |name: &str, runs: usize, cost: f64| AgentSpend {
+            name: name.into(),
+            runs,
+            cost,
+            tokens: 0,
+            last_used_ms: 0,
+            top_model: None,
+            by_client: vec![],
+        };
+        let out = seat_agent_spend(&[
+            row("general-purpose", 5, 10.0),
+            row("reviewer", 2, 3.0),      // a custom definition's own name
+            row("", 1, 1.0),              // the unattributed marker
+            row("Explore", 4, 2.0),
+        ]);
+        assert_eq!(
+            out,
+            vec![
+                SeatAgentSpend { name: "general-purpose".into(), runs: 5, cost: 10.0 },
+                SeatAgentSpend { name: "custom".into(), runs: 3, cost: 4.0 },
+                SeatAgentSpend { name: "Explore".into(), runs: 4, cost: 2.0 },
+            ],
+            "built-ins pass through by name; the custom name and the empty marker sum into one row, sorted by cost"
+        );
+    }
+
+    #[test]
     fn a_schema_one_report_without_the_new_fields_still_parses() {
         let (inv, spend) = inputs();
         let mut old = serde_json::to_value(build("seat-abcdefgh", "x", 1, &inv, &spend)).unwrap();
@@ -408,6 +524,15 @@ mod tests {
         assert_eq!(report.agents_model_unset, 0);
         assert!(!report.deny_covers_shell);
         assert!(report.hook_events.is_empty());
+    }
+
+    #[test]
+    fn a_schema_one_report_without_agent_spend_still_parses() {
+        let (inv, spend) = inputs();
+        let mut old = serde_json::to_value(build("seat-abcdefgh", "x", 1, &inv, &spend)).unwrap();
+        old.as_object_mut().unwrap().remove("agentSpend");
+        let report = parse(&old.to_string()).unwrap();
+        assert!(report.agent_spend.is_empty());
     }
 
     #[test]

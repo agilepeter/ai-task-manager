@@ -234,6 +234,27 @@ pub fn dashboard_with(reports: &[SeatReport], policy: Option<&Policy>, now: i64)
         })
         .collect();
 
+    // Agent spend across the team: each seat already folds every custom
+    // definition's own name into one "custom" row (`seat::seat_agent_spend`),
+    // so summing by name here can only ever gather a `seat::BUILTIN_AGENTS`
+    // name or the word "custom" -- never a client-flavoured agent name.
+    let mut agent_totals: std::collections::BTreeMap<String, (usize, f64)> = Default::default();
+    for r in reports {
+        for a in &r.agent_spend {
+            let entry = agent_totals.entry(a.name.clone()).or_insert((0, 0.0));
+            entry.0 += a.runs;
+            entry.1 += a.cost;
+        }
+    }
+    let mut agent_totals: Vec<_> = agent_totals.into_iter().collect();
+    agent_totals.sort_by(|a, b| b.1 .1.total_cmp(&a.1 .1).then_with(|| a.0.cmp(&b.0)));
+    let agent_rows: String = agent_totals
+        .iter()
+        .map(|(name, (runs, cost))| {
+            format!("<tr><td>{}</td><td class=n>{runs}</td><td class=n>{}</td></tr>", esc(name), dollars(*cost))
+        })
+        .collect();
+
     format!(
         r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>AI Task Manager · Team</title>
@@ -262,6 +283,7 @@ footer{{margin-top:28px;color:var(--mut);font-size:12px}}
 </div>
 <h2>Seats</h2><div class="scroll"><table><thead><tr><th>Seat</th><th>Last report</th><th>AI tools</th><th class=n>MCP servers</th><th class=n>Unpinned</th><th class=n>Permission rules</th><th class=n>30-day usage</th><th class=n>Largest models</th><th>Tightest limit</th><th>Guardrails</th><th>Policy</th><th>Findings</th></tr></thead><tbody>{}</tbody></table></div>
 <h2>MCP servers across the team</h2><div class="scroll"><table><thead><tr><th>Server</th><th class=n>Seats</th><th></th></tr></thead><tbody>{}</tbody></table></div>
+<h2>Agent spend across the team</h2><div class="scroll"><table><thead><tr><th>Agent</th><th class=n>Runs</th><th class=n>30-day usage</th></tr></thead><tbody>{}</tbody></table></div>
 <footer>Usage is priced at API rates from each seat's local logs: on flat-rate plans it is equivalent value, not a charge. A greyed seat has not reported in over a week.</footer>
 </main></body></html>"#,
         reports.len(),
@@ -275,6 +297,7 @@ footer{{margin-top:28px;color:var(--mut);font-size:12px}}
         dollars(spend),
         if seat_rows.is_empty() { "<tr><td colspan=12>No seat has reported yet.</td></tr>".to_string() } else { seat_rows },
         if fleet_rows.is_empty() { "<tr><td colspan=3>None yet.</td></tr>".to_string() } else { fleet_rows },
+        if agent_rows.is_empty() { "<tr><td colspan=3>None yet.</td></tr>".to_string() } else { agent_rows },
     )
 }
 
@@ -400,6 +423,7 @@ mod tests {
                 seat::SeatLimit { provider: "claude".into(), plan: Some("max".into()), metric: "Weekly".into(), used_percent: 91.0, resets_at: None },
             ],
             agents_unrestricted: 0, agents_model_unset: 0, deny_covers_shell: false, hook_events: vec![],
+            agent_spend: vec![],
         }
     }
 
@@ -515,6 +539,19 @@ mod tests {
         assert!(html.contains("class=stale"), "nine days without a report greys the seat");
         assert!(html.contains("80%"), "200 of 250 on the largest models");
         assert!(dashboard(&[], now).contains("No seat has reported yet."));
+    }
+
+    #[test]
+    fn the_agent_spend_tile_is_escaped() {
+        // parse() only bounds this list's length, not what a name says, so
+        // a hostile client could post markup here -- the dashboard must
+        // still be safe to render it.
+        let mut r = report("seat-aaaaaaaa", "Dana", 1);
+        r.agent_spend = vec![seat::SeatAgentSpend { name: "<script>alert(1)</script>".into(), runs: 2, cost: 5.0 }];
+        let html = dashboard(&[r], 1);
+        assert!(!html.contains("<script>alert(1)</script>"));
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(html.contains("<td class=n>2</td><td class=n>$5</td>"), "runs and cost still render: {html}");
     }
 
     #[test]
