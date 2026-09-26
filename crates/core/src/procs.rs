@@ -718,19 +718,22 @@ pub fn agents_from(raw: &[RawProc], cwds: &HashMap<u32, String>) -> Vec<RunningA
     out
 }
 
-/// Fills in each agent's area, client and live pace from its folder alone.
-/// Pure: `lookup` (a fresh read of that folder's newest session file) and
-/// the client rules both come from the caller, so this needs no I/O of its
-/// own to test. An agent with no known `cwd` is left exactly as `agents_from`
-/// built it -- there is no folder to ask a session or a client rule about.
-/// Agents that share a `cwd` share one `lookup` call: the result is cached
-/// by folder for this pass, so two hosts backed by the same session file
-/// never make `lookup` read it twice.
-pub fn attach_context(agents: &mut [RunningAgent], rules: &[ClientRule], lookup: &dyn Fn(&str) -> Option<LivePace>) {
-    let mut cache: HashMap<String, Option<LivePace>> = HashMap::new();
+/// Fills in each agent's area, client and live pace from its folder and its
+/// own tool. Pure: `lookup` (a fresh read of that tool's newest session
+/// file in that folder) and the client rules both come from the caller, so
+/// this needs no I/O of its own to test. An agent with no known `cwd` is
+/// left exactly as `agents_from` built it -- there is no folder to ask a
+/// session or a client rule about. Agents that share BOTH a `cwd` and a
+/// tool share one `lookup` call: the result is cached by `(tool, cwd)` for
+/// this pass, so two hosts of the same tool backed by the same session
+/// file never make `lookup` read it twice -- and two different tools
+/// sharing a folder never share the wrong one's pace.
+pub fn attach_context(agents: &mut [RunningAgent], rules: &[ClientRule], lookup: &dyn Fn(&str, &str) -> Option<LivePace>) {
+    let mut cache: HashMap<(String, String), Option<LivePace>> = HashMap::new();
     for agent in agents.iter_mut() {
         let Some(cwd) = agent.cwd.as_deref() else { continue };
-        let pace = cache.entry(cwd.to_string()).or_insert_with(|| lookup(cwd)).clone();
+        let tool = agent.tool.as_str();
+        let pace = cache.entry((tool.to_string(), cwd.to_string())).or_insert_with(|| lookup(tool, cwd)).clone();
         agent.area = pace.as_ref().and_then(|p| p.area.clone());
         agent.client = agent.area.as_deref().and_then(|a| clients::client_of(a, rules)).map(str::to_string);
         agent.pace = pace;
@@ -755,7 +758,7 @@ pub fn agents_snapshot(rules: &[ClientRule]) -> Vec<RunningAgent> {
     let pids = agent_host_pids(&raw);
     let cwds = cwd_of_pids(&pids);
     let mut agents = agents_from(&raw, &cwds);
-    attach_context(&mut agents, rules, &|cwd| spend::live_session_for_cwd(cwd, crate::pricing::now_ms()));
+    attach_context(&mut agents, rules, &|tool, cwd| spend::live_session_for_cwd(tool, cwd, crate::pricing::now_ms()));
     agents
 }
 
@@ -1414,9 +1417,11 @@ mod tests {
             idle_secs: 5,
             model: Some("claude-sonnet-5".into()),
             area: Some("acme".into()),
+            tool: "Claude Code".into(),
         };
         let rules = vec![ClientRule { client: "Acme".into(), patterns: vec!["acme".into()], monthly_budget: None }];
-        attach_context(&mut agents, &rules, &|cwd| {
+        attach_context(&mut agents, &rules, &|tool, cwd| {
+            assert_eq!(tool, "Claude Code", "the lookup is asked about the agent's own tool");
             assert_eq!(cwd, "/w/acme", "the lookup is asked about the agent's own folder");
             Some(pace.clone())
         });
@@ -1435,7 +1440,7 @@ mod tests {
         // resolution goes through the pace's own area and never the raw
         // cwd directly.
         let rules = vec![ClientRule { client: "Acme".into(), patterns: vec!["quiet".into()], monthly_budget: None }];
-        attach_context(&mut agents, &rules, &|_cwd| None);
+        attach_context(&mut agents, &rules, &|_tool, _cwd| None);
         assert_eq!(agents[0].cwd.as_deref(), Some("/w/quiet"), "the folder itself is untouched");
         assert_eq!(agents[0].area, None, "no live session means no area to report");
         assert_eq!(agents[0].client, None, "so no client, even though a rule would match the bare folder name");
@@ -1443,31 +1448,45 @@ mod tests {
     }
 
     #[test]
-    fn attach_context_memoises_the_lookup_per_folder() {
-        // Two different hosts, same cwd: the folder's live session should be
-        // read once and shared, not re-read per agent.
-        let table = "500 1 51200 10:00 1.0 claude\n600 1 20480 09:00 0.5 codex\n";
+    fn attach_context_memoises_per_tool_and_folder() {
+        // Two Claude Code hosts and one Codex host, all in the same folder:
+        // the two Claude Code rows must share ONE lookup, and Codex must
+        // get its own -- the cache key is (tool, cwd), never cwd alone, so
+        // two different tools sharing a folder can never end up sharing
+        // (or stealing) each other's pace.
+        let table = "500 1 51200 10:00 1.0 claude\n600 1 20480 09:00 0.5 claude\n700 1 10240 08:00 0.2 codex\n";
         let mut cwds = HashMap::new();
-        cwds.insert(500, "/w/acme".to_string());
-        cwds.insert(600, "/w/acme".to_string());
+        for pid in [500, 600, 700] {
+            cwds.insert(pid, "/w/acme".to_string());
+        }
         let mut agents = agents_from(&parse_ps(table), &cwds);
-        assert_eq!(agents.len(), 2, "both hosts get their own row");
-        let calls = std::cell::Cell::new(0u32);
-        let pace = LivePace {
-            session_id: "sess-1".into(),
-            tokens_10m: 1,
-            cost_10m: 0.0,
-            priced: true,
-            idle_secs: 0,
-            model: None,
-            area: Some("acme".into()),
-        };
-        attach_context(&mut agents, &[], &|cwd| {
-            calls.set(calls.get() + 1);
-            assert_eq!(cwd, "/w/acme");
-            Some(pace.clone())
+        assert_eq!(agents.len(), 3, "three independent host processes, even sharing a folder and (twice) a tool");
+
+        let calls: std::cell::RefCell<Vec<(String, String)>> = std::cell::RefCell::new(Vec::new());
+        attach_context(&mut agents, &[], &|tool, cwd| {
+            calls.borrow_mut().push((tool.to_string(), cwd.to_string()));
+            Some(LivePace {
+                session_id: "sess".into(),
+                tokens_10m: 1,
+                cost_10m: 0.0,
+                priced: true,
+                idle_secs: 0,
+                model: None,
+                area: None,
+                tool: tool.to_string(),
+            })
         });
-        assert_eq!(calls.get(), 1, "two agents sharing a folder must trigger one lookup");
-        assert!(agents.iter().all(|a| a.pace == Some(pace.clone())), "both still get the shared result");
+        let mut seen = calls.into_inner();
+        seen.sort();
+        assert_eq!(
+            seen,
+            vec![("Claude Code".to_string(), "/w/acme".to_string()), ("Codex".to_string(), "/w/acme".to_string())],
+            "one lookup per (tool, cwd) pair, not per agent and not per folder alone"
+        );
+        assert_eq!(agents.iter().filter(|a| a.tool == "Claude Code").count(), 2);
+        assert!(
+            agents.iter().all(|a| a.pace.as_ref().map(|p| p.tool.as_str()) == Some(a.tool.as_str())),
+            "each row's pace matches its own tool, never a neighbour's"
+        );
     }
 }

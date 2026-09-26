@@ -2378,13 +2378,29 @@ pub struct LivePace {
     /// own tool-call signal, never the process's bare cwd, which (being the
     /// session's own root) names no area relative to itself.
     pub area: Option<String>,
+    /// The `AGENT_HOSTS` display name this pace was read for ("Claude
+    /// Code" / "Codex" / "Gemini CLI"). Set by whichever arm of
+    /// `live_session_for_cwd` produced it, never guessed from the session
+    /// file's own shape.
+    pub tool: String,
 }
 
-/// `live_session_in` at the project folder a cwd's own session logs live
-/// under.
-pub fn live_session_for_cwd(cwd: &str, now_ms: i64) -> Option<LivePace> {
-    let dir = claude_projects_root().join(encode_project_path(cwd));
-    live_session_in(&dir, now_ms)
+/// Reads whichever running agent's own session format matches `tool`, at
+/// the folder `cwd` names. Each arm resolves its tool's home directory
+/// itself (`CODEX_HOME` / the Gemini tmp root / Claude's projects root) so
+/// the lookup stays a single call for every caller; a tool with no live
+/// reader here (most of `AGENT_HOSTS`) is `None`, never a guess at a format
+/// nobody has taught this function yet.
+pub fn live_session_for_cwd(tool: &str, cwd: &str, now_ms: i64) -> Option<LivePace> {
+    match tool {
+        "Claude Code" => {
+            let dir = claude_projects_root().join(encode_project_path(cwd));
+            live_session_in(&dir, now_ms)
+        }
+        "Codex" => codex_live_session_in(&codex_home(), cwd, now_ms),
+        "Gemini CLI" => gemini_live_session_in(&gemini_tmp_root(), cwd, now_ms),
+        _ => None,
+    }
 }
 
 /// How many directory levels `jsonl_files_under` will descend beneath a
@@ -2652,6 +2668,7 @@ fn pace_from_lines<'a>(lines: impl Iterator<Item = &'a str>, session_id: &str, n
         idle_secs: now_ms.saturating_sub(newest_ms).max(0) as u64 / 1000,
         model,
         area,
+        tool: "Claude Code".to_string(),
     })
 }
 
@@ -3074,22 +3091,13 @@ fn codex_no_cache_discount(dated: &str) -> bool {
     matches!(dated, "gpt-5.4-pro" | "gpt-5.5-pro")
 }
 
-/// Parse one Codex rollout line. Tracks the current model (turn_context),
-/// the fast/priority service tier (thread_settings_applied — config.toml is
-/// deliberately not consulted, toggling it must not reprice history), and a
-/// child session's replay gate; normalizes each token_count into a delta
-/// event.
-fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
-    if !(line.contains("token_count")
-        || line.contains("turn_context")
-        || line.contains("session_meta")
-        || line.contains("task_started")
-        || line.contains("thread_settings_applied"))
-    {
-        return;
-    }
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
-
+/// One rollout line's effect on `st`, applied identically for the day
+/// scanner (`codex_line`) and the live ticker (`codex_pace_from_lines`) so
+/// the two can never read the same turn differently. Every line updates
+/// state only (model, replay gate, fast tier) and returns `None`, except a
+/// live, non-replayed, non-stale token_count turn, which additionally
+/// returns its own timestamp, resolved model and delta usage.
+fn codex_turn(st: &mut CodexFileState, v: &Value) -> Option<(DateTime<Utc>, String, CodexRaw)> {
     // Only the file's own (first) session_meta counts — a child file replays
     // the parent's session_meta lines right after its own.
     if v.get("type").and_then(Value::as_str) == Some("session_meta") {
@@ -3107,7 +3115,7 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
                 }
             }
         }
-        return;
+        return None;
     }
 
     match v.pointer("/payload/type").and_then(Value::as_str) {
@@ -3119,7 +3127,7 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
             if let Some(t) = tier {
                 st.fast_tier = t == "fast" || t == "priority";
             }
-            return;
+            None
         }
         Some("task_started") => {
             // The first live task_started ends a child's replayed history —
@@ -3136,63 +3144,71 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
                     }
                 }
             }
-            return;
+            None
         }
-        Some("token_count") => {}
+        Some("token_count") => {
+            // A model on the line itself wins.
+            if let Some(m) = v
+                .pointer("/payload/model")
+                .and_then(Value::as_str)
+                .or_else(|| v.pointer("/payload/info/model").and_then(Value::as_str))
+            {
+                st.model = m.to_string();
+            }
+            let ts = parse_ts(v.get("timestamp"))?;
+            let totals = v.pointer("/payload/info/total_token_usage").map(codex_raw);
+
+            // Replayed parent history: seed the delta baseline, never count
+            // it — a large parent history takes several seconds to replay,
+            // which is why this is a log marker and not a time window (the
+            // Mac's old one-second window leaked replays and inflated
+            // spend ~20x).
+            if st.gate.is_some() {
+                if let Some(t) = totals {
+                    st.prev_totals = Some(t);
+                }
+                return None;
+            }
+            // Unchanged cumulative totals mean a re-emitted stale snapshot,
+            // not new usage — even when the line repeats a last_token_usage.
+            if let (Some(t), Some(p)) = (&totals, &st.prev_totals) {
+                if t == p {
+                    return None;
+                }
+            }
+            let usage = match v.pointer("/payload/info/last_token_usage") {
+                Some(l) => codex_raw(l),
+                // `.as_ref()` only borrows `totals` -- it is still needed,
+                // whole, to seed `prev_totals` right below.
+                None => totals.as_ref()?.minus(st.prev_totals.as_ref()),
+            };
+            if let Some(t) = totals {
+                st.prev_totals = Some(t);
+            }
+            if !usage.any_tokens() {
+                return None;
+            }
+            let model = if st.model.is_empty() { "gpt-5".to_string() } else { st.model.clone() };
+            Some((ts, model, usage))
+        }
         _ => {
             // turn_context (or older shapes): update the session's model.
             if let Some(m) = v.pointer("/payload/model").and_then(Value::as_str) {
                 st.model = m.to_string();
             }
-            return;
+            None
         }
     }
+}
 
-    // token_count from here on. A model on the line itself wins.
-    if let Some(m) = v
-        .pointer("/payload/model")
-        .and_then(Value::as_str)
-        .or_else(|| v.pointer("/payload/info/model").and_then(Value::as_str))
-    {
-        st.model = m.to_string();
-    }
-    let Some(ts) = parse_ts(v.get("timestamp")) else { return };
-    let totals = v.pointer("/payload/info/total_token_usage").map(codex_raw);
-
-    // Replayed parent history: seed the delta baseline, never count it —
-    // a large parent history takes several seconds to replay, which is why
-    // this is a log marker and not a time window (the Mac's old one-second
-    // window leaked replays and inflated spend ~20x).
-    if st.gate.is_some() {
-        if let Some(t) = totals {
-            st.prev_totals = Some(t);
-        }
-        return;
-    }
-    // Unchanged cumulative totals mean a re-emitted stale snapshot, not new
-    // usage — even when the line repeats a last_token_usage.
-    if let (Some(t), Some(p)) = (&totals, &st.prev_totals) {
-        if t == p {
-            return;
-        }
-    }
-    let usage = match v.pointer("/payload/info/last_token_usage") {
-        Some(l) => codex_raw(l),
-        None => match &totals {
-            Some(t) => t.minus(st.prev_totals.as_ref()),
-            None => return,
-        },
-    };
-    if let Some(t) = totals {
-        st.prev_totals = Some(t);
-    }
-    if !usage.any_tokens() {
-        return;
-    }
-
-    let model = if st.model.is_empty() { "gpt-5".to_string() } else { st.model.clone() };
-    let tokens = usage.total;
-
+/// Prices one Codex turn's delta usage against `model`: live catalog (with
+/// the dated-snapshot fallback) first, then the static gpt-5-family table,
+/// else `None` (excluded, never a guessed dollar figure) — the same
+/// three-tier shape `claude_cost` uses, with Codex's own fast-tier
+/// multiplier and long-context threshold. Shared by the day scanner
+/// (`codex_line`) and the live ticker (`codex_pace_from_lines`) so the two
+/// can never quote a different dollar figure for the same turn.
+fn codex_turn_cost(model: &str, usage: &CodexRaw, fast_tier: bool, ts: DateTime<Utc>) -> Option<f64> {
     // Codex speed is a provider tier, not Cursor's `-fast` price variant: a
     // `-fast` slug resolves through its unscaled base rates and the Codex
     // multiplier applies exactly once. A fast-only third-party slug with no
@@ -3202,7 +3218,7 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
     let rate_source = if model.eq_ignore_ascii_case("codex-auto-review") {
         auto_review_fallback(ts)
     } else {
-        model.clone()
+        model.to_string()
     };
     let (rate_model, alias_fast) = match rate_source.strip_suffix("-fast") {
         Some(base) if !base.is_empty() => (base.to_string(), true),
@@ -3233,10 +3249,7 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
                 None
             }
         });
-    let Some(mut p) = price else {
-        note_unpriced(data, ts, &model, tokens);
-        return;
-    };
+    let mut p = price?;
     let mut threshold = 200_000.0;
     if let Some((i, o, cr)) = codex_long_context(&dated) {
         p.input_200k = Some(i);
@@ -3248,7 +3261,7 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
         p.cache_read = p.input;
         p.cache_read_200k = p.input_200k;
     }
-    let is_fast = if alias_fast { base_price.is_some() } else { st.fast_tier };
+    let is_fast = if alias_fast { base_price.is_some() } else { fast_tier };
     let mult = if is_fast { codex_priority_multiplier(&dated, &rate_model) } else { 1.0 };
 
     let cached = usage.cached.min(usage.input);
@@ -3259,7 +3272,30 @@ fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
         cache_write_5m: 0.0,
         cache_write_1h: 0.0,
     };
-    add_event(data, ts, &model, cost_for(&model, &p, &u, threshold, ts) * mult, tokens);
+    Some(cost_for(model, &p, &u, threshold, ts) * mult)
+}
+
+/// Parse one Codex rollout line. Tracks the current model (turn_context),
+/// the fast/priority service tier (thread_settings_applied — config.toml is
+/// deliberately not consulted, toggling it must not reprice history), and a
+/// child session's replay gate; normalizes each token_count into a delta
+/// event.
+fn codex_line(st: &mut CodexFileState, line: &str, data: &mut FileData) {
+    if !(line.contains("token_count")
+        || line.contains("turn_context")
+        || line.contains("session_meta")
+        || line.contains("task_started")
+        || line.contains("thread_settings_applied"))
+    {
+        return;
+    }
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Some((ts, model, usage)) = codex_turn(st, &v) else { return };
+    let tokens = usage.total;
+    match codex_turn_cost(&model, &usage, st.fast_tier, ts) {
+        Some(cost) => add_event(data, ts, &model, cost, tokens),
+        None => note_unpriced(data, ts, &model, tokens),
+    }
 }
 
 /// `codex-auto-review` release timeline (newest first), from ccusage's
@@ -3345,11 +3381,17 @@ fn codex_scan(home: &Path) -> FileData {
     all
 }
 
-fn codex(extra: FileData) -> (ProviderSpend, FileData) {
-    let home = std::env::var("CODEX_HOME")
+/// `CODEX_HOME`, or `~/.codex` when unset. The one place both the day
+/// scanner and the live ticker resolve it, so the two can never disagree
+/// about which account's logs they're reading.
+fn codex_home() -> PathBuf {
+    std::env::var("CODEX_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"));
-    let mut all = codex_scan(&home);
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".codex"))
+}
+
+fn codex(extra: FileData) -> (ProviderSpend, FileData) {
+    let mut all = codex_scan(&codex_home());
     // Pi sessions that drove a Codex account (passed in from the pi scan).
     merge_data(&mut all, extra);
     // Kimi OAuth / Moonshot turns routed through Codex (codex-router logs
@@ -3371,6 +3413,300 @@ fn codex_extra_accounts() -> (Vec<ProviderSpend>, FileData) {
         spends.push(build_spend(acct.id, acct.name, data));
     }
     (spends, kimi_extra)
+}
+
+// ---------------------------------------------------------------------------
+// Live pace: Codex
+// ---------------------------------------------------------------------------
+
+/// A rollout's own `session_meta.cwd`, read from just its opening lines —
+/// confirmed against the real `codex-rs` source (`SessionMeta.cwd:
+/// PathBuf`, flattened onto the `session_meta` line's `payload` exactly
+/// like the `forked_from_id` / `model` fields `codex_child_meta` and
+/// `codex_turn` already read there); this machine has no Codex CLI
+/// installed to sample a live rollout against. The record is always a
+/// rollout's first line, so this never pays for a read of what can be a
+/// very large file. `None` when nothing within a generous opening-line
+/// bound parses as one (a foreign or truncated file), which simply drops
+/// the file from cwd matching rather than guessing.
+fn codex_rollout_cwd(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    for line in BufReader::new(file).lines().take(20).map_while(Result::ok) {
+        if !line.contains("session_meta") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+        if v.get("type").and_then(Value::as_str) != Some("session_meta") {
+            continue;
+        }
+        return v.pointer("/payload/cwd").and_then(Value::as_str).map(str::to_string);
+    }
+    None
+}
+
+/// `live_session_in` for Codex. Unlike Claude Code, which keys one folder
+/// per project under `claude_projects_root()`, Codex logs every session
+/// into one shared `sessions/` (plus `archived_sessions/`) tree with no
+/// per-project split — so finding "this folder's" rollout means checking
+/// each fresh candidate's own `session_meta.cwd` (`codex_rollout_cwd`)
+/// rather than jumping straight to a directory. Freshness is checked
+/// before cwd is ever read, so a month of quiet history costs nothing
+/// beyond an mtime stat per file; `codex_session_files` is the same
+/// enumeration (`sessions/` plus `archived_sessions/`, archived duplicates
+/// of a live file counted once) the day scanner uses.
+fn codex_live_session_in(sessions_root: &Path, cwd: &str, now_ms: i64) -> Option<LivePace> {
+    let mut best: Option<(PathBuf, SystemTime)> = None;
+    for file in codex_session_files(sessions_root) {
+        let Ok(mtime) = fs::metadata(&file).and_then(|m| m.modified()) else { continue };
+        let mtime_ms = mtime.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_millis() as i64;
+        if now_ms.saturating_sub(mtime_ms) > LIVE_FRESH_MS {
+            continue;
+        }
+        let newer_than_best = best.as_ref().is_none_or(|(_, best_mtime)| mtime > *best_mtime);
+        if !newer_than_best {
+            continue;
+        }
+        if codex_rollout_cwd(&file).as_deref() != Some(cwd) {
+            continue;
+        }
+        best = Some((file, mtime));
+    }
+    let (path, _) = best?;
+    let session_id = path.file_stem().and_then(|s| s.to_str())?.to_string();
+    let lines = tail_lines(&path);
+    codex_pace_from_lines(lines.iter().map(String::as_str), &session_id, now_ms)
+}
+
+/// One live Codex rollout's tail, already read: recent turns priced and
+/// summed exactly like the day scanner (`codex_turn` / `codex_turn_cost`
+/// are the very same calls `codex_line` makes), windowed to the last 10
+/// minutes, and starting from a fresh, unpersisted `CodexFileState` — a
+/// live poll never resumes the on-disk checkpoint. A token_count line just
+/// before the tail's own start (if any) still seeds `prev_totals`
+/// correctly; being before the cutoff, it is never itself added to the
+/// window.
+///
+/// `area` needs a folder to be relative to, which only `session_meta`
+/// carries — and a busy rollout's 256 KB tail rarely reaches back that
+/// far. So it is entirely best-effort: the earliest and latest `cwd` this
+/// call happens to see (session_meta's own, or any later turn_context)
+/// stand in for "session root" and "now", and when the tail shows only one
+/// (or none), `area` is `None` rather than a guess.
+fn codex_pace_from_lines<'a>(lines: impl Iterator<Item = &'a str>, session_id: &str, now_ms: i64) -> Option<LivePace> {
+    let cutoff = now_ms - LIVE_WINDOW_MS;
+    let mut st = CodexFileState::default();
+    let mut tokens_10m = 0.0f64;
+    let mut cost_10m = 0.0f64;
+    let mut priced = true;
+    let mut newest_ms: Option<i64> = None;
+    let mut model: Option<String> = None;
+    let mut root_cwd: Option<String> = None;
+    let mut latest_cwd: Option<String> = None;
+
+    for line in lines {
+        if !(line.contains("token_count")
+            || line.contains("turn_context")
+            || line.contains("session_meta")
+            || line.contains("task_started")
+            || line.contains("thread_settings_applied"))
+        {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+
+        // Every session_meta/turn_context cwd this tail happens to carry,
+        // in file order — independent of the token-delta state machine
+        // below, and never gated by the window: `area` reports where the
+        // session is scoped now, same as `st.model` tracks the current
+        // model regardless of which turn eventually prices against it.
+        if let Some(c) = v.pointer("/payload/cwd").and_then(Value::as_str).filter(|c| !c.is_empty()) {
+            root_cwd.get_or_insert_with(|| c.to_string());
+            latest_cwd = Some(c.to_string());
+        }
+
+        let Some((ts, turn_model, usage)) = codex_turn(&mut st, &v) else { continue };
+        let ms = ts.timestamp_millis();
+        if ms < cutoff {
+            continue;
+        }
+        if newest_ms.is_none_or(|n| ms >= n) {
+            newest_ms = Some(ms);
+            model = Some(turn_model.clone());
+        }
+        tokens_10m += usage.total;
+        match codex_turn_cost(&turn_model, &usage, st.fast_tier, ts) {
+            Some(cost) => cost_10m += cost,
+            None => priced = false,
+        }
+    }
+
+    let newest_ms = newest_ms?;
+    let area = match (&root_cwd, &latest_cwd) {
+        (Some(root), Some(latest)) => area_under(latest, root, true),
+        _ => None,
+    };
+    Some(LivePace {
+        session_id: session_id.to_string(),
+        tokens_10m: tokens_10m.round() as u64,
+        cost_10m,
+        priced,
+        idle_secs: now_ms.saturating_sub(newest_ms).max(0) as u64 / 1000,
+        model,
+        area,
+        tool: "Codex".to_string(),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Live pace: Gemini CLI
+//
+// No day-scan card exists for Gemini here (nothing in this module scans
+// its history), only this live ticker. Confirmed against a real 0.61.0
+// session on this Mac (2026-09-25 — `npm i -g @google/gemini-cli`, one
+// trivial non-interactive prompt, then a resumed second turn to check
+// whether usage was cumulative): `~/.gemini/tmp/<project>/.project_root`
+// is a plain text file holding the project's literal absolute path, and
+// `~/.gemini/tmp/<project>/chats/*.jsonl` holds, among `"$set"` patches
+// and plain "user" turns this never reads, one self-contained
+// `"type":"gemini"` line per model turn carrying its own `tokens`
+// (input/cached/output/thoughts/tool/total), `model` and `timestamp` — the
+// second turn's own numbers did not need the first subtracted out, so
+// (unlike Codex) no running-total delta state is kept here at all.
+// ---------------------------------------------------------------------------
+
+/// Where Gemini CLI keeps its per-project chat logs. No env override
+/// exists for this (unlike Codex's `CODEX_HOME`), matching how
+/// `inventory.rs` already resolves the same tool's config folder.
+fn gemini_tmp_root() -> PathBuf {
+    dirs::home_dir().unwrap_or_default().join(".gemini").join("tmp")
+}
+
+/// `live_session_in` for Gemini CLI. Gemini keys its tmp folder by
+/// project, not by session, so — unlike Claude's uuid-per-session files or
+/// Codex's session_meta — the newest fresh `chats/*.jsonl` under whichever
+/// project directory's `.project_root` names `cwd` is the one to read;
+/// nothing inside a chat log's own lines carries a folder at all.
+fn gemini_live_session_in(tmp_root: &Path, cwd: &str, now_ms: i64) -> Option<LivePace> {
+    let mut newest: Option<(PathBuf, SystemTime)> = None;
+    let entries = fs::read_dir(tmp_root).ok()?;
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Ok(root) = fs::read_to_string(dir.join(".project_root")) else { continue };
+        if root.trim() != cwd {
+            continue;
+        }
+        let Ok(chats) = fs::read_dir(dir.join("chats")) else { continue };
+        for chat in chats.flatten() {
+            let path = chat.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Ok(mtime) = chat.metadata().and_then(|m| m.modified()) else { continue };
+            if newest.as_ref().is_none_or(|(_, best)| mtime > *best) {
+                newest = Some((path, mtime));
+            }
+        }
+    }
+    let (path, mtime) = newest?;
+    let mtime_ms = mtime.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_millis() as i64;
+    if now_ms.saturating_sub(mtime_ms) > LIVE_FRESH_MS {
+        return None;
+    }
+    let session_id = path.file_stem().and_then(|s| s.to_str())?.to_string();
+    let lines = tail_lines(&path);
+    gemini_pace_from_lines(lines.iter().map(String::as_str), &session_id, now_ms)
+}
+
+/// One live Gemini CLI chat log's tail, already read. Each `"type":"gemini"`
+/// line's own `tokens` object is that turn's own usage (see the module
+/// note above), so — unlike `codex_pace_from_lines` — there is no delta or
+/// replay state to carry between lines here, only a running window sum,
+/// the same shape `pace_from_lines` uses for Claude Code.
+///
+/// `cached` is billed as a subset of `input`, never additional to it:
+/// Gemini's own `cachedContentTokenCount` is documented as counted within
+/// `promptTokenCount`, the same convention `codex_turn_cost` already
+/// applies to Codex's `cached_input_tokens`
+/// (ai.google.dev/gemini-api/docs/usage — this machine's one real sample
+/// had no cached tokens to confirm the split against directly).
+/// `thoughts` and `tool` tokens count toward the reported `tokens_10m`
+/// total (Gemini's own `total` already includes them) but never toward the
+/// priced output bucket — the same conservative call `codex_turn_cost`
+/// makes for a Codex reasoning token: real, but never a guessed dollar
+/// figure. No folder signal exists inside a line itself, so `area` is
+/// always `None` here; `gemini_live_session_in`'s own `.project_root`
+/// match is the only place Gemini pace learns a folder.
+fn gemini_pace_from_lines<'a>(lines: impl Iterator<Item = &'a str>, session_id: &str, now_ms: i64) -> Option<LivePace> {
+    let cutoff = now_ms - LIVE_WINDOW_MS;
+    let mut tokens_10m = 0.0f64;
+    let mut cost_10m = 0.0f64;
+    let mut priced = true;
+    let mut newest_ms: Option<i64> = None;
+    let mut model: Option<String> = None;
+
+    for line in lines {
+        if !line.contains("\"type\":\"gemini\"") || !line.contains("\"tokens\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if v.get("type").and_then(Value::as_str) != Some("gemini") {
+            continue;
+        }
+        let Some(tokens) = v.get("tokens") else { continue };
+        let Some(ts) = parse_ts(v.get("timestamp")) else { continue };
+        let ms = ts.timestamp_millis();
+        if ms < cutoff {
+            continue;
+        }
+
+        let num = |key: &str| tokens.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+        let input = num("input");
+        let cached = num("cached").min(input);
+        let output = num("output");
+        let thoughts = num("thoughts");
+        let tool = num("tool");
+        let reported_total = num("total");
+        let total = if reported_total > 0.0 { reported_total } else { input + cached + output + thoughts + tool };
+        if total <= 0.0 {
+            continue;
+        }
+        tokens_10m += total;
+
+        let turn_model = v.get("model").and_then(Value::as_str).unwrap_or("gemini").to_string();
+        if newest_ms.is_none_or(|n| ms >= n) {
+            newest_ms = Some(ms);
+            model = Some(turn_model.clone());
+        }
+
+        match probe_lookup(&turn_model) {
+            Some(price) => {
+                let u = pricing::Usage {
+                    input: input - cached,
+                    output,
+                    cache_read: cached,
+                    cache_write_5m: 0.0,
+                    cache_write_1h: 0.0,
+                };
+                cost_10m += cost_for(&turn_model, &price, &u, 200_000.0, ts);
+            }
+            None => priced = false,
+        }
+    }
+
+    let newest_ms = newest_ms?;
+    Some(LivePace {
+        session_id: session_id.to_string(),
+        tokens_10m: tokens_10m.round() as u64,
+        cost_10m,
+        priced,
+        idle_secs: now_ms.saturating_sub(newest_ms).max(0) as u64 / 1000,
+        model,
+        area: None,
+        tool: "Gemini CLI".to_string(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -6461,6 +6797,203 @@ mod tests {
             );
         }
         assert!(lines.iter().any(|l| l == &real_line), "the real, complete final line must survive the tail");
+    }
+
+    // ---- Live pace: Codex and Gemini CLI ----------------------------------
+
+    #[test]
+    fn live_session_for_cwd_dispatches_by_tool_and_rejects_unknown() {
+        let now = 1_790_000_000_000i64;
+        // A real AGENT_HOSTS tool with no live-pace arm at all: dispatch
+        // must fall through to None rather than guessing at a format
+        // nobody has taught this function.
+        assert_eq!(live_session_for_cwd("Aider", "/w", now), None);
+        // Every wired-up tool still resolves cleanly (no panic, just
+        // "nothing found") against a folder nothing on this machine could
+        // possibly have a session for.
+        let bogus = "/definitely/not/a/real/project-xyz-never-exists";
+        assert_eq!(live_session_for_cwd("Claude Code", bogus, now), None);
+        assert_eq!(live_session_for_cwd("Codex", bogus, now), None);
+        assert_eq!(live_session_for_cwd("Gemini CLI", bogus, now), None);
+    }
+
+    #[test]
+    fn codex_pace_counts_token_deltas_inside_the_window() {
+        let now = 1_790_000_000_000i64;
+        let at = |offset_ms: i64| chrono::DateTime::from_timestamp_millis(now - offset_ms).unwrap().to_rfc3339();
+        let lines = [
+            json!({"timestamp": at(20 * 60_000), "type": "turn_context",
+                   "payload": {"model": "gpt-5.6-terra"}})
+            .to_string(),
+            // Outside the window: seeds the delta baseline, never itself counted.
+            token_count_line(&at(LIVE_WINDOW_MS + 60_000), None, (5_000.0, 500.0)),
+            // Inside the window: two more turns, each a fresh delta off the running total.
+            token_count_line(&at(5 * 60_000), None, (6_000.0, 600.0)),
+            token_count_line(&at(60_000), None, (8_000.0, 800.0)),
+        ];
+        let pace = codex_pace_from_lines(lines.iter().map(String::as_str), "sess", now)
+            .expect("two turns fall inside the window");
+        // (6000-5000)+(600-500) then (8000-6000)+(800-600): the pre-window
+        // snapshot's own 5500-token total must never appear.
+        assert_eq!(pace.tokens_10m, 1_100 + 2_200);
+        assert!(pace.priced);
+        assert_eq!(pace.model.as_deref(), Some("gpt-5.6-terra"));
+        assert_eq!(pace.tool, "Codex");
+        assert_eq!(pace.session_id, "sess");
+
+        let ts1 = chrono::DateTime::from_timestamp_millis(now - 5 * 60_000).unwrap();
+        let ts2 = chrono::DateTime::from_timestamp_millis(now - 60_000).unwrap();
+        let usage1 = CodexRaw { input: 1_000.0, cached: 0.0, output: 100.0, reasoning: 0.0, total: 1_100.0 };
+        let usage2 = CodexRaw { input: 2_000.0, cached: 0.0, output: 200.0, reasoning: 0.0, total: 2_200.0 };
+        let expect_cost = codex_turn_cost("gpt-5.6-terra", &usage1, false, ts1).unwrap()
+            + codex_turn_cost("gpt-5.6-terra", &usage2, false, ts2).unwrap();
+        assert!((pace.cost_10m - expect_cost).abs() < 1e-9, "got {}, want {expect_cost}", pace.cost_10m);
+    }
+
+    #[test]
+    fn codex_live_session_matches_on_session_meta_cwd() {
+        let home = std::env::temp_dir().join(format!("pane-codex-live-cwd-{}", std::process::id()));
+        let sessions = home.join("sessions");
+        let _ = fs::create_dir_all(&sessions);
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        let recent = chrono::DateTime::from_timestamp_millis(now - 60_000).unwrap().to_rfc3339();
+
+        let rollout = |cwd: &str, total: (f64, f64)| {
+            format!(
+                "{}\n{}\n{}\n",
+                json!({"timestamp": &recent, "type": "session_meta", "payload": {"cwd": cwd}}),
+                json!({"timestamp": &recent, "type": "turn_context", "payload": {"model": "gpt-5.6-terra"}}),
+                token_count_line(&recent, None, total),
+            )
+        };
+        // A fresh rollout for a DIFFERENT folder must never win just for
+        // being newest.
+        fs::write(sessions.join("other.jsonl"), rollout("/w/other", (100.0, 10.0))).unwrap();
+        fs::write(sessions.join("mine.jsonl"), rollout("/w/acme", (1_000.0, 100.0))).unwrap();
+
+        let got = codex_live_session_in(&home, "/w/acme", now);
+        let _ = fs::remove_dir_all(&home);
+        let pace = got.expect("the rollout naming /w/acme must be found even though 'other' is also fresh");
+        assert_eq!(pace.tool, "Codex");
+        assert_eq!(pace.session_id, "mine");
+        assert_eq!(pace.tokens_10m, 1_100);
+    }
+
+    #[test]
+    fn codex_live_session_ignores_a_stale_rollout() {
+        let home = std::env::temp_dir().join(format!("pane-codex-live-stale-{}", std::process::id()));
+        let sessions = home.join("sessions");
+        let _ = fs::create_dir_all(&sessions);
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        let recent = chrono::DateTime::from_timestamp_millis(now - 60_000).unwrap().to_rfc3339();
+        let body = format!(
+            "{}\n{}\n",
+            json!({"timestamp": &recent, "type": "session_meta", "payload": {"cwd": "/w/acme"}}),
+            token_count_line(&recent, None, (1_000.0, 100.0)),
+        );
+        fs::write(sessions.join("mine.jsonl"), body).unwrap();
+        // The file's own mtime is "now" (just written); asking as of a
+        // point 6 minutes later makes it stale by the same 5-minute gate
+        // `live_pace_ignores_a_stale_file` uses for Claude Code.
+        let got = codex_live_session_in(&home, "/w/acme", now + 6 * 60_000);
+        let _ = fs::remove_dir_all(&home);
+        assert!(got.is_none(), "a rollout untouched for 6 minutes must not report a live pace");
+    }
+
+    #[test]
+    fn codex_pace_derives_area_from_a_later_turn_context_cwd() {
+        let now = 1_790_000_000_000i64;
+        let at = |offset_ms: i64| chrono::DateTime::from_timestamp_millis(now - offset_ms).unwrap().to_rfc3339();
+        let lines = [
+            json!({"timestamp": at(20 * 60_000), "type": "session_meta", "payload": {"cwd": "/w/acme"}}).to_string(),
+            json!({"timestamp": at(9 * 60_000), "type": "turn_context",
+                   "payload": {"model": "gpt-5.6-terra", "cwd": "/w/acme/sub"}})
+            .to_string(),
+            token_count_line(&at(60_000), None, (1_000.0, 100.0)),
+        ];
+        let pace =
+            codex_pace_from_lines(lines.iter().map(String::as_str), "sess", now).expect("one turn falls inside the window");
+        assert_eq!(pace.area.as_deref(), Some("sub"), "a later turn_context cwd relative to session_meta's own is the area");
+    }
+
+    /// One `"type":"gemini"` chat line shaped like the real 0.61.0 log this
+    /// was verified against.
+    fn gemini_line(ts: &str, input: f64, cached: f64, output: f64, thoughts: f64, tool: f64) -> String {
+        json!({"id": "x", "timestamp": ts, "type": "gemini", "content": "ok", "thoughts": [],
+               "tokens": {"input": input, "cached": cached, "output": output, "thoughts": thoughts,
+                          "tool": tool, "total": input + cached + output + thoughts + tool},
+               "model": "gemini-3.8-flash"})
+        .to_string()
+    }
+
+    #[test]
+    fn gemini_pace_sums_tokens_and_prices_the_newest_in_window_model() {
+        let now = 1_790_000_000_000i64;
+        let at = |offset_ms: i64| chrono::DateTime::from_timestamp_millis(now - offset_ms).unwrap().to_rfc3339();
+        let lines = [
+            gemini_line(&at(LIVE_WINDOW_MS + 60_000), 6_000.0, 0.0, 500.0, 100.0, 0.0), // outside the window
+            gemini_line(&at(5 * 60_000), 100.0, 0.0, 10.0, 5.0, 0.0),
+            gemini_line(&at(60_000), 200.0, 20.0, 50.0, 10.0, 5.0),
+        ];
+        let pace = gemini_pace_from_lines(lines.iter().map(String::as_str), "sess", now)
+            .expect("two turns fall inside the window");
+        assert_eq!(pace.tokens_10m, 400, "115 (turn 1) + 285 (turn 2); the pre-window turn's 6,600 must never appear");
+        assert!(pace.priced, "gemini-3.8-flash is a baked price entry");
+        assert_eq!(pace.model.as_deref(), Some("gemini-3.8-flash"));
+        assert_eq!(pace.tool, "Gemini CLI");
+        assert_eq!(pace.area, None, "no folder signal exists inside a chat log's own lines");
+
+        let price = probe_lookup("gemini-3.8-flash").expect("baked in pricing.rs::builtin_price");
+        let ts1 = chrono::DateTime::from_timestamp_millis(now - 5 * 60_000).unwrap();
+        let ts2 = chrono::DateTime::from_timestamp_millis(now - 60_000).unwrap();
+        let u1 = pricing::Usage { input: 100.0, output: 10.0, cache_read: 0.0, cache_write_5m: 0.0, cache_write_1h: 0.0 };
+        // cached(20) is billed as a subset of input(200): u.input = 180.
+        let u2 = pricing::Usage { input: 180.0, output: 50.0, cache_read: 20.0, cache_write_5m: 0.0, cache_write_1h: 0.0 };
+        let expect_cost =
+            cost_for("gemini-3.8-flash", &price, &u1, 200_000.0, ts1) + cost_for("gemini-3.8-flash", &price, &u2, 200_000.0, ts2);
+        assert!((pace.cost_10m - expect_cost).abs() < 1e-9, "got {}, want {expect_cost}", pace.cost_10m);
+    }
+
+    #[test]
+    fn gemini_live_session_matches_on_project_root() {
+        let root = std::env::temp_dir().join(format!("pane-gemini-live-{}", std::process::id()));
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        let recent = chrono::DateTime::from_timestamp_millis(now - 60_000).unwrap().to_rfc3339();
+
+        let make_project = |name: &str, project_root: &str, total: f64| {
+            let dir = root.join(name);
+            let chats = dir.join("chats");
+            fs::create_dir_all(&chats).unwrap();
+            fs::write(dir.join(".project_root"), project_root).unwrap();
+            let line = gemini_line(&recent, total, 0.0, 0.0, 0.0, 0.0);
+            fs::write(chats.join("session-a.jsonl"), format!("{line}\n")).unwrap();
+        };
+        // A fresh project for a DIFFERENT folder must never win just for
+        // being newest.
+        make_project("other", "/w/other", 10.0);
+        make_project("mine", "/w/acme", 500.0);
+
+        let got = gemini_live_session_in(&root, "/w/acme", now);
+        let _ = fs::remove_dir_all(&root);
+        let pace = got.expect("the project naming /w/acme must be found even though 'other' is also fresh");
+        assert_eq!(pace.tool, "Gemini CLI");
+        assert_eq!(pace.tokens_10m, 500);
+    }
+
+    #[test]
+    fn gemini_live_session_ignores_a_stale_project() {
+        let root = std::env::temp_dir().join(format!("pane-gemini-live-stale-{}", std::process::id()));
+        let dir = root.join("mine");
+        let chats = dir.join("chats");
+        fs::create_dir_all(&chats).unwrap();
+        fs::write(dir.join(".project_root"), "/w/acme").unwrap();
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        let recent = chrono::DateTime::from_timestamp_millis(now - 60_000).unwrap().to_rfc3339();
+        let line = gemini_line(&recent, 10.0, 0.0, 0.0, 0.0, 0.0);
+        fs::write(chats.join("session-a.jsonl"), format!("{line}\n")).unwrap();
+        let got = gemini_live_session_in(&root, "/w/acme", now + 6 * 60_000);
+        let _ = fs::remove_dir_all(&root);
+        assert!(got.is_none(), "a chat log untouched for 6 minutes must not report a live pace");
     }
 
     #[test]
