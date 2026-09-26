@@ -41,10 +41,11 @@ let firstRun = false;
 /** Which tab fixes a check, when one does. */
 const WHERE: Record<string, "inventory" | "ledger" | "usage"> = {
   "mcp-unpinned": "inventory", "mcp-env-secrets": "inventory", "mcp-remote": "inventory",
-  "perm-none": "inventory", "perm-deny": "inventory", "hooks-none": "inventory", "agents-none": "inventory",
-  "agent-tools": "inventory", "deny-shell": "inventory", "agent-model": "inventory",
+  "perm-none": "inventory", "perm-deny": "inventory", "perm-deny-only": "inventory", "hooks-none": "inventory",
+  "agents-none": "inventory", "agent-tools": "inventory", "deny-shell": "inventory", "agent-model": "inventory",
   ledger: "ledger", "ledger-idle": "ledger", "ledger-dates": "ledger",
   clients: "usage", "areas-unsorted": "usage", "mix-top-heavy": "usage", "session-long-lived": "usage",
+  "cache-read-share": "usage", "subagent-share": "usage",
 };
 
 function esc(s: string): string {

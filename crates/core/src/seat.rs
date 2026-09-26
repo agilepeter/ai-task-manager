@@ -340,7 +340,7 @@ mod tests {
     ];
 
     fn w(cost: f64) -> Window {
-        Window { cost, tokens: 0.0, models: vec![ModelSpend { model: "claude-opus-5".into(), cost, tokens: 0.0 }] }
+        Window { cost, tokens: 0.0, cache_read: 0.0, models: vec![ModelSpend { model: "claude-opus-5".into(), cost, tokens: 0.0 }] }
     }
 
     fn inputs() -> (Inventory, Vec<ProviderSpend>) {

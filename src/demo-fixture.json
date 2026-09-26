@@ -118,7 +118,7 @@
   ],
   "permissions": {
    "defaultMode": null,
-   "allow": 2,
+   "allow": 0,
    "ask": 0,
    "deny": 3,
    "denyCoversShell": false
@@ -206,6 +206,25 @@
     "learnUrl": "https://staas.fund/mcp/"
    },
    {
+    "id": "perm-deny-only",
+    "kind": "learn",
+    "title": "3 deny rules, no allow rules",
+    "detail": "You have a safety floor but approve routine commands by hand. Allow-listing the read-only commands you approve every day removes most prompts without widening risk.",
+    "titleMsg": {
+     "key": "finding.perm-deny-only.title",
+     "vars": {
+      "count": "3"
+     },
+     "count": null
+    },
+    "detailMsg": {
+     "key": "finding.perm-deny-only.detail",
+     "vars": {},
+     "count": null
+    },
+    "learnUrl": "https://staas.fund/classroom/"
+   },
+   {
     "id": "agents-model-unset",
     "kind": "learn",
     "title": "1 agent inherits the session model",
@@ -248,6 +267,7 @@
    "today": {
     "cost": 0.3416,
     "tokens": 52343.0,
+    "cache_read": 48693.0,
     "models": [
      {
       "model": "claude-haiku-4-5-20251001",
@@ -259,6 +279,7 @@
    "yesterday": {
     "cost": 69.7025,
     "tokens": 6687100.0,
+    "cache_read": 6315024.0,
     "models": [
      {
       "model": "claude-opus-5",
@@ -278,13 +299,14 @@
     ]
    },
    "last30": {
-    "cost": 1582.5106,
-    "tokens": 160156235.0,
+    "cost": 1793.655,
+    "tokens": 161838352.0,
+    "cache_read": 152332769.0,
     "models": [
      {
       "model": "claude-opus-5",
-      "cost": 1269.8495,
-      "tokens": 84370645.0
+      "cost": 1480.9939,
+      "tokens": 86052762.0
      },
      {
       "model": "claude-sonnet-5",
@@ -326,7 +348,7 @@
     11677944.0,
     7788237.0,
     2848750.0,
-    7360788.0,
+    9042905.0,
     6687100.0,
     52343.0
    ],
@@ -360,7 +382,7 @@
     122.5065,
     72.6604,
     27.6527,
-    79.1978,
+    290.3422,
     69.7025,
     0.3416
    ],
@@ -370,34 +392,98 @@
      "today": {
       "cost": 0.3416,
       "tokens": 52343.0,
+      "cache_read": 0.0,
       "models": []
      },
      "yesterday": {
       "cost": 69.7025,
       "tokens": 6687100.0,
+      "cache_read": 0.0,
       "models": []
      },
      "last30": {
-      "cost": 1582.5106,
-      "tokens": 160156235.0,
+      "cost": 1793.655,
+      "tokens": 161838352.0,
+      "cache_read": 0.0,
       "models": []
      },
      "areas": [
+      {
+       "area": "northwind-api",
+       "today": {
+        "cost": 0.1702,
+        "tokens": 11703.0,
+        "cache_read": 0.0,
+        "models": []
+       },
+       "yesterday": {
+        "cost": 6.2566,
+        "tokens": 1027230.0,
+        "cache_read": 0.0,
+        "models": []
+       },
+       "last30": {
+        "cost": 688.1448,
+        "tokens": 54711720.0,
+        "cache_read": 0.0,
+        "models": []
+       },
+       "daily_cost": [
+        20.6079,
+        1.2093,
+        0.0,
+        0.0,
+        7.7262,
+        56.2872,
+        6.7885,
+        42.4247,
+        5.7487,
+        0.0,
+        0.0,
+        30.6683,
+        9.7497,
+        13.6561,
+        15.537,
+        55.2266,
+        4.7039,
+        5.0634,
+        7.9921,
+        7.3562,
+        28.9242,
+        20.3864,
+        17.7717,
+        19.8445,
+        11.2238,
+        45.498,
+        5.3334,
+        241.9902,
+        6.2566,
+        0.1702
+       ],
+       "week": {
+        "thisWeek": 330.3167,
+        "lastWeek": 92.1979,
+        "changePercent": 258.269223
+       }
+      },
       {
        "area": "acme-portal/web",
        "today": {
         "cost": 0.0,
         "tokens": 0.0,
+        "cache_read": 0.0,
         "models": []
        },
        "yesterday": {
         "cost": 13.551,
         "tokens": 1223349.0,
+        "cache_read": 0.0,
         "models": []
        },
        "last30": {
         "cost": 537.7619,
         "tokens": 53435958.0,
+        "cache_read": 0.0,
         "models": []
        },
        "daily_cost": [
@@ -439,75 +525,23 @@
        }
       },
       {
-       "area": "northwind-api",
-       "today": {
-        "cost": 0.1702,
-        "tokens": 11703.0,
-        "models": []
-       },
-       "yesterday": {
-        "cost": 6.2566,
-        "tokens": 1027230.0,
-        "models": []
-       },
-       "last30": {
-        "cost": 480.7542,
-        "tokens": 53054434.0,
-        "models": []
-       },
-       "daily_cost": [
-        20.6079,
-        1.2093,
-        0.0,
-        0.0,
-        7.7262,
-        56.2872,
-        6.7885,
-        42.4247,
-        5.7487,
-        0.0,
-        0.0,
-        30.6683,
-        9.7497,
-        13.6561,
-        15.537,
-        55.2266,
-        4.7039,
-        5.0634,
-        7.9921,
-        7.3562,
-        28.9242,
-        20.3864,
-        17.7717,
-        19.8445,
-        11.2238,
-        45.498,
-        5.3334,
-        34.5996,
-        6.2566,
-        0.1702
-       ],
-       "week": {
-        "thisWeek": 122.9261,
-        "lastWeek": 92.1979,
-        "changePercent": 33.328525
-       }
-      },
-      {
        "area": "acme-portal/api",
        "today": {
         "cost": 0.0,
         "tokens": 0.0,
+        "cache_read": 0.0,
         "models": []
        },
        "yesterday": {
         "cost": 18.2882,
         "tokens": 1963633.0,
+        "cache_read": 0.0,
         "models": []
        },
        "last30": {
         "cost": 216.3204,
         "tokens": 20325353.0,
+        "cache_read": 0.0,
         "models": []
        },
        "daily_cost": [
@@ -553,16 +587,19 @@
        "today": {
         "cost": 0.0,
         "tokens": 0.0,
+        "cache_read": 0.0,
         "models": []
        },
        "yesterday": {
         "cost": 0.0,
         "tokens": 0.0,
+        "cache_read": 0.0,
         "models": []
        },
        "last30": {
         "cost": 163.4634,
         "tokens": 16753755.0,
+        "cache_read": 0.0,
         "models": []
        },
        "daily_cost": [
@@ -608,16 +645,19 @@
        "today": {
         "cost": 0.1714,
         "tokens": 40640.0,
+        "cache_read": 0.0,
         "models": []
        },
        "yesterday": {
         "cost": 31.6067,
         "tokens": 2472888.0,
+        "cache_read": 0.0,
         "models": []
        },
        "last30": {
-        "cost": 156.0862,
-        "tokens": 13852429.0,
+        "cost": 159.84,
+        "tokens": 13877260.0,
+        "cache_read": 0.0,
         "models": []
        },
        "daily_cost": [
@@ -648,14 +688,14 @@
         2.79,
         4.2379,
         0.3265,
-        3.4754,
+        7.2292,
         31.6067,
         0.1714
        ],
        "week": {
-        "thisWeek": 50.7681,
+        "thisWeek": 54.5219,
         "lastWeek": 15.5781,
-        "changePercent": 225.894044
+        "changePercent": 249.990692
        }
       },
       {
@@ -663,16 +703,19 @@
        "today": {
         "cost": 0.0,
         "tokens": 0.0,
+        "cache_read": 0.0,
         "models": []
        },
        "yesterday": {
         "cost": 0.0,
         "tokens": 0.0,
+        "cache_read": 0.0,
         "models": []
        },
        "last30": {
         "cost": 28.1245,
         "tokens": 2734306.0,
+        "cache_read": 0.0,
         "models": []
        },
        "daily_cost": [
@@ -717,14 +760,37 @@
     }
    ],
    "week": {
-    "thisWeek": 458.2767,
+    "thisWeek": 669.4211,
     "lastWeek": 259.3926,
-    "changePercent": 76.673005
+    "changePercent": 158.072551
    }
   }
  ],
  "sessions": {
   "area": [
+   {
+    "areas": [
+     [
+      "northwind-api",
+      1.3027
+     ],
+     [
+      "(unsorted)",
+      0.3272
+     ]
+    ],
+    "bytes": 2271,
+    "cost": 215.8769,
+    "dayCost": null,
+    "endedMs": 1790155240794,
+    "id": "36f65e46-c64a-4dc8-bec1-826123ff42c9",
+    "project": "/Users/dana/work",
+    "startedMs": 1790154242240,
+    "subagentCost": 214.247,
+    "subagentRuns": 5,
+    "tokens": 2183989.0,
+    "topModel": "claude-sonnet-5"
+   },
    {
     "areas": [
      [
@@ -1841,36 +1907,32 @@
     "subagentRuns": 0,
     "tokens": 1129802.0,
     "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "acme-portal/web",
-      7.223
-     ],
-     [
-      "northwind-api",
-      3.6987
-     ],
-     [
-      "(unsorted)",
-      2.156
-     ]
-    ],
-    "bytes": 6419,
-    "cost": 13.0777,
-    "dayCost": null,
-    "endedMs": 1789680749794,
-    "id": "0bfaf63c-e44e-4155-8cd9-fc5755767120",
-    "project": "/Users/dana/work",
-    "startedMs": 1789677685194,
-    "subagentCost": 0.0,
-    "subagentRuns": 0,
-    "tokens": 1319968.0,
-    "topModel": "claude-opus-5"
    }
   ],
   "day": [
+   {
+    "areas": [
+     [
+      "northwind-api",
+      1.3027
+     ],
+     [
+      "(unsorted)",
+      0.3272
+     ]
+    ],
+    "bytes": 2271,
+    "cost": 215.8769,
+    "dayCost": null,
+    "endedMs": 1790155240794,
+    "id": "36f65e46-c64a-4dc8-bec1-826123ff42c9",
+    "project": "/Users/dana/work",
+    "startedMs": 1790154242240,
+    "subagentCost": 214.247,
+    "subagentRuns": 5,
+    "tokens": 2183989.0,
+    "topModel": "claude-sonnet-5"
+   },
    {
     "areas": [
      [
@@ -2959,37 +3021,6 @@
     "subagentRuns": 0,
     "tokens": 1838767.0,
     "topModel": "claude-opus-5"
-   },
-   {
-    "areas": [
-     [
-      "northwind-api",
-      7.7262
-     ],
-     [
-      "acme-portal/api",
-      6.5464
-     ],
-     [
-      "acme-portal/web",
-      5.2096
-     ],
-     [
-      "(unsorted)",
-      0.4648
-     ]
-    ],
-    "bytes": 7776,
-    "cost": 19.947,
-    "dayCost": null,
-    "endedMs": 1788216565303,
-    "id": "f4ec7bd3-318b-434c-8dc1-c3501f7835c5",
-    "project": "/Users/dana/work",
-    "startedMs": 1788211172270,
-    "subagentCost": 0.0,
-    "subagentRuns": 0,
-    "tokens": 1417882.0,
-    "topModel": "claude-opus-5"
    }
   ]
  },
@@ -3123,7 +3154,7 @@
       "id": "perm-rules",
       "status": "pass",
       "title": "Permission rules are set",
-      "detail": "2 allow, 0 ask, 3 deny.",
+      "detail": "0 allow, 0 ask, 3 deny.",
       "titleMsg": {
        "key": "check.perm-rules.pass.title",
        "vars": {},
@@ -3132,7 +3163,7 @@
       "detailMsg": {
        "key": "check.perm-rules.pass.detail",
        "vars": {
-        "allow": "2",
+        "allow": "0",
         "ask": "0",
         "deny": "3"
        },
@@ -3151,6 +3182,24 @@
       },
       "detailMsg": {
        "key": "check.perm-deny.pass.detail",
+       "vars": {},
+       "count": null
+      }
+     },
+     {
+      "id": "perm-deny-only",
+      "status": "consider",
+      "title": "3 deny rules, nothing on the allow list",
+      "detail": "Every routine command still prompts for approval by hand. Allow-listing the ones approved every day removes most of that without widening risk.",
+      "titleMsg": {
+       "key": "check.perm-deny-only.consider.title",
+       "vars": {
+        "count": "3"
+       },
+       "count": null
+      },
+      "detailMsg": {
+       "key": "check.perm-deny-only.consider.detail",
        "vars": {},
        "count": null
       }
@@ -3264,20 +3313,20 @@
      {
       "id": "mix-top-heavy",
       "status": "consider",
-      "title": "81% of spend is on the largest models",
-      "detail": "$1270 of $1573 in 30 days went to the top tier. Searching files, reading logs and summarising do as well a tier down; giving those jobs to subagents on a lighter model is the usual way to cut this without touching the hard work.",
+      "title": "83% of spend is on the largest models",
+      "detail": "$1481 of $1785 in 30 days went to the top tier. Searching files, reading logs and summarising do as well a tier down; giving those jobs to subagents on a lighter model is the usual way to cut this without touching the hard work.",
       "titleMsg": {
        "key": "finding.mix-top-heavy.title",
        "vars": {
-        "pct": "81"
+        "pct": "83"
        },
        "count": null
       },
       "detailMsg": {
        "key": "finding.mix-top-heavy.detail",
        "vars": {
-        "known": "$1573",
-        "top": "$1270"
+        "known": "$1785",
+        "top": "$1481"
        },
        "count": null
       }
@@ -3315,6 +3364,45 @@
       "detailMsg": {
        "key": "check.areas-unsorted.pass.detail",
        "vars": {},
+       "count": null
+      }
+     },
+     {
+      "id": "cache-read-share",
+      "status": "consider",
+      "title": "94% of your tokens were context re-reads",
+      "detail": "A re-read is the conversation so far being sent again so the model can answer the next turn. It is cheaper than fresh input, but a one-hour cache write bills at twice the catalogue rate, which is why the spend here is a floor rather than an invoice.",
+      "titleMsg": {
+       "key": "finding.cache-read-share.title",
+       "vars": {
+        "percent": "94"
+       },
+       "count": null
+      },
+      "detailMsg": {
+       "key": "finding.cache-read-share.detail",
+       "vars": {},
+       "count": null
+      }
+     },
+     {
+      "id": "subagent-share",
+      "status": "consider",
+      "title": "Subagents cost $214, 12% of the last 30 days",
+      "detail": "Most of it went to general-purpose. A subagent's spend counts toward the session that started it, so this is already inside the totals above.",
+      "titleMsg": {
+       "key": "finding.subagent-share.title",
+       "vars": {
+        "cost": "$214",
+        "percent": "12"
+       },
+       "count": null
+      },
+      "detailMsg": {
+       "key": "finding.subagent-share.detail",
+       "vars": {
+        "agent": "general-purpose"
+       },
        "count": null
       }
      },
@@ -3378,6 +3466,24 @@
  },
  "agentSpend": [
   {
+   "name": "general-purpose",
+   "runs": 2,
+   "cost": 211.7078,
+   "tokens": 1742825,
+   "lastUsedMs": 1790166414494,
+   "topModel": "claude-opus-5",
+   "byClient": [
+    [
+     "Northwind",
+     207.6785
+    ],
+    [
+     "Unassigned",
+     4.0293
+    ]
+   ]
+  },
+  {
    "name": "deploy-checker",
    "runs": 2,
    "cost": 1.6929,
@@ -3414,24 +3520,6 @@
     [
      "Unassigned",
      0.1299
-    ]
-   ]
-  },
-  {
-   "name": "general-purpose",
-   "runs": 1,
-   "cost": 0.5634,
-   "tokens": 60708,
-   "lastUsedMs": 1790155454502,
-   "topModel": "claude-sonnet-5",
-   "byClient": [
-    [
-     "Northwind",
-     0.2879
-    ],
-    [
-     "Unassigned",
-     0.2755
     ]
    ]
   }

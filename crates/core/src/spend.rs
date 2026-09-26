@@ -77,6 +77,10 @@ pub struct ModelSpend {
 pub struct Window {
     pub cost: f64,
     pub tokens: f64,
+    /// Claude-only: cache-read tokens inside this window (see
+    /// `FileData::cache_read_days`). Always zero for every other provider,
+    /// and for a `ProjectSpend`/`AreaSpend` window, which never populates it.
+    pub cache_read: f64,
     pub models: Vec<ModelSpend>,
 }
 
@@ -223,6 +227,13 @@ struct FileData {
     /// lines have named one yet; `agent_spend` is what turns the latter
     /// into an empty, unattributed display name, never this field directly.
     agent: Option<String>,
+    /// Claude Code only: cache-read tokens per day, straight from
+    /// `claude_line`'s own `ClaudeTokens.cache_read` -- day only, no model
+    /// split, because the cache-read-share finding only ever asks "how much
+    /// of the window", never "which model". Every other provider's line
+    /// parser never touches this, so it stays empty for every card but
+    /// Claude's.
+    cache_read_days: HashMap<i32, f64>,
 }
 
 impl FileData {
@@ -413,8 +424,13 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 /// directly under `subagents/`. Without this bump, a cache an older build
 /// already wrote would go on treating every one of those as its own
 /// phantom session forever, since `cache_unchanged` never re-parses a file
-/// whose mtime and size have not moved.
-const PERSIST_VERSION: u32 = 10;
+/// whose mtime and size have not moved. 11: entries now also carry
+/// `FileData::cache_read_days`, Claude's cache-read tokens per day, which
+/// the cache-read-share usage finding needs for a real 30-day figure. A
+/// cache written under 10 has none of that data; without the bump it would
+/// go on trusting that cache forever (`cache_unchanged` only looks at mtime
+/// and size) instead of taking the one rescan that back-fills it.
+const PERSIST_VERSION: u32 = 11;
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -440,6 +456,11 @@ struct PersistEntry {
     /// which the PERSIST_VERSION bump discards anyway.
     #[serde(default)]
     areas: Vec<(i32, String, f64, f64)>,
+    /// `FileData::cache_read_days`: day only, no model column (unlike
+    /// `days`/`areas` above). Absent in caches written before
+    /// PERSIST_VERSION 11, which that bump discards anyway.
+    #[serde(default)]
+    cache_read_days: Vec<(i32, f64)>,
     unpriced: Vec<(String, u64)>,
     /// Pricing questions this file's parse asked (see `PriceProbe`).
     /// Older caches without the field deserialize as empty — safe, because
@@ -529,6 +550,9 @@ fn load_persisted_cache_from(path: &Path) {
         for (day, area, cost, tokens) in e.areas {
             data.areas.insert((day, area), (cost, tokens));
         }
+        for (day, cache_read) in e.cache_read_days {
+            data.cache_read_days.insert(day, cache_read);
+        }
         data.unpriced = e.unpriced.into_iter().collect();
         data.parent_session = e.parent_session;
         data.agent = e.agent;
@@ -593,6 +617,7 @@ fn save_persisted_cache() {
                     .iter()
                     .map(|((day, area), (cost, tokens))| (*day, area.clone(), *cost, *tokens))
                     .collect(),
+                cache_read_days: e.data.cache_read_days.iter().map(|(day, cache_read)| (*day, *cache_read)).collect(),
                 unpriced: e.data.unpriced.iter().map(|(m, c)| (m.clone(), *c)).collect(),
                 probes: e.probes.clone(),
                 prefix_head: e.prefix_head.clone(),
@@ -630,6 +655,17 @@ fn add_event(data: &mut FileData, ts: DateTime<Utc>, model: &str, cost: f64, tok
     entry.1 += tokens;
 }
 
+/// `claude_line`'s own top-up alongside `add_event`: the same event's
+/// cache-read tokens, folded into the plain per-day total in
+/// `FileData::cache_read_days` rather than threaded through `add_event`
+/// itself, so every other provider's parser (24 call sites, none of them
+/// Claude) stays untouched.
+fn add_cache_read(data: &mut FileData, ts: DateTime<Utc>, cache_read: f64) {
+    if cache_read > 0.0 {
+        *data.cache_read_days.entry(day_of_utc(ts)).or_insert(0.0) += cache_read;
+    }
+}
+
 /// Tally an event no catalog can price: its tokens still count (they're
 /// measured, not guessed) at zero cost, so only the dollars under-report.
 fn note_unpriced(data: &mut FileData, ts: DateTime<Utc>, model: &str, tokens: f64) {
@@ -657,6 +693,9 @@ fn merge_data(target: &mut FileData, source: FileData) {
     }
     for (model, count) in source.unpriced {
         *target.unpriced.entry(model).or_insert(0) += count;
+    }
+    for (day, cache_read) in source.cache_read_days {
+        *target.cache_read_days.entry(day).or_insert(0.0) += cache_read;
     }
     target.models.extend(source.models);
 }
@@ -693,6 +732,7 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
     unpriced_models.sort();
     unpriced_models.truncate(5);
     let days = data.days;
+    let cache_read_days = data.cache_read_days;
     let mut sp = ProviderSpend {
         week: None,
         id: id.into(),
@@ -737,6 +777,20 @@ fn build_spend(id: impl Into<String>, name: impl Into<String>, data: FileData) -
     sp.today.models = finalize_models(m0, sp.today.cost);
     sp.yesterday.models = finalize_models(m1, sp.yesterday.cost);
     sp.last30.models = finalize_models(m2, sp.last30.cost);
+
+    // Same day-window arithmetic as the loop above, kept separate because
+    // this map is day-only (no model key) -- see `FileData::cache_read_days`.
+    for (day, cache_read) in cache_read_days {
+        if day == today {
+            sp.today.cache_read += cache_read;
+        }
+        if day == today - 1 {
+            sp.yesterday.cache_read += cache_read;
+        }
+        if day > today - TREND_DAYS as i32 {
+            sp.last30.cache_read += cache_read;
+        }
+    }
     sp
 }
 
@@ -1846,6 +1900,7 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
             if t.total() > 0.0 || c > 0.0 {
                 add_event(data, ts, name, c, t.total());
                 add_area(st, data, ts, name, c, t.total());
+                add_cache_read(data, ts, t.cache_read);
             }
         }
         None if synthetic => {}
@@ -1854,11 +1909,13 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
                 if t.total() > 0.0 || c > 0.0 {
                     add_event(data, ts, &model, c, t.total());
                     add_area(st, data, ts, &model, c, t.total());
+                    add_cache_read(data, ts, t.cache_read);
                 }
             }
             None => {
                 if t.total() > 0.0 {
                     note_unpriced(data, ts, &model, t.total());
+                    add_cache_read(data, ts, t.cache_read);
                 }
             }
         },
@@ -1888,8 +1945,12 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
             Some(c) => {
                 add_event(data, ts, advisor, c, at.total());
                 add_area(st, data, ts, advisor, c, at.total());
+                add_cache_read(data, ts, at.cache_read);
             }
-            None => note_unpriced(data, ts, advisor, at.total()),
+            None => {
+                note_unpriced(data, ts, advisor, at.total());
+                add_cache_read(data, ts, at.cache_read);
+            }
         }
     }
 }
@@ -4828,6 +4889,7 @@ mod tests {
                 size: 4096,
                 days: vec![(739_000, "claude-fable-5".into(), 1.25, 40_000.0)],
                 areas: vec![(739_000, "acme".into(), 1.25, 40_000.0)],
+                cache_read_days: vec![(739_000, 12_345.0)],
                 unpriced: vec![("mystery-model".into(), 3)],
                 probes: vec![
                     PriceProbe::Lookup {
@@ -4865,6 +4927,7 @@ mod tests {
         assert_eq!((a.mtime_secs, a.mtime_nanos, a.size), (b.mtime_secs, b.mtime_nanos, b.size));
         assert_eq!(a.days, b.days);
         assert_eq!(a.areas, b.areas);
+        assert_eq!(a.cache_read_days, b.cache_read_days);
         assert_eq!(a.unpriced, b.unpriced);
         assert_eq!(a.probes, b.probes);
         assert_eq!(a.prefix_head, b.prefix_head);
@@ -4905,7 +4968,10 @@ mod tests {
     /// numbers: a version-9 doc's own entry must never reach the live map.
     #[test]
     fn persist_version_10_discards_a_version_9_cache() {
-        assert_eq!(PERSIST_VERSION, 10, "the cache-format version this fix shipped under");
+        // The live PERSIST_VERSION has since moved past 10 (see the test
+        // right below this one) -- what this regression pins is that a
+        // version-9 doc specifically never loads, which holds regardless of
+        // how far the constant has moved since.
         let fake_path = PathBuf::from("/pane-test-fixture/persist-version-10-discard/uuid.jsonl");
         let v9 = PersistFile {
             version: 9,
@@ -4926,6 +4992,36 @@ mod tests {
         let _ = fs::remove_file(&tmp);
         let map = cache().lock().unwrap_or_else(|e| e.into_inner());
         assert!(!map.contains_key(&fake_path), "a version-9 cache's entries must never reach the live map");
+    }
+
+    /// The cache format moved from 10 to 11 when persisted entries started
+    /// carrying `FileData::cache_read_days` (Claude's cache-read tokens per
+    /// day, for the cache-read-share usage finding) alongside cost/tokens: a
+    /// cache an older build wrote has none of that data, and the finding
+    /// would read a permanent zero if such a cache were trusted instead of
+    /// rescanned once. Exercises the real decision
+    /// (`load_persisted_cache_from`) rather than just comparing version
+    /// numbers: a version-10 doc's own entry must never reach the live map.
+    #[test]
+    fn persist_version_11_discards_a_version_10_cache() {
+        assert_eq!(PERSIST_VERSION, 11, "the cache-format version this fix shipped under");
+        let fake_path = PathBuf::from("/pane-test-fixture/persist-version-11-discard/uuid.jsonl");
+        let v10 = PersistFile {
+            version: 10,
+            pricing_stamp: "x".to_string(),
+            corrections: pricing::corrections_rev(),
+            entries: vec![PersistEntry {
+                path: fake_path.clone(),
+                days: vec![(19_000, "claude-haiku-4-5".to_string(), 1.0, 10.0)],
+                ..Default::default()
+            }],
+        };
+        let tmp = std::env::temp_dir().join(format!("pane-persist-v10-discard-{}.json", std::process::id()));
+        fs::write(&tmp, serde_json::to_string(&v10).unwrap()).unwrap();
+        load_persisted_cache_from(&tmp);
+        let _ = fs::remove_file(&tmp);
+        let map = cache().lock().unwrap_or_else(|e| e.into_inner());
+        assert!(!map.contains_key(&fake_path), "a version-10 cache's entries must never reach the live map");
     }
 
     /// SWE/Penguin + V4.1 Flash baked rates bumped CORRECTIONS_REV. A
@@ -6363,7 +6459,7 @@ mod tests {
             area: name.to_string(),
             today: Window::default(),
             yesterday: Window::default(),
-            last30: Window { cost, tokens: 0.0, models: Vec::new() },
+            last30: Window { cost, tokens: 0.0, cache_read: 0.0, models: Vec::new() },
             daily_cost: Vec::new(),
             week: None,
         };
@@ -6522,6 +6618,41 @@ mod tests {
         // dropped, advisors included.
         let twice = claude_run(&[line.clone(), line]);
         assert_eq!(tokens_sum(&twice), 1_509.0);
+    }
+
+    #[test]
+    fn claude_line_tracks_cache_read_tokens_per_day() {
+        // Same shape as claude_advisor_iterations_expand_once: a parent event
+        // and one advisor_message, each carrying its own cache-read count.
+        // Both must land in cache_read_days -- day only, no model split.
+        let line = json!({"type": "assistant", "timestamp": "2026-07-10T10:00:00Z",
+            "requestId": "req_1",
+            "message": {"id": "msg_1", "model": "claude-fable-5-20260115",
+                "usage": {"input_tokens": 2.0, "output_tokens": 491.0,
+                    "cache_read_input_tokens": 1000.0,
+                    "iterations": [
+                        {"type": "advisor_message", "model": "claude-haiku-4-5",
+                         "input_tokens": 10.0, "output_tokens": 2.0,
+                         "cache_read_input_tokens": 4.0}
+                    ]}}})
+        .to_string();
+        let data = claude_run(std::slice::from_ref(&line));
+        assert_eq!(data.cache_read_days.len(), 1, "one calendar day");
+        let total_cache_read: f64 = data.cache_read_days.values().sum();
+        assert_eq!(total_cache_read, 1_004.0, "parent's 1000 plus the advisor's 4");
+    }
+
+    #[test]
+    fn build_spend_rolls_up_cache_read_into_the_window_totals() {
+        let today = today_days_from_ce();
+        let mut data = FileData::default();
+        data.days.insert((today, "claude-sonnet-5".to_string()), (1.0, 100.0));
+        data.cache_read_days.insert(today, 60.0);
+        data.cache_read_days.insert(today - 1, 25.0); // yesterday, still inside last30
+        let sp = build_spend("claude", "Claude", data);
+        assert_eq!(sp.today.cache_read, 60.0);
+        assert_eq!(sp.yesterday.cache_read, 25.0);
+        assert_eq!(sp.last30.cache_read, 85.0, "both days roll up into the 30-day window");
     }
 
     #[test]

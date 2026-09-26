@@ -32,7 +32,8 @@ fn build_report(label: Option<String>, no_limits: bool) -> Result<seat::SeatRepo
     let mut inv = inventory::scan();
     let spend = spend::collect(None);
     let claude = spend.iter().find(|p| p.id == "claude");
-    inv.opportunities.extend(coaching::opportunities(claude, &spend::claude_sessions(None, None, 500)));
+    let agent_spend = spend::agent_spend(30);
+    inv.opportunities.extend(coaching::opportunities(claude, &spend::claude_sessions(None, None, 500), &agent_spend));
     let seat_id = seat::seat_id_in(&providers::config_dir())?;
     let label = label
         .or_else(|| std::env::var("AITM_SEAT_LABEL").ok())

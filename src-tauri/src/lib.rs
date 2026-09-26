@@ -433,15 +433,18 @@ fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     let mut inv = inventory::scan();
     let spend = spend::collect(None);
     let claude = spend.iter().find(|p| p.id == "claude");
-    inv.opportunities.extend(coaching::opportunities(claude, &spend::claude_sessions(None, None, 500)));
-    inv.opportunities.extend(procs::opportunities(&procs::snapshot(&inv.mcp_servers)));
-    inv.opportunities.extend(drift::opportunities(&drift::scan()));
     // Same 30-day window the agent-spend view itself reads, so the opportunity
     // and the numbers behind it can never disagree about what "recent" means.
+    // Computed before coaching::opportunities (which reads it for
+    // subagent-share) and cloned into the cache before agent_usage_opportunities
+    // consumes it by value below.
     let agent_spend = spend::agent_spend(30);
     if let Ok(mut slot) = AGENT_SPEND_CACHE.lock() {
         *slot = Some((std::time::Instant::now(), agent_spend.clone()));
     }
+    inv.opportunities.extend(coaching::opportunities(claude, &spend::claude_sessions(None, None, 500), &agent_spend));
+    inv.opportunities.extend(procs::opportunities(&procs::snapshot(&inv.mcp_servers)));
+    inv.opportunities.extend(drift::opportunities(&drift::scan()));
     let any_subagent_runs = !agent_spend.is_empty();
     let used_agents: HashSet<String> = agent_spend.into_iter().map(|a| a.name).collect();
     inv.opportunities.extend(inventory::agent_usage_opportunities(&inv.agents, &used_agents, any_subagent_runs));

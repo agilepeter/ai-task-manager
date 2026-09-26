@@ -312,7 +312,7 @@ mod tests {
     use super::*;
 
     fn w(cost: f64) -> Window {
-        Window { cost, tokens: cost * 10.0, models: Vec::new() }
+        Window { cost, tokens: cost * 10.0, cache_read: 0.0, models: Vec::new() }
     }
 
     fn area(name: &str, last30: f64, today: f64, daily_tail: &[f64]) -> AreaSpend {

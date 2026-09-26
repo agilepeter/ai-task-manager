@@ -53,6 +53,7 @@ pub(crate) const CHECK_KEYS: &[&str] = &[
     "check.perm-rules.pass",
     "check.perm-deny.pass",
     "check.perm-deny.attention",
+    "check.perm-deny-only.consider",
     "check.agent-tools.attention",
     "check.agent-tools.pass",
     "check.deny-shell.attention",
@@ -80,6 +81,8 @@ pub(crate) const CHECK_KEYS: &[&str] = &[
     "check.mix-top-heavy.pass",
     "check.session-long-lived.pass",
     "check.areas-unsorted.pass",
+    "check.cache-read-share.pass",
+    "check.subagent-share.pass",
     "check.agents-none.pass",
 ];
 
@@ -347,6 +350,23 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
             )
         },
     ];
+    // Same condition the Inventory tab's "perm-deny-only" opportunity fires
+    // on (inventory.rs's opportunities_for), computed straight from the
+    // permissions here rather than through from_finding/only_if_present: the
+    // "agent-model" precedent for the same kind of duplicated fact is a
+    // short, independent sentence rather than the opportunity's fuller
+    // explanation restated verbatim. It keeps the finding's own id, so a
+    // consider row here needs no entry in the demo's AUDIT_ID_ALIASES --
+    // plain id equality already stops it being synthesised a second time.
+    if p.deny > 0 && p.allow == 0 {
+        guardrails.push(check(
+            "perm-deny-only",
+            "consider",
+            Msg::new("check.perm-deny-only.consider.title").var("count", p.deny),
+            Some(Msg::new("check.perm-deny-only.consider.detail")),
+            "",
+        ));
+    }
     guardrails.extend(agent_checks(inv));
     guardrails.push(from_finding(
         inv,
@@ -387,6 +407,18 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
                 Some(Msg::new("check.areas-unsorted.pass.detail")),
             ));
         }
+        usage.push(from_finding(
+            inv,
+            "cache-read-share",
+            Msg::new("check.cache-read-share.pass.title"),
+            Some(Msg::new("check.cache-read-share.pass.detail")),
+        ));
+        usage.push(from_finding(
+            inv,
+            "subagent-share",
+            Msg::new("check.subagent-share.pass.title"),
+            Some(Msg::new("check.subagent-share.pass.detail")),
+        ));
     } else {
         usage.push(check(
             "usage-thin",
@@ -674,6 +706,32 @@ mod tests {
     }
 
     #[test]
+    fn perm_deny_only_is_consider_and_unscored() {
+        // deny_covers_shell: true and no agents keep "deny-shell" and
+        // "agent-model" out of the picture, isolating "perm-deny-only".
+        let inv = Inventory {
+            permissions: Permissions { default_mode: None, allow: 0, ask: 0, deny: 3, deny_covers_shell: true },
+            ..Inventory::default()
+        };
+        let r = run_one(&inv);
+        let got = statuses(&r);
+        assert_eq!(got.iter().find(|(id, _)| id == "perm-deny-only").map(|(_, s)| s.as_str()), Some("consider"));
+        let c = r.sections.iter().flat_map(|s| &s.checks).find(|c| c.id == "perm-deny-only").unwrap();
+        assert_eq!(c.title, "3 deny rules, nothing on the allow list");
+        assert_eq!(r.attention, 0, "{:?}", got);
+        assert_eq!(r.score, Some(100), "a consider costs nothing against the score");
+    }
+
+    #[test]
+    fn perm_deny_only_is_absent_with_any_allow_rule() {
+        let inv = Inventory {
+            permissions: Permissions { default_mode: None, allow: 1, ask: 0, deny: 3, deny_covers_shell: true },
+            ..Inventory::default()
+        };
+        assert!(!statuses(&run_one(&inv)).iter().any(|(id, _)| id == "perm-deny-only"));
+    }
+
+    #[test]
     fn a_tidy_setup_scores_100_and_every_pass_says_why() {
         let inv = Inventory {
             tools: vec![AiTool { name: "Claude Code".into(), kind: "app".into(), mcp_servers: 1 }],
@@ -773,7 +831,12 @@ mod tests {
         let mut inv = crate::inventory::scan();
         let spend = crate::spend::collect(None);
         let claude = spend.iter().find(|p| p.id == "claude");
-        inv.opportunities.extend(crate::coaching::opportunities(claude, &crate::spend::claude_sessions(None, None, 500)));
+        let agent_spend = crate::spend::agent_spend(30);
+        inv.opportunities.extend(crate::coaching::opportunities(
+            claude,
+            &crate::spend::claude_sessions(None, None, 500),
+            &agent_spend,
+        ));
         let l = view(&crate::ledger::load_from(&crate::ledger::path()), crate::spend::today_naive_date(), &HashMap::new());
         let areas: std::collections::HashSet<&str> = spend.iter().flat_map(|p| p.projects.iter())
             .flat_map(|pr| pr.areas.iter()).map(|a| crate::spend::area_top(&a.area)).filter(|a| !a.starts_with('(')).collect();

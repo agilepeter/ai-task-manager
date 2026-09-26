@@ -66,10 +66,11 @@ write(home / ".claude.json", json.dumps({
 }, indent=2))
 write(claude / "settings.json", json.dumps({
     "model": "claude-sonnet-5",
-    # None of these name Bash: the deny list keeps secrets and credentials out
-    # of reach but leaves the shell itself unguarded, which is exactly the
-    # gap the "deny-shell" audit check exists to catch.
-    "permissions": {"allow": ["Bash(git status)", "Bash(npm test)"], "deny": ["Read(./.env)", "Write(./.env)", "Edit(./secrets/**)"]},
+    # No allow list at all: the deny list keeps secrets and credentials out of
+    # reach but leaves the shell itself unguarded (the "deny-shell" audit
+    # check's gap) and, with nothing on the allow side, every routine command
+    # still prompts by hand (the "perm-deny-only" gap).
+    "permissions": {"deny": ["Read(./.env)", "Write(./.env)", "Edit(./secrets/**)"]},
     "hooks": {"SessionEnd": [{"hooks": [{"type": "command", "command": "true"}]}]},
 }, indent=2))
 write(claude / "agents" / "deploy-checker.md", "---\nname: deploy-checker\ntools: Bash, Read\nmodel: sonnet\n---\nChecks a deploy before it ships.\n")
@@ -184,7 +185,7 @@ for _ in range(5):
 first = json.loads(host_lines[0]); first["cwd"] = str(work); host_lines[0] = compact(first)
 write(project_dir / f"{host_sid}.jsonl", "\n".join(host_lines) + "\n")
 
-def subagent_transcript(agent_name, start, turns, model, area="northwind-api"):
+def subagent_transcript(agent_name, start, turns, model, area="northwind-api", cost_range=(0.05, 0.4)):
     """A sidechain transcript stamped with attributionAgent, same line shape
     the real engine parses (crates/core/src/spend.rs's claude_line). Like
     every other log this script writes, the first line sits at the project
@@ -198,7 +199,7 @@ def subagent_transcript(agent_name, start, turns, model, area="northwind-api"):
         t += datetime.timedelta(minutes=random.uniform(1, 4))
         lines.append(compact({
             "type": "assistant", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": host_sid,
-            "cwd": str(work / area), "requestId": f"req_{seeded_uuid4().hex[:12]}", "costUSD": round(random.uniform(0.05, 0.4), 4),
+            "cwd": str(work / area), "requestId": f"req_{seeded_uuid4().hex[:12]}", "costUSD": round(random.uniform(*cost_range), 4),
             "isSidechain": True, "attributionAgent": agent_name,
             "message": {"id": f"msg_{seeded_uuid4().hex[:16]}", "model": model, "content": [{"type": "text", "text": "."}],
                         "usage": {"input_tokens": random.randint(500, 3000), "output_tokens": random.randint(100, 600),
@@ -212,6 +213,11 @@ write(sub_dir / "deploy-checker-1.jsonl", subagent_transcript("deploy-checker", 
 write(sub_dir / "deploy-checker-2.jsonl", subagent_transcript("deploy-checker", now - datetime.timedelta(hours=6), 2, "claude-haiku-4-5-20251001"))
 write(sub_dir / "general-purpose.jsonl", subagent_transcript("general-purpose", host_start + datetime.timedelta(minutes=20), 2, "claude-sonnet-5"))
 write(sub_dir / "explore.jsonl", subagent_transcript("Explore", host_start + datetime.timedelta(minutes=30), 4, "claude-haiku-4-5-20251001"))
+# A big automated migration fanned out to general-purpose on opus-tier work:
+# the pattern the "subagent-share" coaching finding is there to catch. Same
+# area as the rest of this host session, so it never touches Acme's budget.
+write(sub_dir / "general-purpose-migration.jsonl", subagent_transcript(
+    "general-purpose", host_start + datetime.timedelta(minutes=40), 70, "claude-opus-5", cost_range=(2.0, 4.0)))
 
 # --- curated PATH for the fictional machine ---------------------------------
 # Every read so far is already hermetic: dirs::home_dir() and friends honour

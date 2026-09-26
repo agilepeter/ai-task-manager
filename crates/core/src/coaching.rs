@@ -8,7 +8,7 @@
 
 use crate::i18n::Msg;
 use crate::inventory::Opportunity;
-use crate::spend::{area_top, ProviderSpend, SessionSpend};
+use crate::spend::{area_top, AgentSpend, ProviderSpend, SessionSpend};
 
 const CLASSROOM: &str = "https://staas.fund/classroom/";
 
@@ -16,7 +16,8 @@ const CLASSROOM: &str = "https://staas.fund/classroom/";
 /// this module can emit. Only `i18n.rs`'s test module reads this, so it does
 /// not exist in a release build at all.
 #[cfg(test)]
-pub(crate) const FINDING_IDS: &[&str] = &["mix-top-heavy", "areas-unsorted", "session-long-lived"];
+pub(crate) const FINDING_IDS: &[&str] =
+    &["mix-top-heavy", "areas-unsorted", "session-long-lived", "cache-read-share", "subagent-share"];
 
 /// Below this much 30-day spend the mix is noise, not a pattern.
 const MIN_SPEND_FOR_MIX: f64 = 50.0;
@@ -27,6 +28,25 @@ const LONG_SESSION_DAYS: f64 = 7.0;
 const LONG_SESSION_COST: f64 = 50.0;
 /// Share of spend with no work area at which attribution is getting blurry.
 const UNSORTED_SHARE: f64 = 0.25;
+/// Below this many tokens in the 30-day window, a cache-read share is noise:
+/// a handful of requests can swing the ratio wildly either way.
+const MIN_TOKENS_FOR_CACHE_SHARE: f64 = 1_000_000.0;
+/// Share of all tokens in the window that must be cache re-reads before the
+/// pattern is worth a look. First guess, tuned against a real Mac's own
+/// 30-day numbers running Claude Code daily: that machine's real share sat
+/// close to this, comfortably above ordinary single-digit-percent re-use and
+/// comfortably below what a runaway loop re-sending the same huge context
+/// every turn would show.
+const CACHE_READ_SHARE: f64 = 0.60;
+/// Below this much subagent spend in the window, the share is noise, not a
+/// pattern -- a single one-off fan-out shouldn't earn a callout.
+const MIN_SUBAGENT_COST: f64 = 5.0;
+/// Share of 30-day spend subagents must cross before it is worth a look.
+/// First guess: subagents are a deliberate choice (fan out search/summarise
+/// work to keep the main context small), so this sits well above what an
+/// occasional Explore/Plan call would cost and flags only a setup that has
+/// come to lean on them heavily.
+const SUBAGENT_SHARE: f64 = 0.10;
 
 /// 3 = the largest models, 2 = mid, 1 = small. None when the name gives no
 /// clue: an unknown model is left out of the mix rather than guessed at.
@@ -86,7 +106,10 @@ pub fn sessions_to_nudge(
     due
 }
 
-pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend]) -> Vec<Opportunity> {
+/// `agent_spend` is the same 30-day `spend::agent_spend(30)` view
+/// `enriched_inventory` already computes for the agent-usage opportunity, so
+/// this never triggers a second scan.
+pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend], agent_spend: &[AgentSpend]) -> Vec<Opportunity> {
     let mut out = Vec::new();
     let mut push = |id: &str, kind: &str, title_msg: Msg, detail_msg: Msg| {
         out.push(Opportunity::from_msgs(id, kind, title_msg, Some(detail_msg), Some(CLASSROOM)));
@@ -123,6 +146,42 @@ pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend]) 
                 Msg::new("finding.areas-unsorted.title").var("pct", format!("{:.0}", 100.0 * unsorted / all)),
                 Msg::new("finding.areas-unsorted.detail").var("unsorted", money(unsorted)),
             );
+        }
+
+        // --- cache-read share: how much of the window is a re-read, not
+        // fresh input. The scanner already parses this per line
+        // (`ClaudeTokens.cache_read` in spend.rs); the window total comes
+        // from the same persisted per-day accumulator `last30.tokens` does.
+        let total_tokens = sp.last30.tokens;
+        if total_tokens >= MIN_TOKENS_FOR_CACHE_SHARE {
+            let share = sp.last30.cache_read / total_tokens;
+            if share >= CACHE_READ_SHARE {
+                push(
+                    "cache-read-share",
+                    "learn",
+                    Msg::new("finding.cache-read-share.title").var("percent", format!("{:.0}", 100.0 * share)),
+                    Msg::new("finding.cache-read-share.detail"),
+                );
+            }
+        }
+
+        // --- subagent share of spend
+        let subagent_total: f64 = agent_spend.iter().map(|a| a.cost).sum();
+        if sp.last30.cost > 0.0 && subagent_total >= MIN_SUBAGENT_COST && subagent_total / sp.last30.cost >= SUBAGENT_SHARE {
+            // agent_spend sorts named agents first by cost, the empty
+            // "unattributed" name always last regardless of its own cost
+            // (see agent_spend_from's own sort) -- the first named row is
+            // the highest-cost one actually worth pointing at.
+            if let Some(top) = agent_spend.iter().find(|a| !a.name.is_empty()) {
+                push(
+                    "subagent-share",
+                    "learn",
+                    Msg::new("finding.subagent-share.title")
+                        .var("cost", money(subagent_total))
+                        .var("percent", format!("{:.0}", 100.0 * subagent_total / sp.last30.cost)),
+                    Msg::new("finding.subagent-share.detail").var("agent", top.name.clone()),
+                );
+            }
         }
     }
 
@@ -161,10 +220,19 @@ pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend]) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spend::{AreaSpend, ModelSpend, ProjectSpend, Window};
+    use crate::spend::{AgentSpend, AreaSpend, ModelSpend, ProjectSpend, Window};
 
     fn w(cost: f64) -> Window {
-        Window { cost, tokens: cost * 1000.0, models: Vec::new() }
+        Window { cost, tokens: cost * 1000.0, cache_read: 0.0, models: Vec::new() }
+    }
+
+    /// A last30 window with tokens/cache-read chosen independently of cost --
+    /// `w()`/`claude()` tie tokens to cost at a fixed ratio, which can't
+    /// express "big window, high cache-read share" on its own.
+    fn with_cache_read(mut sp: ProviderSpend, tokens: f64, cache_read: f64) -> ProviderSpend {
+        sp.last30.tokens = tokens;
+        sp.last30.cache_read = cache_read;
+        sp
     }
 
     fn claude(models: &[(&str, f64)], areas: &[(&str, f64)]) -> ProviderSpend {
@@ -224,11 +292,15 @@ mod tests {
         found.iter().map(|o| o.id.as_str()).collect()
     }
 
+    fn agent(name: &str, cost: f64) -> AgentSpend {
+        AgentSpend { name: name.into(), runs: 1, cost, tokens: 0, last_used_ms: 0, top_model: None, by_client: vec![] }
+    }
+
     #[test]
     fn a_balanced_well_sorted_setup_earns_nothing() {
         let sp = claude(&[("claude-opus-5", 60.0), ("claude-sonnet-5", 40.0)], &[("acme", 95.0), ("(unsorted)", 5.0)]);
-        assert!(opportunities(Some(&sp), &[session(0.2, 30.0), session(10.0, 5.0)]).is_empty());
-        assert!(opportunities(None, &[]).is_empty());
+        assert!(opportunities(Some(&sp), &[session(0.2, 30.0), session(10.0, 5.0)], &[]).is_empty());
+        assert!(opportunities(None, &[], &[]).is_empty());
     }
 
     #[test]
@@ -237,7 +309,7 @@ mod tests {
             &[("claude-fable-5-1", 800.0), ("claude-opus-5", 100.0), ("claude-sonnet-5", 100.0), ("mystery", 500.0)],
             &[("acme", 1500.0)],
         );
-        let found = opportunities(Some(&sp), &[]);
+        let found = opportunities(Some(&sp), &[], &[]);
         assert_eq!(ids(&found), ["mix-top-heavy"]);
         assert_eq!(found[0].title, "90% of spend is on the largest models", "the unknown model is left out, not guessed");
         assert!(found[0].detail.contains("$900 of $1000"), "{}", found[0].detail);
@@ -246,13 +318,13 @@ mod tests {
     #[test]
     fn small_spend_is_not_a_pattern() {
         let sp = claude(&[("claude-opus-5", 20.0)], &[("(unsorted)", 20.0)]);
-        assert!(opportunities(Some(&sp), &[]).is_empty());
+        assert!(opportunities(Some(&sp), &[], &[]).is_empty());
     }
 
     #[test]
     fn unsorted_counts_at_either_depth_and_is_a_gap() {
         let sp = claude(&[("claude-sonnet-5", 100.0)], &[("(unsorted)", 30.0), ("acme/web", 70.0)]);
-        let found = opportunities(Some(&sp), &[]);
+        let found = opportunities(Some(&sp), &[], &[]);
         assert_eq!(ids(&found), ["areas-unsorted"]);
         assert_eq!(found[0].kind, "tighten");
         assert!(found[0].title.starts_with("30%"));
@@ -260,11 +332,61 @@ mod tests {
 
     #[test]
     fn the_costliest_long_session_speaks_for_the_rest() {
-        let found = opportunities(None, &[session(56.0, 419.0), session(9.0, 60.0), session(30.0, 10.0), session(1.0, 900.0)]);
+        let found =
+            opportunities(None, &[session(56.0, 419.0), session(9.0, 60.0), session(30.0, 10.0), session(1.0, 900.0)], &[]);
         assert_eq!(ids(&found), ["session-long-lived"]);
         assert_eq!(found[0].title, "One session has been open 56 days");
         assert!(found[0].detail.contains("$419"));
         assert!(found[0].detail.contains("one other session is past a week too"), "{}", found[0].detail);
+    }
+
+    #[test]
+    fn cache_share_finding_needs_a_real_window() {
+        let base = claude(&[("claude-sonnet-5", 100.0)], &[("acme", 100.0)]);
+
+        // High share, but the window itself is thin: a handful of requests
+        // could swing that ratio either way.
+        let thin = with_cache_read(base.clone(), 900_000.0, 800_000.0);
+        assert!(opportunities(Some(&thin), &[], &[]).iter().all(|o| o.id != "cache-read-share"), "under the token floor");
+
+        // Big enough window, but the share itself is unremarkable.
+        let low_share = with_cache_read(base.clone(), 2_000_000.0, 400_000.0);
+        assert!(
+            opportunities(Some(&low_share), &[], &[]).iter().all(|o| o.id != "cache-read-share"),
+            "under the share threshold"
+        );
+
+        // Both conditions cross: fires with its own percentage.
+        let over = with_cache_read(base, 2_000_000.0, 1_400_000.0);
+        let found = opportunities(Some(&over), &[], &[]);
+        let o = found.iter().find(|o| o.id == "cache-read-share").expect("cache-read-share should fire");
+        assert_eq!(o.kind, "learn");
+        assert_eq!(o.title, "70% of your tokens were context re-reads");
+    }
+
+    #[test]
+    fn subagent_share_finding_names_the_top_agent() {
+        // $4 of a $30 window is 13%: over the share, under the $5 floor.
+        let small = claude(&[("claude-sonnet-5", 30.0)], &[("acme", 30.0)]);
+        assert!(
+            opportunities(Some(&small), &[], &[agent("Explore", 4.0)]).iter().all(|o| o.id != "subagent-share"),
+            "under the dollar floor"
+        );
+
+        // $8 of a $100 window is 8%: over the $5 floor, under the share.
+        let sp = claude(&[("claude-sonnet-5", 100.0)], &[("acme", 100.0)]);
+        assert!(
+            opportunities(Some(&sp), &[], &[agent("Explore", 8.0)]).iter().all(|o| o.id != "subagent-share"),
+            "under the share threshold"
+        );
+
+        // $12 of the same $100 window is 12%: over both, names the top agent.
+        let over = [agent("Explore", 9.0), agent("Plan", 3.0)];
+        let found = opportunities(Some(&sp), &[], &over);
+        let o = found.iter().find(|o| o.id == "subagent-share").expect("subagent-share should fire");
+        assert_eq!(o.kind, "learn");
+        assert_eq!(o.title, "Subagents cost $12, 12% of the last 30 days");
+        assert!(o.detail.contains("Explore"), "{}", o.detail);
     }
 
     /// Prints what this machine's real usage earns. `--ignored --nocapture`
@@ -273,7 +395,8 @@ mod tests {
     fn live_coaching() {
         let spend = crate::spend::collect(None);
         let claude = spend.iter().find(|p| p.id == "claude");
-        for o in opportunities(claude, &crate::spend::claude_sessions(None, None, 500)) {
+        let agent_spend = crate::spend::agent_spend(30);
+        for o in opportunities(claude, &crate::spend::claude_sessions(None, None, 500), &agent_spend) {
             println!("[{}] {}\n    {}", o.kind, o.title, o.detail);
         }
     }
@@ -308,8 +431,8 @@ mod tests {
     }
 
     /// A missing translation key renders as its own literal key text instead
-    /// of failing -- that takes a real fixture run to catch. Exercises all
-    /// three finding ids, including session-long-lived's "others" clause at
+    /// of failing -- that takes a real fixture run to catch. Exercises every
+    /// finding id, including session-long-lived's "others" clause at
     /// count=1 (the .one plural form) and count=2 (.other).
     #[test]
     fn opportunities_never_render_a_raw_key() {
@@ -320,11 +443,15 @@ mod tests {
         let unsorted = claude(&[("claude-sonnet-5", 100.0)], &[("(unsorted)", 30.0), ("acme/web", 70.0)]);
         let one_other = [session(56.0, 419.0), session(9.0, 60.0)];
         let two_others = [session(56.0, 419.0), session(9.0, 60.0), session(30.0, 500.0)];
-        let fixtures: [Vec<Opportunity>; 4] = [
-            opportunities(Some(&mix), &[]),
-            opportunities(Some(&unsorted), &[]),
-            opportunities(None, &one_other),
-            opportunities(None, &two_others),
+        let cache_heavy = with_cache_read(claude(&[("claude-sonnet-5", 100.0)], &[("acme", 100.0)]), 2_000_000.0, 1_400_000.0);
+        let subagent_heavy = claude(&[("claude-sonnet-5", 100.0)], &[("acme", 100.0)]);
+        let fixtures: [Vec<Opportunity>; 6] = [
+            opportunities(Some(&mix), &[], &[]),
+            opportunities(Some(&unsorted), &[], &[]),
+            opportunities(None, &one_other, &[]),
+            opportunities(None, &two_others, &[]),
+            opportunities(Some(&cache_heavy), &[], &[]),
+            opportunities(Some(&subagent_heavy), &[], &[agent("Explore", 9.0), agent("Plan", 3.0)]),
         ];
         for found in fixtures {
             assert!(!found.is_empty());
