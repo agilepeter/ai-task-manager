@@ -539,7 +539,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn parse_folds_a_forged_custom_agent_name_away() {
         // Anyone holding the collector's shared token can post a report
         // claiming anything, so the guarantee has to hold at the door too.
@@ -561,6 +560,7 @@ mod tests {
         assert_eq!(parsed.agent_spend.iter().find(|a| a.name == "general-purpose").map(|a| a.runs), Some(1));
     }
 
+    #[test]
     fn a_schema_one_report_without_agent_spend_still_parses() {
         let (inv, spend) = inputs();
         let mut old = serde_json::to_value(build("seat-abcdefgh", "x", 1, &inv, &spend)).unwrap();
