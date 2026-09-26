@@ -670,7 +670,7 @@
   "finding.session-long-lived.title": "有一个会话已经开了 {days} 天",
   "finding.session-long-lived.detail": "过去 30 天它花费了 {cost}。会话每一轮都会重新发送不断增长的历史记录，所以一个旧会话的每次回答都更贵，操控起来也更慢。为新工作开一个新会话，把重要内容留在项目记忆里，会更省钱。",
   "finding.session-long-lived.detailOthers.other": "过去 30 天它花费了 {cost}，另外还有 {count} 个会话也超过了一周。会话每一轮都会重新发送不断增长的历史记录，所以一个旧会话的每次回答都更贵，操控起来也更慢。为新工作开一个新会话，把重要内容留在项目记忆里，会更省钱。",
-  "finding.cache-read-share.title": "{percent}% 的 tokens 是重复读取的上下文",
+  "finding.cache-read-share.title": "最近 30 天有 {percent}% 的 tokens 是重复读取的上下文",
   "finding.cache-read-share.detail": "重复读取，是指把此前的对话再发一遍，好让模型回答下一轮。它比全新输入更便宜，但 1 小时缓存写入的计费是标准费率的两倍，这也是为什么这里的花费只是下限，而不是账单。",
   "finding.subagent-share.title": "子智能体花费 {cost}，占最近 30 天的 {percent}%",
   "finding.subagent-share.detail": "其中大部分流向了 {agent}。子智能体的花费计入发起它的会话，因此已经包含在上面的总额里。",

@@ -32,12 +32,17 @@ const UNSORTED_SHARE: f64 = 0.25;
 /// a handful of requests can swing the ratio wildly either way.
 const MIN_TOKENS_FOR_CACHE_SHARE: f64 = 1_000_000.0;
 /// Share of all tokens in the window that must be cache re-reads before the
-/// pattern is worth a look. First guess, tuned against a real Mac's own
-/// 30-day numbers running Claude Code daily: that machine's real share sat
-/// close to this, comfortably above ordinary single-digit-percent re-use and
-/// comfortably below what a runaway loop re-sending the same huge context
-/// every turn would show.
-const CACHE_READ_SHARE: f64 = 0.60;
+/// pattern is worth a look. The share on its own is a poor signal: the tool
+/// re-sends the conversation every turn, so a high share is how Claude Code
+/// works rather than anything a particular person is doing, and two real
+/// machines measured here sat at 97% and 94%. This sits high enough to be
+/// worth saying out loud, and the dollar gate below does the real work of
+/// deciding whether the explanation matters to this reader at all.
+const CACHE_READ_SHARE: f64 = 0.90;
+/// Below this much 30-day spend a re-read share is a curiosity, not money.
+/// Same figure the mix finding and the audit's usage checks already use, for
+/// the same reason: under it there is nothing worth acting on.
+const MIN_SPEND_FOR_CACHE_SHARE: f64 = 50.0;
 /// Below this much subagent spend in the window, the share is noise, not a
 /// pattern -- a single one-off fan-out shouldn't earn a callout.
 const MIN_SUBAGENT_COST: f64 = 5.0;
@@ -153,7 +158,7 @@ pub fn opportunities(claude: Option<&ProviderSpend>, sessions: &[SessionSpend], 
         // (`ClaudeTokens.cache_read` in spend.rs); the window total comes
         // from the same persisted per-day accumulator `last30.tokens` does.
         let total_tokens = sp.last30.tokens;
-        if total_tokens >= MIN_TOKENS_FOR_CACHE_SHARE {
+        if total_tokens >= MIN_TOKENS_FOR_CACHE_SHARE && sp.last30.cost >= MIN_SPEND_FOR_CACHE_SHARE {
             let share = sp.last30.cache_read / total_tokens;
             if share >= CACHE_READ_SHARE {
                 push(
@@ -356,12 +361,30 @@ mod tests {
             "under the share threshold"
         );
 
-        // Both conditions cross: fires with its own percentage.
-        let over = with_cache_read(base, 2_000_000.0, 1_400_000.0);
+        // Every condition crosses: fires with its own percentage.
+        let over = with_cache_read(base, 2_000_000.0, 1_900_000.0);
         let found = opportunities(Some(&over), &[], &[]);
         let o = found.iter().find(|o| o.id == "cache-read-share").expect("cache-read-share should fire");
         assert_eq!(o.kind, "learn");
-        assert_eq!(o.title, "70% of your tokens were context re-reads");
+        assert_eq!(o.title, "95% of your tokens in the last 30 days were context re-reads");
+    }
+
+    #[test]
+    fn cache_share_needs_real_money_behind_it() {
+        // The share alone says nothing: the tool re-sends the conversation
+        // every turn, so almost everyone clears it. What decides whether the
+        // explanation is worth reading is whether there is money behind it.
+        let pennies = with_cache_read(claude(&[("claude-sonnet-5", 12.0)], &[("acme", 12.0)]), 2_000_000.0, 1_920_000.0);
+        assert!(
+            opportunities(Some(&pennies), &[], &[]).iter().all(|o| o.id != "cache-read-share"),
+            "96% of nothing is not worth a callout"
+        );
+
+        let real = with_cache_read(claude(&[("claude-sonnet-5", 200.0)], &[("acme", 200.0)]), 2_000_000.0, 1_920_000.0);
+        assert!(
+            opportunities(Some(&real), &[], &[]).iter().any(|o| o.id == "cache-read-share"),
+            "the same share against real spend does fire"
+        );
     }
 
     #[test]
@@ -443,7 +466,7 @@ mod tests {
         let unsorted = claude(&[("claude-sonnet-5", 100.0)], &[("(unsorted)", 30.0), ("acme/web", 70.0)]);
         let one_other = [session(56.0, 419.0), session(9.0, 60.0)];
         let two_others = [session(56.0, 419.0), session(9.0, 60.0), session(30.0, 500.0)];
-        let cache_heavy = with_cache_read(claude(&[("claude-sonnet-5", 100.0)], &[("acme", 100.0)]), 2_000_000.0, 1_400_000.0);
+        let cache_heavy = with_cache_read(claude(&[("claude-sonnet-5", 100.0)], &[("acme", 100.0)]), 2_000_000.0, 1_900_000.0);
         let subagent_heavy = claude(&[("claude-sonnet-5", 100.0)], &[("acme", 100.0)]);
         let fixtures: [Vec<Opportunity>; 6] = [
             opportunities(Some(&mix), &[], &[]),

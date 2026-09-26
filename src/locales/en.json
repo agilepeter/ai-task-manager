@@ -697,7 +697,7 @@
   "finding.session-long-lived.detail": "It cost {cost} in the last 30 days. A session re-sends its growing history on every turn, so an old one pays more for each answer and gets slower to steer. Starting fresh for new work, and keeping what matters in project memory, is cheaper.",
   "finding.session-long-lived.detailOthers.one": "It cost {cost} in the last 30 days, and one other session is past a week too. A session re-sends its growing history on every turn, so an old one pays more for each answer and gets slower to steer. Starting fresh for new work, and keeping what matters in project memory, is cheaper.",
   "finding.session-long-lived.detailOthers.other": "It cost {cost} in the last 30 days, and {count} other sessions are past a week too. A session re-sends its growing history on every turn, so an old one pays more for each answer and gets slower to steer. Starting fresh for new work, and keeping what matters in project memory, is cheaper.",
-  "finding.cache-read-share.title": "{percent}% of your tokens were context re-reads",
+  "finding.cache-read-share.title": "{percent}% of your tokens in the last 30 days were context re-reads",
   "finding.cache-read-share.detail": "A re-read is the conversation so far being sent again so the model can answer the next turn. It is cheaper than fresh input, but a one-hour cache write bills at twice the catalogue rate, which is why the spend here is a floor rather than an invoice.",
   "finding.subagent-share.title": "Subagents cost {cost}, {percent}% of the last 30 days",
   "finding.subagent-share.detail": "Most of it went to {agent}. A subagent's spend counts toward the session that started it, so this is already inside the totals above.",

@@ -66,11 +66,13 @@ write(home / ".claude.json", json.dumps({
 }, indent=2))
 write(claude / "settings.json", json.dumps({
     "model": "claude-sonnet-5",
-    # No allow list at all: the deny list keeps secrets and credentials out of
-    # reach but leaves the shell itself unguarded (the "deny-shell" audit
-    # check's gap) and, with nothing on the allow side, every routine command
-    # still prompts by hand (the "perm-deny-only" gap).
-    "permissions": {"deny": ["Read(./.env)", "Write(./.env)", "Edit(./secrets/**)"]},
+    # None of these name Bash: the deny list keeps secrets and credentials out
+    # of reach but leaves the shell itself unguarded, which is exactly the gap
+    # the "deny-shell" audit check exists to catch. The allow list stays as a
+    # real machine would have it -- the everyday safe commands waved through.
+    # A finding that does not fire here is a finding this machine does not
+    # have; the fixture is a day in a life, not a rack of every warning.
+    "permissions": {"allow": ["Bash(git status)", "Bash(npm test)"], "deny": ["Read(./.env)", "Write(./.env)", "Edit(./secrets/**)"]},
     "hooks": {"SessionEnd": [{"hooks": [{"type": "command", "command": "true"}]}]},
 }, indent=2))
 write(claude / "agents" / "deploy-checker.md", "---\nname: deploy-checker\ntools: Bash, Read\nmodel: sonnet\n---\nChecks a deploy before it ships.\n")
@@ -213,11 +215,12 @@ write(sub_dir / "deploy-checker-1.jsonl", subagent_transcript("deploy-checker", 
 write(sub_dir / "deploy-checker-2.jsonl", subagent_transcript("deploy-checker", now - datetime.timedelta(hours=6), 2, "claude-haiku-4-5-20251001"))
 write(sub_dir / "general-purpose.jsonl", subagent_transcript("general-purpose", host_start + datetime.timedelta(minutes=20), 2, "claude-sonnet-5"))
 write(sub_dir / "explore.jsonl", subagent_transcript("Explore", host_start + datetime.timedelta(minutes=30), 4, "claude-haiku-4-5-20251001"))
-# A big automated migration fanned out to general-purpose on opus-tier work:
-# the pattern the "subagent-share" coaching finding is there to catch. Same
-# area as the rest of this host session, so it never touches Acme's budget.
+# One long migration fanned out to general-purpose: many turns, but at the
+# same per-turn cost as every other transcript here. Subagent work shows up
+# as a share of the month because it ran for a long time, not because any
+# single turn was made expensive to reach a threshold.
 write(sub_dir / "general-purpose-migration.jsonl", subagent_transcript(
-    "general-purpose", host_start + datetime.timedelta(minutes=40), 70, "claude-opus-5", cost_range=(2.0, 4.0)))
+    "general-purpose", host_start + datetime.timedelta(minutes=40), 60, "claude-sonnet-5"))
 
 # --- curated PATH for the fictional machine ---------------------------------
 # Every read so far is already hermetic: dirs::home_dir() and friends honour
