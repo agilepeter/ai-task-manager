@@ -75,13 +75,14 @@ if [ -z "$TAG" ]; then
   exit 2
 fi
 
-case "$TAG" in
-  v[0-9]*.[0-9]*.[0-9]*) ;;
-  *)
-    echo "FAIL: '$TAG' does not look like a vX.Y.Z tag" >&2
-    exit 1
-    ;;
-esac
+# Anchored on purpose: a `case` glob would let "v1.0.0; anything" through,
+# because `*` there matches the rest of the line. Nothing downstream is
+# interpolated into a shell command, but a script that can publish should
+# refuse a tag it does not fully recognise.
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+  echo "FAIL: '$TAG' does not look like a vX.Y.Z tag" >&2
+  exit 1
+fi
 VERSION="${TAG#v}"
 
 if [ -n "$FIXTURE_DIR" ]; then
