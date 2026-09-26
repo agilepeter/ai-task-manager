@@ -4,6 +4,7 @@
 
 use std::sync::{Mutex, OnceLock};
 
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::providers::Snapshot;
@@ -55,6 +56,50 @@ pub fn areas_feed(spend: &[crate::spend::ProviderSpend]) -> Value {
         .flat_map(|pr| pr.areas.iter())
         .map(|a| json!({"area": a.area, "today": a.today.cost, "yesterday": a.yesterday.cost, "last30": a.last30.cost}))
         .collect::<Vec<_>>())
+}
+
+/// 30 days of subagent spend paired with who is running right now.
+pub fn agents_feed(spend: &[crate::spend::AgentSpend], running: &[crate::procs::RunningAgent]) -> Value {
+    let running: Vec<AgentFeedRunning> = running.iter().map(AgentFeedRunning::from).collect();
+    json!({
+        "agents": spend,
+        "running": running,
+    })
+}
+
+/// A running agent, reduced to what this feed is allowed to publish. A
+/// deliberate allowlist rather than serialising `RunningAgent` itself, so a
+/// field added to that struct later has to be added here on purpose before
+/// it can reach the network. `cwd` and `pid` never appear here: the folder
+/// a session ran in stays on this machine even though the request arrived
+/// over loopback, and an agent has no End task that would ever need its
+/// pid. `area` and `client` do go out — the same, less specific, folder-
+/// and customer-derived facts `/v1/spend/areas` and `/v1/spend/clients`
+/// already publish.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentFeedRunning {
+    tool: String,
+    elapsed_secs: u64,
+    rss_bytes: u64,
+    cpu_percent: Option<f32>,
+    area: Option<String>,
+    client: Option<String>,
+    pace: Option<crate::spend::LivePace>,
+}
+
+impl From<&crate::procs::RunningAgent> for AgentFeedRunning {
+    fn from(a: &crate::procs::RunningAgent) -> Self {
+        AgentFeedRunning {
+            tool: a.tool.clone(),
+            elapsed_secs: a.elapsed_secs,
+            rss_bytes: a.rss_bytes,
+            cpu_percent: a.cpu_percent,
+            area: a.area.clone(),
+            client: a.client.clone(),
+            pace: a.pace.clone(),
+        }
+    }
 }
 
 fn latest() -> &'static Mutex<Value> {
@@ -279,10 +324,20 @@ pub fn start() {
 
 #[cfg(test)]
 mod tests {
+    /// `FEEDS` is one process-wide map. Every test below that publishes to
+    /// it takes this lock first: `publish_feeds` replaces the whole map, so
+    /// two such tests running concurrently (the default for `cargo test`)
+    /// would otherwise clear each other's setup mid-assertion.
+    fn feeds_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap()
+    }
+
     #[test]
     fn feeds_exist_only_while_the_user_has_them_on() {
         use super::route;
         use serde_json::json;
+        let _guard = feeds_test_lock();
         let get = |path: &str| route(&tiny_http::Method::Get, path);
         super::publish_feeds(false, vec![("/v1/feed-test", json!({"a": 1}))]);
         assert_eq!(get("/v1/feed-test").0, 404, "off means absent, not hidden");
@@ -295,8 +350,128 @@ mod tests {
         assert_eq!(get("/v1/feed-test").0, 404);
     }
 
-    use super::{host_ok, provider_json, publish, route};
+    #[test]
+    fn agents_feed_is_a_404_until_api_feeds_is_on() {
+        let _guard = feeds_test_lock();
+        let get = |path: &str| route(&tiny_http::Method::Get, path);
+        let body = agents_feed(&[], &[]);
+        super::publish_feeds(false, vec![("/v1/agents", body.clone())]);
+        assert_eq!(get("/v1/agents").0, 404, "off means absent, not hidden");
+        super::publish_feeds(true, vec![("/v1/agents", body)]);
+        assert_eq!(get("/v1/agents").0, 200);
+        super::publish_feeds(false, vec![]);
+        assert_eq!(get("/v1/agents").0, 404);
+    }
+
+    #[test]
+    fn agents_feed_never_carries_cwd_or_pid() {
+        let running = RunningAgent {
+            tool: "Claude Code".into(),
+            pid: 918_273,
+            elapsed_secs: 120,
+            rss_bytes: 4_096_000,
+            cpu_percent: Some(1.5),
+            cwd: Some("/Users/example/CWD-MARKER-should-never-leave".into()),
+            area: Some("site/client-a".into()),
+            client: Some("Acme".into()),
+            pace: None,
+        };
+        let value = agents_feed(&[], &[running]);
+        assert!(value["running"][0].get("cwd").is_none(), "cwd must never appear");
+        assert!(value["running"][0].get("pid").is_none(), "pid must never appear");
+        let raw = value.to_string();
+        assert!(!raw.contains("CWD-MARKER-should-never-leave"), "local HTTP leaked the folder: {raw}");
+        assert!(!raw.contains("918273"), "local HTTP leaked the pid: {raw}");
+        // Less specific than the folder, and published the same way
+        // `/v1/spend/areas` and `/v1/spend/clients` already publish them.
+        assert_eq!(value["running"][0]["area"], "site/client-a");
+        assert_eq!(value["running"][0]["client"], "Acme");
+    }
+
+    #[test]
+    fn agents_feed_shape_matches_the_documented_example() {
+        // Mirrors the example in docs/local-http-api.md. A rename on either
+        // side that misses the other shows up here as a key-set mismatch.
+        let documented = serde_json::json!({
+            "agents": [{
+                "name": "code-reviewer",
+                "runs": 14,
+                "cost": 3.42,
+                "tokens": 128000,
+                "lastUsedMs": 1758844800000i64,
+                "topModel": "claude-sonnet-4-5",
+                "byClient": [["Acme", 2.10], ["Unassigned", 1.32]]
+            }],
+            "running": [{
+                "tool": "Claude Code",
+                "elapsedSecs": 942,
+                "rssBytes": 184320000,
+                "cpuPercent": 3.1,
+                "area": "site/client-a",
+                "client": "Acme",
+                "pace": {
+                    "sessionId": "b6b4b9b2-27d1-4a52-9c2e-1a9a7a6f2e10",
+                    "tokens10m": 5400,
+                    "cost10m": 0.18,
+                    "priced": true,
+                    "idleSecs": 12,
+                    "model": "claude-sonnet-4-5",
+                    "area": "site/client-a",
+                    "tool": "Claude Code"
+                }
+            }]
+        });
+
+        let agent = AgentSpend {
+            name: "code-reviewer".into(),
+            runs: 14,
+            cost: 3.42,
+            tokens: 128_000,
+            last_used_ms: 1_758_844_800_000,
+            top_model: Some("claude-sonnet-4-5".into()),
+            by_client: vec![("Acme".into(), 2.10), (crate::clients::UNASSIGNED.into(), 1.32)],
+        };
+        let running = RunningAgent {
+            tool: "Claude Code".into(),
+            pid: 4242,
+            elapsed_secs: 942,
+            rss_bytes: 184_320_000,
+            cpu_percent: Some(3.1),
+            cwd: Some("/Users/example/site/client-a".into()),
+            area: Some("site/client-a".into()),
+            client: Some("Acme".into()),
+            pace: Some(LivePace {
+                session_id: "b6b4b9b2-27d1-4a52-9c2e-1a9a7a6f2e10".into(),
+                tokens_10m: 5_400,
+                cost_10m: 0.18,
+                priced: true,
+                idle_secs: 12,
+                model: Some("claude-sonnet-4-5".into()),
+                area: Some("site/client-a".into()),
+                tool: "Claude Code".into(),
+            }),
+        };
+        let actual = agents_feed(&[agent], &[running]);
+
+        fn keys(v: &serde_json::Value) -> Vec<&str> {
+            let mut k: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+            k.sort_unstable();
+            k
+        }
+        assert_eq!(keys(&documented), keys(&actual), "top-level shape");
+        assert_eq!(keys(&documented["agents"][0]), keys(&actual["agents"][0]), "an agents row's shape");
+        assert_eq!(keys(&documented["running"][0]), keys(&actual["running"][0]), "a running row's shape");
+        assert_eq!(
+            keys(&documented["running"][0]["pace"]),
+            keys(&actual["running"][0]["pace"]),
+            "a pace row's shape"
+        );
+    }
+
+    use super::{agents_feed, host_ok, provider_json, publish, route};
+    use crate::procs::RunningAgent;
     use crate::providers::{Metric, ResetCredit, Snapshot};
+    use crate::spend::{AgentSpend, LivePace};
 
     #[test]
     fn sub2api_public_projection_preserves_stale_and_display_amounts_only() {

@@ -129,7 +129,7 @@
   "settings.updateChecks": "更新を確認",
   "settings.updateChecksHint": "オンにすると、起動時と 4 時間ごとに github.com へ latest.json を 1 回リクエストします。あなたやこのコンピューターに関する情報は送信されません。",
   "settings.apiFeeds": "ローカル API で支出とサブスクリプションを提供",
-  "settings.apiFeedsHint": "自分のダッシュボード向けです。http://127.0.0.1:6736 に /v1/spend、/v1/spend/areas、/v1/spend/clients、/v1/subscriptions を追加し、このコンピューターからのみアクセスできます。作業領域とクライアントはそれぞれフォルダー名と実際の顧客名なので、オンにするまでは既定でオフになっています。",
+  "settings.apiFeedsHint": "自分のダッシュボード向けです。http://127.0.0.1:6736 に /v1/spend、/v1/spend/areas、/v1/spend/clients、/v1/subscriptions、/v1/agents を追加し、このコンピューターからのみアクセスできます。作業領域とクライアントはそれぞれフォルダー名と実際の顧客名なので、オンにするまでは既定でオフになっています。",
   "settings.apiKeysReveal": "API キーの入力欄を表示",
   "settings.apiKeysRevealNote": "自分でサインインできないツールにのみ必要です。",
   "settings.apiKeys": "API キー",

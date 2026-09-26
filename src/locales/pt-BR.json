@@ -129,7 +129,7 @@
   "settings.updateChecks": "Verificar atualizações",
   "settings.updateChecksHint": "Uma solicitação a github.com por latest.json ao abrir o app e a cada 4 horas enquanto estiver ativado. Nada sobre você ou este computador é enviado.",
   "settings.apiFeeds": "Disponibilizar gastos e assinaturas na API local",
-  "settings.apiFeedsHint": "Para seus próprios painéis. Adiciona /v1/spend, /v1/spend/areas, /v1/spend/clients e /v1/subscriptions a http://127.0.0.1:6736, acessível somente a partir deste computador. Áreas e clientes são nomes de pastas e de clientes, então isso fica desativado até você ativar.",
+  "settings.apiFeedsHint": "Para seus próprios painéis. Adiciona /v1/spend, /v1/spend/areas, /v1/spend/clients, /v1/subscriptions e /v1/agents a http://127.0.0.1:6736, acessível somente a partir deste computador. Áreas e clientes são nomes de pastas e de clientes, então isso fica desativado até você ativar.",
   "settings.apiKeysReveal": "Mostrar campos de chave de API",
   "settings.apiKeysRevealNote": "Só é necessário para ferramentas que não conseguem fazer login por conta própria.",
   "settings.apiKeys": "Chaves de API",

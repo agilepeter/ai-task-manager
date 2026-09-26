@@ -49,6 +49,112 @@ Wire format (compatible with the macOS OpenUsage API):
 }]
 ```
 
+## Opt-in feeds
+
+Off by default. Turn on **Serve spend and subscriptions on the local API**
+(Settings > Advanced) to publish these five paths at
+`http://127.0.0.1:6736`. While it is off, every one of them returns
+`404 {"error": "not_found"}` — the same as a path that was never a real
+route, not an empty result. Loopback-only and Host-checked, same as
+`/v1/usage` above.
+
+`GET /v1/spend` — spend per provider, with no folder-derived detail:
+
+```json
+[{
+  "providerId": "claude",
+  "displayName": "Claude",
+  "today": 4.12,
+  "yesterday": 9.87,
+  "last30": 214.55,
+  "dailyCost": 7.15,
+  "models": [{ "model": "claude-sonnet-4-5", "last30": 180.20 }]
+}]
+```
+
+`GET /v1/spend/areas` — work areas across every project, top level and as
+logged:
+
+```json
+[{ "area": "site/client-a", "today": 1.05, "yesterday": 2.40, "last30": 38.90 }]
+```
+
+`GET /v1/spend/clients` — your `clients.json` rules rolled up against
+those same areas:
+
+```json
+[{
+  "client": "Acme",
+  "today": { "cost": 1.05, "tokens": 42000, "models": [] },
+  "yesterday": { "cost": 2.40, "tokens": 91000, "models": [] },
+  "last30": { "cost": 38.90, "tokens": 1200000, "models": [] },
+  "monthToDate": 22.10,
+  "areas": ["site/client-a"]
+}]
+```
+
+`GET /v1/subscriptions` — your ledger, valued against measured usage:
+
+```json
+{
+  "items": [{
+    "id": "sub_1",
+    "name": "Claude Pro",
+    "price": 20.0,
+    "cycle": "monthly",
+    "renewsOn": "2026-10-15",
+    "provider": "claude",
+    "monthlyCost": 20.0,
+    "nextRenewal": "2026-10-15",
+    "daysLeft": 19,
+    "usage30": 214.55,
+    "valueRatio": 10.7,
+    "idle": false,
+    "whatIf": null
+  }],
+  "monthly": 20.0,
+  "yearly": 240.0,
+  "idleMonthly": 0.0
+}
+```
+
+`GET /v1/agents` — 30 days of subagent spend, plus who is running right
+now. A running row never carries `cwd` or `pid`: the folder a session ran
+in stays on this machine even over loopback. `area` and `client` are less
+specific and already published by the two feeds above, so they do go out:
+
+```json
+{
+  "agents": [{
+    "name": "code-reviewer",
+    "runs": 14,
+    "cost": 3.42,
+    "tokens": 128000,
+    "lastUsedMs": 1758844800000,
+    "topModel": "claude-sonnet-4-5",
+    "byClient": [["Acme", 2.10], ["Unassigned", 1.32]]
+  }],
+  "running": [{
+    "tool": "Claude Code",
+    "elapsedSecs": 942,
+    "rssBytes": 184320000,
+    "cpuPercent": 3.1,
+    "area": "site/client-a",
+    "client": "Acme",
+    "pace": {
+      "sessionId": "b6b4b9b2-27d1-4a52-9c2e-1a9a7a6f2e10",
+      "tokens10m": 5400,
+      "cost10m": 0.18,
+      "priced": true,
+      "idleSecs": 12,
+      "model": "claude-sonnet-4-5",
+      "area": "site/client-a",
+      "tool": "Claude Code"
+    }
+  }]
+}
+```
+
 ## Security posture
 
 - **Loopback only.** Binds `127.0.0.1` — nothing on your network can

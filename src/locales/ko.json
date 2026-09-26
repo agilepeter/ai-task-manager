@@ -129,7 +129,7 @@
   "settings.updateChecks": "업데이트 확인",
   "settings.updateChecksHint": "켜져 있으면 실행 시와 이후 4시간마다 github.com에 latest.json을 한 번 요청합니다. 사용자나 이 컴퓨터에 관한 어떤 정보도 전송되지 않습니다.",
   "settings.apiFeeds": "로컬 API에서 지출과 구독 제공",
-  "settings.apiFeedsHint": "나만의 대시보드를 위한 기능입니다. http://127.0.0.1:6736 에 /v1/spend, /v1/spend/areas, /v1/spend/clients, /v1/subscriptions 를 추가하며, 이 컴퓨터에서만 접근할 수 있습니다. 작업 영역과 클라이언트는 각각 폴더 이름과 실제 고객 이름이므로, 켜기 전까지는 기본적으로 꺼져 있습니다.",
+  "settings.apiFeedsHint": "나만의 대시보드를 위한 기능입니다. http://127.0.0.1:6736 에 /v1/spend, /v1/spend/areas, /v1/spend/clients, /v1/subscriptions, /v1/agents 를 추가하며, 이 컴퓨터에서만 접근할 수 있습니다. 작업 영역과 클라이언트는 각각 폴더 이름과 실제 고객 이름이므로, 켜기 전까지는 기본적으로 꺼져 있습니다.",
   "settings.apiKeysReveal": "API 키 입력란 표시",
   "settings.apiKeysRevealNote": "스스로 로그인할 수 없는 도구에만 필요합니다.",
   "settings.apiKeys": "API 키",

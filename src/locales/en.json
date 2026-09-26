@@ -129,7 +129,7 @@
   "settings.updateChecks": "Check for updates",
   "settings.updateChecksHint": "One request to github.com for latest.json, on launch and every 4 hours while this is on. Nothing about you or this computer is sent.",
   "settings.apiFeeds": "Serve spend and subscriptions on the local API",
-  "settings.apiFeedsHint": "For your own dashboards. Adds /v1/spend, /v1/spend/areas, /v1/spend/clients and /v1/subscriptions to http://127.0.0.1:6736, reachable from this computer only. Areas and clients are folder and customer names, so this is off until you turn it on.",
+  "settings.apiFeedsHint": "For your own dashboards. Adds /v1/spend, /v1/spend/areas, /v1/spend/clients, /v1/subscriptions and /v1/agents to http://127.0.0.1:6736, reachable from this computer only. Areas and clients are folder and customer names, so this is off until you turn it on.",
   "settings.apiKeysReveal": "Show API key fields",
   "settings.apiKeysRevealNote": "Only needed for tools that cannot sign you in themselves.",
   "settings.apiKeys": "API keys",

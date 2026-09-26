@@ -129,7 +129,7 @@
   "settings.updateChecks": "Buscar actualizaciones",
   "settings.updateChecksHint": "Una solicitud a github.com para latest.json al iniciar la app y cada 4 horas mientras esté activado. No se envía nada sobre este equipo.",
   "settings.apiFeeds": "Ofrecer gasto y suscripciones en la API local",
-  "settings.apiFeedsHint": "Para paneles propios. Añade /v1/spend, /v1/spend/areas, /v1/spend/clients y /v1/subscriptions a http://127.0.0.1:6736, accesible solo desde este equipo. Las áreas y los clientes son nombres de carpetas y de clientes, así que esto está desactivado hasta que se active.",
+  "settings.apiFeedsHint": "Para paneles propios. Añade /v1/spend, /v1/spend/areas, /v1/spend/clients, /v1/subscriptions y /v1/agents a http://127.0.0.1:6736, accesible solo desde este equipo. Las áreas y los clientes son nombres de carpetas y de clientes, así que esto está desactivado hasta que se active.",
   "settings.apiKeysReveal": "Mostrar campos de claves de API",
   "settings.apiKeysRevealNote": "Solo hace falta para herramientas que no pueden iniciar sesión por sí mismas.",
   "settings.apiKeys": "Claves de API",

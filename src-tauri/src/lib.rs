@@ -2783,6 +2783,11 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
             .collect();
         let usage30: std::collections::HashMap<String, f64> =
             result.iter().map(|p| (p.id.clone(), p.last30.cost)).collect();
+        let client_rules = clients::load_from(&clients::path());
+        // Unlike the rows above, which are already sitting in memory, this
+        // is a fresh process-table scan -- pay for it only while a
+        // dashboard could actually read the result.
+        let running_agents = if on { procs::agents_snapshot(&client_rules) } else { Vec::new() };
         httpapi::publish_feeds(
             on,
             vec![
@@ -2790,13 +2795,17 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
                 ("/v1/spend/areas", httpapi::areas_feed(&result)),
                 (
                     "/v1/spend/clients",
-                    serde_json::to_value(clients::rollup(&areas, &clients::load_from(&clients::path()), today))
+                    serde_json::to_value(clients::rollup(&areas, &client_rules, today))
                         .unwrap_or(Value::Null),
                 ),
                 (
                     "/v1/subscriptions",
                     serde_json::to_value(ledger::view(&ledger::load_from(&ledger::path()), today, &usage30))
                         .unwrap_or(Value::Null),
+                ),
+                (
+                    "/v1/agents",
+                    httpapi::agents_feed(&spend::agent_spend(30), &running_agents),
                 ),
             ],
         );

@@ -129,7 +129,7 @@
   "settings.updateChecks": "Nach Updates suchen",
   "settings.updateChecksHint": "Eine Anfrage an github.com nach latest.json, beim Start und danach alle 4 Stunden, solange das eingeschaltet ist. Nichts über diesen Computer wird gesendet.",
   "settings.apiFeeds": "Ausgaben und Abonnements über die lokale API bereitstellen",
-  "settings.apiFeedsHint": "Für eigene Dashboards. Fügt /v1/spend, /v1/spend/areas, /v1/spend/clients und /v1/subscriptions zu http://127.0.0.1:6736 hinzu, nur von diesem Computer aus erreichbar. Bereiche und Kunden sind Ordner- und Kundennamen, daher ist das standardmäßig aus, bis es eingeschaltet wird.",
+  "settings.apiFeedsHint": "Für eigene Dashboards. Fügt /v1/spend, /v1/spend/areas, /v1/spend/clients, /v1/subscriptions und /v1/agents zu http://127.0.0.1:6736 hinzu, nur von diesem Computer aus erreichbar. Bereiche und Kunden sind Ordner- und Kundennamen, daher ist das standardmäßig aus, bis es eingeschaltet wird.",
   "settings.apiKeysReveal": "API-Schlüsselfelder anzeigen",
   "settings.apiKeysRevealNote": "Nur nötig für Tools, die sich nicht selbst anmelden können.",
   "settings.apiKeys": "API-Schlüssel",
