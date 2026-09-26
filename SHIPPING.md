@@ -67,7 +67,10 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
    release itself. Any check failing leaves the draft as a draft and fails the job loudly
    instead of publishing something wrong. `scripts/verify-and-publish-release.sh vX.Y.Z
    --dry-run` runs the same checks by hand against an existing draft and prints the notes
-   without publishing, which is also how to diagnose a run that failed. The first tag cut
+   without publishing, which is also how to diagnose a run that failed. Fix whatever it
+   named, then re-run the publish job from the Actions tab, or run the script by hand
+   (without `--dry-run`) against the still-draft release -- a failed check leaves the
+   draft exactly as it was, so nothing needs re-tagging or re-pushing. The first tag cut
    after this pipeline shipped is still confirmed by hand once the job reports it published:
    open the release page and read it the way an installer would.
 4. Refresh the site's embedded demo and its SEO files: `scripts/sync-demo-to-site.sh`

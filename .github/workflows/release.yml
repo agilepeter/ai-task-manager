@@ -100,7 +100,10 @@ jobs:
   # the script so it can also be run by hand against an existing draft.
   publish:
     needs: [build]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A job-level if: replaces GitHub's implicit success() gate rather than adding to it,
+    # so success() must be spelled out here or a failed build leg (fail-fast is off) would
+    # still let this job run.
+    if: success() && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

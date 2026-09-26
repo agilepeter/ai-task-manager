@@ -96,10 +96,19 @@ CHANGELOG_PATH="$HERE/CHANGELOG.md"
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
+# Flipped to 1 the moment `gh release edit --draft=false` below succeeds, so
+# fail() can tell a check that ran before publishing (the draft is still just
+# a draft) apart from one that ran after (the release is already live).
+PUBLISHED=0
+
 fail() {
   echo "FAIL: $1" >&2
   if [ -z "$FIXTURE_DIR" ]; then
-    echo "Draft for $TAG left untouched." >&2
+    if [ "$PUBLISHED" -eq 1 ]; then
+      echo "$TAG is already published -- this failure happened in the post-publish destination check, not before it. Fix the problem named above and verify the release by hand; re-running this script will not undo or redo the publish." >&2
+    else
+      echo "Draft for $TAG left untouched." >&2
+    fi
   fi
   exit 1
 }
@@ -198,9 +207,16 @@ platforms = latest.get("platforms")
 if not platforms:
     fail("latest.json has no platforms")
 
-# 4. The three keys that point at real installers (as opposed to the
-# macOS "-app" update-bundle aliases) must be present.
-for key in ("windows-x86_64", "windows-x86_64-msi", "windows-x86_64-nsis"):
+# 4. The keys that point at real installers (as opposed to the macOS
+# "-app" update-bundle aliases) must be present for every platform the
+# feed is supposed to cover, not just Windows.
+for key in (
+    "windows-x86_64",
+    "windows-x86_64-msi",
+    "windows-x86_64-nsis",
+    "darwin-aarch64",
+    "darwin-x86_64",
+):
     if key not in platforms:
         fail(f"latest.json is missing the {key} platform entry")
 
@@ -267,7 +283,7 @@ install_block = f"""## Install
 
 **macOS, Intel and Apple Silicon (one universal build):** download `{dmg_name}`, open it and drag AI Task Manager to Applications. The app is not notarized yet, so the first launch needs a right-click on the app and Open, once; or run `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`.
 
-**Windows 10 and 11:** download `{exe_name}` (or the `.msi`). The installer is not signed yet, so SmartScreen will warn: More info, then Run anyway.
+**Windows 10 and 11:** download `{exe_name}` (or `{msi_name}`). The installer is not signed yet, so SmartScreen will warn: More info, then Run anyway.
 
 Installs with update checks on are offered this release at their next launch or popover open, or within four hours. Update checks stay off by default; with them off, download and install over the old copy.
 
@@ -301,6 +317,7 @@ gh release edit "$TAG" \
   --notes-file "$NOTES_FILE" \
   --draft=false \
   --latest
+PUBLISHED=1
 
 echo "Published $TAG. Verifying the update feed and installers resolve at the destination..."
 
