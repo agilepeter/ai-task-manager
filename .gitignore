@@ -41,3 +41,7 @@ pane.md
 
 # Browser demo build output
 dist-demo
+
+# Python bytecode from the scripts/ generators and their self-tests
+__pycache__/
+*.pyc
