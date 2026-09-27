@@ -161,7 +161,9 @@ passes; a failed check leaves the draft untouched. The first release was
 [v0.1.2](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.2), the first one the
 workflow published by itself. The
 artifacts are not signed, so building from source above remains the better
-path if you want to read what you are running.
+path if you want to read what you are running. Every release's changelog
+entry, rendered from `CHANGELOG.md`, is also on the web at
+`https://staas.fund/task-manager/changelog/`.
 
 ## How it works
 
