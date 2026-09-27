@@ -147,7 +147,10 @@ _BOLD_EM_RE = re.compile(r"\*\*\*(.+?)\*\*\*")
 # Code spans and links are found in ONE left-to-right pass, whichever starts
 # first winning: a code sample that shows link syntax stays code, and a link
 # whose address holds a backtick or an asterisk stays a link.
-_CODE_OR_LINK_RE = re.compile(r"`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)")
+# The address may hold one level of balanced parentheses, as real URLs do; a
+# link whose parentheses do not balance is not matched at all, so an address
+# is either taken whole or left as the text it was, never cut short.
+_CODE_OR_LINK_RE = re.compile(r"`([^`]+)`|\[([^\]]+)\]\(((?:[^()]|\([^()]*\))+)\)")
 _STASH_RE = re.compile("\x00(\\d+)\x00")
 
 
@@ -167,6 +170,10 @@ def render_inline(md: str) -> str:
     as Markdown; and whatever the input, the result is checked with a real
     HTML parser, falling back to the asterisks as written if emphasis would
     have produced tags that cross."""
+    # A NUL byte has no place in a changelog bullet, and the placeholders below
+    # are built from one: dropping it on the way in means nothing a writer
+    # typed can ever be mistaken for a placeholder on the way out.
+    md = md.replace("\x00", "")
     text = html.escape(md, quote=False).replace("—", " - ").replace("→", "->")
     stashed: list[str] = []
 
@@ -819,6 +826,15 @@ def selftest() -> int:
     code_with_link_syntax = render_inline("write `[text](url)` to link")
     check(code_with_link_syntax == "write <code>[text](url)</code> to link",
           f"link syntax shown inside a code span must stay code: {code_with_link_syntax!r}")
+    paren_url = render_inline("[text](https://example.com/a(b)c)")
+    check(paren_url == '<a href="https://example.com/a(b)c" rel="noopener">text</a>',
+          f"balanced parentheses inside a link address must stay in the address: {paren_url!r}")
+    open_paren_url = render_inline("[text](https://example.com/a(b)")
+    check("<a " not in open_paren_url and open_paren_url == "[text](https://example.com/a(b)",
+          f"an address whose parentheses do not balance must stay literal text, never a cut-short link: {open_paren_url!r}")
+    nul_collision = render_inline("a\x000\x00b `code`")
+    check(nul_collision == "a0b <code>code</code>",
+          f"NUL bytes in the input must be dropped, never read as a placeholder: {nul_collision!r}")
     crossed = render_inline("*a **b* c**")
     check(crossed == "*a **b* c**",
           f"asterisks that cross must print as written, never as tags that cross: {crossed!r}")
@@ -827,6 +843,8 @@ def selftest() -> int:
         "***bold and em***", "[text](https://example.com/*star*/page)", "[t](https://example.com/**x**/y)",
         "[t](https://example.com/`x`/y)", "[`cfg` file](https://example.com/cfg)", "[*a*](https://example.com)",
         "write `[text](url)` to link", "*a **b* c**", "**a *b** c*", "one *two* three*", "(*a*), *b*.",
+        "[text](https://example.com/a(b)c)", "[text](https://example.com/a(b)", "[a](https://x.y/1) and [b](https://x.y/2)",
+        "[a](https://x.y)*em*", "[a [b] c](https://x.y)",
         "**A *lively* `feature`.** The rest.",
     ):
         check(_well_nested(render_inline(sample)),
