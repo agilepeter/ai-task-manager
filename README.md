@@ -162,8 +162,8 @@ passes; a failed check leaves the draft untouched. The first release was
 workflow published by itself. The
 artifacts are not signed, so building from source above remains the better
 path if you want to read what you are running. Every release's changelog
-entry, rendered from `CHANGELOG.md`, is also on the web at
-`https://staas.fund/task-manager/changelog/`.
+entry, rendered from `CHANGELOG.md`, is also on the
+[changelog page](https://staas.fund/task-manager/changelog/).
 
 ## How it works
 
