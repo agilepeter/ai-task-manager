@@ -131,18 +131,29 @@ def _parse_bullets(text: str) -> list[str]:
 
 _CODE_RE = re.compile(r"`([^`]+)`")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+# A single asterisk opens emphasis only when the character right after it is
+# not whitespace, and closes only when the character right before it is not
+# whitespace either -- the same flanking rule real Markdown uses to keep
+# "2 * 3 * 4" from reading as emphasis. Run only after _BOLD_RE has already
+# consumed every "**...**" pair, so the two asterisks of a bold span are
+# never still lying around for this pattern to mistake for two single ones.
+_EM_RE = re.compile(r"\*(?!\s)(.+?)(?<!\s)\*")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _STASH_RE = re.compile("\x00(\\d+)\x00")
 
 
 def render_inline(md: str) -> str:
-    """**bold** leads, `code`, and [text](url) links become their HTML;
-    everything else comes out as escaped text. An em dash and an arrow are
-    part of the changelog's own prose style, not this page's, so both
-    become plain punctuation here instead of carrying the glyph through.
-    Code spans are pulled out before bold and link parsing run, and put
-    back afterwards, so a stray '**' or '[' inside a code sample can never
-    be mistaken for Markdown around it."""
+    """**bold** leads, *emphasis*, `code`, and [text](url) links become
+    their HTML; everything else comes out as escaped text. An em dash and
+    an arrow are part of the changelog's own prose style, not this page's,
+    so both become plain punctuation here instead of carrying the glyph
+    through. Code spans are pulled out before any of the rest run, and put
+    back afterwards, so a stray '**', '*' or '[' inside a code sample can
+    never be mistaken for Markdown around it. Bold is matched, and fully
+    replaced, before emphasis ever looks at the text, so the two asterisks
+    of a bold span can never be misread as a pair of single ones; a lone or
+    unclosed asterisk that survives both passes was never Markdown to begin
+    with and is left exactly as escaping produced it."""
     text = html.escape(md, quote=False).replace("—", " - ").replace("→", "->")
     stashed: list[str] = []
 
@@ -153,6 +164,7 @@ def render_inline(md: str) -> str:
     text = _CODE_RE.sub(stash, text)
     text = _LINK_RE.sub(lambda m: f'<a href="{m.group(2)}" rel="noopener">{m.group(1)}</a>', text)
     text = _BOLD_RE.sub(lambda m: f"<strong>{m.group(1)}</strong>", text)
+    text = _EM_RE.sub(lambda m: f"<em>{m.group(1)}</em>", text)
     return _STASH_RE.sub(lambda m: stashed[int(m.group(1))], text)
 
 
@@ -706,6 +718,34 @@ def selftest() -> int:
     escaped_bullet = render_inline(releases[0].sections["Changed"][0])
     check("<code>&lt;Config&gt;</code>" in escaped_bullet, f"code content not escaped: {escaped_bullet!r}")
     check("A &amp; B" in escaped_bullet, f"surrounding text not escaped: {escaped_bullet!r}")
+
+    # Single-asterisk emphasis, added alongside the existing **bold**: bold
+    # still wins where the two could be confused, code still shields its
+    # own asterisks, and an asterisk that was never really Markdown -- lone,
+    # unclosed, or a multiplication sign with spaces on both sides -- comes
+    # through exactly as escaping left it.
+    check(render_inline("*a*") == "<em>a</em>", f"a single-asterisk span must become <em>: {render_inline('*a*')!r}")
+    check(render_inline("**b**") == "<strong>b</strong>", f"a double-asterisk span must still become <strong>: {render_inline('**b**')!r}")
+    combined = render_inline("**b** and *a*")
+    check(combined == "<strong>b</strong> and <em>a</em>",
+          f"bold and emphasis together in one bullet must both render, bold never mistaken for emphasis: {combined!r}")
+    code_star = render_inline("a `2 * 3` span")
+    check("<code>2 * 3</code>" in code_star and "<em>" not in code_star,
+          f"an asterisk inside a code span must stay literal, not become emphasis: {code_star!r}")
+    check(render_inline("a * lone one") == "a * lone one",
+          f"a lone asterisk must stay literal: {render_inline('a * lone one')!r}")
+    check(render_inline("*unclosed") == "*unclosed",
+          f"an unclosed asterisk must stay literal: {render_inline('*unclosed')!r}")
+    check(render_inline("2 * 3 * 4") == "2 * 3 * 4",
+          f"asterisks with spaces on both sides (multiplication, not emphasis) must stay literal: {render_inline('2 * 3 * 4')!r}")
+
+    # _lead_text() and render_whats_new() work from the bold lead's raw
+    # markdown, not render_inline()'s output, so emphasis or code sitting
+    # inside that lead must still come through once render_whats_new()
+    # eventually does call render_inline() on it.
+    lead_with_emphasis = _lead_text("**A *lively* `feature`.** The rest of the sentence never reaches the strip.")
+    check(render_inline(lead_with_emphasis) == "<strong>A <em>lively</em> <code>feature</code></strong>",
+          f"a bold lead containing both emphasis and code must still render correctly: {render_inline(lead_with_emphasis)!r}")
 
     check(anchor_id("0.1.2") == "v0-1-2", "anchor_id must turn dots into hyphens")
 
