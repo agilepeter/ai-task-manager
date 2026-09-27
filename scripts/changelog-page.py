@@ -13,14 +13,18 @@ exactly as it already has to be for the workshop.css and favicon links in
 the head.
 
     python3 scripts/changelog-page.py <path-to-task-manager/index.html>
-        Writes <site-root>/task-manager/changelog/index.html. The first
-        time only, also adds two empty marker comments to the product page
-        for a later change to fill in; once they exist this never touches
-        them again.
+        Writes <site-root>/task-manager/changelog/index.html, then keeps
+        two spots on the product page current for the newest release: the
+        "what's new" strip under the facts grid, and the "See what
+        changed" link inside the Version cell. Each spot's marker-comment
+        pair is added once, the first time it is missing; the content
+        between a pair is rewritten on every run, so both always name
+        today's version even though the markers themselves never move.
 
     python3 scripts/changelog-page.py --check <path-to-task-manager/index.html>
-        The drift gate: renders to memory and exits 1 if the page already
-        on disk would come out any different today.
+        The drift gate: renders to memory and exits 1 if the changelog
+        page, the what's-new strip or the Version-cell link on disk would
+        come out any different today.
 
     python3 scripts/changelog-page.py --selftest
         Exercises a fixture changelog and a fixture product page against a
@@ -45,9 +49,14 @@ MARK_START = "<!-- whats-new:start -->"
 MARK_END = "<!-- whats-new:end -->"
 # The indentation ensure_whats_new_markers() writes both before the start
 # marker and between the two markers. Naming it once means the writer and
-# the --check reader can never quietly disagree about what "nothing has
-# been spliced in yet" looks like.
+# a first, still-empty --check run can never quietly disagree about what
+# "nothing has been spliced in yet" looks like.
 _WHATS_NEW_GAP = "\n      "
+# The Version cell's own marker pair, narrower than the one above: it
+# wraps only the "See what changed" link inside a sentence of otherwise
+# hand-written prose, never the sentence itself.
+LINK_MARK_START = "<!-- whats-new-link:start -->"
+LINK_MARK_END = "<!-- whats-new-link:end -->"
 
 
 @dataclass
@@ -149,6 +158,30 @@ def render_inline(md: str) -> str:
 
 def anchor_id(version: str) -> str:
     return "v" + version.replace(".", "-")
+
+
+_BOLD_LEAD_RE = re.compile(r"^\*\*(.+?)\*\*")
+
+
+def _lead_text(bullet: str) -> str:
+    """The short label a whats-new item shows for one bullet: its own
+    **bold lead** markdown (kept as markdown, so render_inline still
+    turns it into <strong> the same way it does on the full changelog
+    page) with the trailing period trimmed, since every item in that
+    strip reads as a short label rather than a full sentence, and with
+    the rest of the bullet's own explanation left out entirely -- that
+    continuation belongs to the fuller changelog page, not a three-item
+    strip on the product page. A bullet with no bold lead of its own
+    (this changelog always writes one, but nothing here enforces that)
+    falls back to the whole bullet, period trimmed the same way, rather
+    than contributing an empty item to a strip that promised three."""
+    m = _BOLD_LEAD_RE.match(bullet)
+    lead = f"**{m.group(1)}**" if m else bullet
+    if lead.endswith(".**"):
+        return lead[:-3] + "**"
+    if lead.endswith("."):
+        return lead[:-1]
+    return lead
 
 
 # ---------------------------------------------------------------------------
@@ -332,34 +365,75 @@ def ensure_whats_new_markers(product_page_html: str) -> str:
 
 
 def render_whats_new(latest: Release) -> str:
-    """The strip's inner HTML for the most recent release. Nothing splices
-    this into the product page yet, only ever the two empty markers are,
-    but it is defined now so the change that does the splicing later has
-    something real, already exercised by this file's own selftest, to
-    call rather than writing it from scratch under time pressure."""
-    items = [b for bullets in latest.sections.values() for b in bullets]
-    lis = "".join(f"<li>{render_inline(b)}</li>" for b in items)
+    """The strip's inner HTML for the most recent release: a small-caps
+    title naming the version and its date, up to three short items, then
+    the two links out to the fuller history. Added is the section almost
+    every release actually writes, but a release that for once has none
+    still needs a strip, so this falls back to whichever section
+    parse_changelog listed first for that release -- the same file order
+    the changelog itself already reads in, never re-sorted by name or
+    guessed at."""
+    kind = "Added" if "Added" in latest.sections else next(iter(latest.sections), None)
+    bullets = latest.sections[kind][:3] if kind else []
+    items = "".join(f"<li>{render_inline(_lead_text(b))}</li>" for b in bullets)
+    tag_url = f"{REPO_URL}/releases/tag/v{latest.version}"
     return (
-        f'<p class="tm-whats-new-version">Version {html.escape(latest.version)} '
-        f'<span class="tm-whats-new-date">{html.escape(latest.date)}</span></p>'
-        f'<ul class="tm-whats-new-list">{lis}</ul>'
-        f'<p class="tm-whats-new-link"><a href="{CHANGELOG_URL}#{anchor_id(latest.version)}" rel="noopener">'
-        f'Full changelog</a></p>'
+        '<div class="tm-whatsnew">'
+        f'<p class="tm-whatsnew-title">What&rsquo;s new in {html.escape(latest.version)} '
+        f'- <span class="tm-whatsnew-date">{html.escape(latest.date)}</span></p>'
+        f'<ul class="tm-whatsnew-list">{items}</ul>'
+        '<p class="tm-whatsnew-links">'
+        f'<a href="changelog/#{anchor_id(latest.version)}" rel="noopener">All changes</a>'
+        f' &middot; <a href="{html.escape(tag_url)}" rel="noopener">Release notes on GitHub</a></p>'
+        '</div>'
     )
 
 
-def splice(product_page_html: str, inner: str) -> str:
-    """Replaces whatever sits between the two marker comments with inner,
-    leaving the rest of the page untouched. A missing or repeated marker
-    means the page is not in the shape this expects, so it refuses rather
-    than guessing where the strip belongs."""
-    if product_page_html.count(MARK_START) != 1 or product_page_html.count(MARK_END) != 1:
-        raise ValueError("whats-new markers are missing or appear more than once")
-    start = product_page_html.index(MARK_START) + len(MARK_START)
-    end = product_page_html.index(MARK_END)
-    if end < start:
-        raise ValueError("whats-new end marker appears before its start marker")
-    return product_page_html[:start] + "\n" + inner + "\n" + product_page_html[end:]
+def render_version_link(latest: Release) -> str:
+    """The "See what changed" link spliced into the Version cell's own
+    <small>, inside the Information section -- a different <dl> from the
+    facts strip above, kept current the same way splice() keeps the strip
+    current: the anchor always follows whichever version is newest
+    today."""
+    return f'<a href="changelog/#{anchor_id(latest.version)}" rel="noopener">See what changed</a>'
+
+
+def ensure_whats_new_link_markers(product_page_html: str) -> str:
+    """Adds the narrower marker pair around just the "See what changed"
+    link inside the Version cell's <small>, the one time it is missing.
+    Everything else in that <small> -- the release month, the
+    unsigned-installers note -- is hand-written prose this generator does
+    not own; wrapping only the link keeps every future run's rewrite
+    scoped to the one fragment that is actually its to change. The single
+    leading space is written once, here, outside the markers, so
+    "unsigned. See what changed" always reads as two sentences and no
+    later run ever has to remember to re-add it."""
+    if LINK_MARK_START in product_page_html:
+        return product_page_html
+    anchor = product_page_html.index("<dt>Version</dt>")
+    close = product_page_html.index("</small>", anchor)
+    return product_page_html[:close] + " " + LINK_MARK_START + LINK_MARK_END + product_page_html[close:]
+
+
+def splice(html_text: str, start: str, end: str, inner: str) -> str:
+    """Replaces whatever sits between a start/end marker pair with inner
+    exactly as given, leaving the rest of the page untouched. Shared by
+    both marker pairs on the product page, so there is exactly one
+    implementation of "replace between two comments" rather than one per
+    pair. A missing or duplicated marker, or an end that comes before its
+    own start, means the page is not in the shape this expects, so this
+    refuses outright rather than guessing where the managed content
+    belongs. Whether inner carries its own leading/trailing newlines is
+    the caller's call: the block-level whats-new strip reads better on
+    its own source lines, while the Version cell's link sits inline in a
+    sentence and must not gain one."""
+    if html_text.count(start) != 1 or html_text.count(end) != 1:
+        raise ValueError(f"markers {start!r} / {end!r} are missing or appear more than once")
+    s = html_text.index(start) + len(start)
+    e = html_text.index(end)
+    if e < s:
+        raise ValueError(f"end marker {end!r} appears before its start marker {start!r}")
+    return html_text[:s] + inner + html_text[e:]
 
 
 # ---------------------------------------------------------------------------
@@ -412,21 +486,24 @@ def _check(releases: list[Release], product_page_html: str, site_root: pathlib.P
         print(f"stale: {target} does not match what CHANGELOG.md renders today", file=sys.stderr)
         return 1
 
-    if product_page_html.count(MARK_START) != 1 or product_page_html.count(MARK_END) != 1:
-        print("stale: the product page's whats-new markers are missing or appear more than once", file=sys.stderr)
+    # The expected product page is computed with the exact same calls
+    # main() writes with below -- never a second, hand-rolled copy of the
+    # marker or splice format to keep in sync by hand. A page that is
+    # already current comes back byte-identical to itself, so idempotence
+    # IS the check; a missing, duplicated or reversed marker pair raises
+    # inside ensure_*/splice and is reported the same way any other
+    # staleness is.
+    try:
+        latest = releases[0]
+        expected = ensure_whats_new_markers(product_page_html)
+        expected = ensure_whats_new_link_markers(expected)
+        expected = splice(expected, MARK_START, MARK_END, "\n" + render_whats_new(latest) + "\n")
+        expected = splice(expected, LINK_MARK_START, LINK_MARK_END, render_version_link(latest))
+    except ValueError as e:
+        print(f"stale: {e}", file=sys.stderr)
         return 1
-    start = product_page_html.index(MARK_START) + len(MARK_START)
-    end = product_page_html.index(MARK_END)
-    if end < start:
-        print("stale: the product page's whats-new end marker comes before its start marker", file=sys.stderr)
-        return 1
-    # Nothing calls splice() with render_whats_new()'s output yet, so the
-    # one correct thing between the markers today is the plain gap
-    # ensure_whats_new_markers() itself writes. Once a later change starts
-    # actually splicing a rendered strip in, this is the one line that
-    # needs to change for the drift check to keep covering it.
-    if product_page_html[start:end] != _WHATS_NEW_GAP:
-        print("stale: the product page's whats-new strip does not match what belongs there right now", file=sys.stderr)
+    if expected != product_page_html:
+        print("stale: the product page's whats-new strip or Version-cell link does not match what belongs there today", file=sys.stderr)
         return 1
     return 0
 
@@ -461,10 +538,14 @@ def main(argv: list[str]) -> int:
     target.write_text(render_page(releases, product_page_html))
     print(f"wrote {target}")
 
+    latest = releases[0]
     updated = ensure_whats_new_markers(product_page_html)
+    updated = ensure_whats_new_link_markers(updated)
+    updated = splice(updated, MARK_START, MARK_END, "\n" + render_whats_new(latest) + "\n")
+    updated = splice(updated, LINK_MARK_START, LINK_MARK_END, render_version_link(latest))
     if updated != product_page_html:
         product_page_path.write_text(updated)
-        print(f"wrote {product_page_path} (added the whats-new markers)")
+        print(f"wrote {product_page_path} (refreshed the whats-new strip and the Version-cell link)")
     return 0
 
 
@@ -482,6 +563,9 @@ Intro paragraph, never rendered on the page.
 
 - **Bold lead.** Text with `inline code`, a [link](https://example.com/page),
   plus an em dash—here and an arrow→there.
+- **Second lead.** Extra detail that must never reach the strip.
+- **Third lead.** Even more detail that must never reach the strip either.
+- **Fourth lead.** This one must never render; the strip caps at three.
 
 ### Changed
 
@@ -534,6 +618,9 @@ FIXTURE_PRODUCT_PAGE = """<!DOCTYPE html>
         <div><dt>Price</dt><dd>Free</dd></div>
       </dl>
     </div>
+    <dl class="tm-info">
+      <div><dt>Version</dt><dd>0.1.2<small>Sept 2026. Installers unsigned.</small></dd></div>
+    </dl>
   </main>
   <footer class="workshop-footer">
     <a href="../library/">Library</a>
@@ -570,6 +657,20 @@ FIXTURE_REPEATED_SECTION = """## 0.3.0 — 2026-01-03
 ### Added
 
 - A second Added heading in the same release must not replace the first list.
+"""
+
+FIXTURE_NO_ADDED = """## 0.4.0 — 2026-02-01
+
+### Fixed
+
+- **First fixed thing.** Detail that stays out of the strip.
+- **Second fixed thing.** More detail that stays out too.
+- Plain bullet with no bold lead at all.
+- **Fourth fixed thing.** Never reached; the strip still caps at three.
+
+### Removed
+
+- Something removed, never reached because Fixed comes first.
 """
 
 
@@ -640,32 +741,80 @@ def selftest() -> int:
         check(ld.get("name") == "AI Task Manager", "unrelated ld+json fields must survive the copy untouched")
 
     marked_once = ensure_whats_new_markers(FIXTURE_PRODUCT_PAGE)
+    marked_once = ensure_whats_new_link_markers(marked_once)
     check(marked_once.count(MARK_START) == 1 and marked_once.count(MARK_END) == 1,
           "whats-new markers must be inserted exactly once")
+    check(marked_once.count(LINK_MARK_START) == 1 and marked_once.count(LINK_MARK_END) == 1,
+          "whats-new-link markers must be inserted exactly once")
     check(marked_once.index(MARK_START) > marked_once.index('<dl class="tm-facts">'),
           "whats-new markers must land after the facts strip, not before it")
-    marked_twice = ensure_whats_new_markers(marked_once)
-    check(marked_twice == marked_once, "a second run must not duplicate the whats-new markers")
+    check(marked_once.index(LINK_MARK_START) > marked_once.index("<dt>Version</dt>"),
+          "whats-new-link markers must land inside the Version cell, not before it")
+    check(" " + LINK_MARK_START in marked_once,
+          "the whats-new-link markers need a leading space so the link never runs into the sentence before it")
+    marked_twice = ensure_whats_new_link_markers(ensure_whats_new_markers(marked_once))
+    check(marked_twice == marked_once, "a second run must not duplicate either marker pair")
 
     try:
-        splice(FIXTURE_PRODUCT_PAGE, "<p>x</p>")
+        splice(FIXTURE_PRODUCT_PAGE, MARK_START, MARK_END, "<p>x</p>")
         failures.append("splice must raise when the markers are absent")
     except ValueError:
         pass
-    spliced = splice(marked_once, "<p>hello</p>")
+    spliced = splice(marked_once, MARK_START, MARK_END, "<p>hello</p>")
     check("<p>hello</p>" in spliced and MARK_START in spliced and MARK_END in spliced,
           "splice must insert between the markers and keep both of them in place")
     duplicated = marked_once.replace(MARK_START, MARK_START + MARK_START)
     try:
-        splice(duplicated, "<p>x</p>")
+        splice(duplicated, MARK_START, MARK_END, "<p>x</p>")
         failures.append("splice must raise when a marker is duplicated")
     except ValueError:
         pass
 
+    # render_whats_new: the common case is three Added leads, but a
+    # release can write fewer, or none at all.
     strip = render_whats_new(releases[0])
-    check("0.1.2" in strip, "the strip must name the version it summarises")
-    check("<strong>Bold lead.</strong>" in strip, "the strip must render its bullets through the same inline rules")
+    check("What&rsquo;s new in 0.1.2" in strip, "the strip must name the version it summarises")
+    check("2026-09-26" in strip, "the strip must give the release date in plain text")
+    check("<strong>Bold lead</strong>" in strip, "a bold lead's trailing period must be dropped from the strip")
+    check("<strong>Second lead</strong>" in strip and "<strong>Third lead</strong>" in strip,
+          "the strip must carry the second and third Added leads too")
+    check("Fourth lead" not in strip, "the strip must cap at three items even when a release lists more")
+    check(strip.count("<li>") == 3, "three available Added leads must produce exactly three items")
     check(re.search(r"—|→", strip) is None, "no em dash or arrow may survive into the strip either")
+    check(f'href="changelog/#{anchor_id("0.1.2")}"' in strip and ">All changes<" in strip,
+          "the strip must link to this release's own anchor on the changelog page")
+    check(f'href="{REPO_URL}/releases/tag/v0.1.2"' in strip and "Release notes on GitHub" in strip,
+          "the strip must link to this release's GitHub release notes")
+
+    thin_strip = render_whats_new(releases[1])  # 0.1.1: exactly one Added bullet, no bold lead
+    check(thin_strip.count("<li>") == 1, "fewer than three Added bullets must render only what exists, never padded")
+    check("<li>Earlier release, one bullet</li>" in thin_strip,
+          "a bullet with no bold lead of its own must still show as an item, period trimmed")
+
+    no_added = parse_changelog(FIXTURE_NO_ADDED)[0]
+    check("Added" not in no_added.sections, "fixture setup: this release must have no Added section")
+    fallback_strip = render_whats_new(no_added)
+    check(fallback_strip.count("<li>") == 3, "the no-Added fallback must still cap at three items")
+    check("<strong>First fixed thing</strong>" in fallback_strip and "<strong>Second fixed thing</strong>" in fallback_strip,
+          "with no Added section, the strip must fall back to the first section the release actually lists")
+    check("Fourth fixed thing" not in fallback_strip and "Something removed" not in fallback_strip,
+          "the fallback must use only the first three bullets of the FIRST section present, never a later one")
+
+    link = render_version_link(releases[0])
+    check(link == '<a href="changelog/#v0-1-2" rel="noopener">See what changed</a>',
+          f"the Version cell's link text and target must match the newest release exactly: {link!r}")
+
+    def _freshly_spliced(product_page_html: str, latest: Release) -> str:
+        """The page exactly as a real run would leave it: both marker
+        pairs present and both holding today's content. Building it this
+        one way -- by calling the very functions --check itself calls --
+        means a fixture claiming to be "fresh" can never quietly drift
+        from what --check considers fresh."""
+        page = ensure_whats_new_link_markers(ensure_whats_new_markers(product_page_html))
+        page = splice(page, MARK_START, MARK_END, "\n" + render_whats_new(latest) + "\n")
+        return splice(page, LINK_MARK_START, LINK_MARK_END, render_version_link(latest))
+
+    fresh_page = _freshly_spliced(FIXTURE_PRODUCT_PAGE, releases[0])
 
     # End to end through the real CLI: a fresh write agrees with --check,
     # and a one-byte edit to the file on disk makes the drift gate fail.
@@ -684,7 +833,15 @@ def selftest() -> int:
 
         changelog_out = tmp_path / "task-manager" / "changelog" / "index.html"
         check(changelog_out.exists(), "the write run must produce the changelog page")
-        check(MARK_START in product_page_path.read_text(), "the write run must add the whats-new markers")
+        written_page = product_page_path.read_text()
+        check(MARK_START in written_page and LINK_MARK_START in written_page,
+              "the write run must add both whats-new marker pairs")
+        check("What&rsquo;s new in 0.1.2" in written_page and "<strong>Bold lead</strong>" in written_page,
+              "the write run must splice real content into the whats-new strip, not leave it empty")
+        check('href="changelog/#v0-1-2" rel="noopener">See what changed<' in written_page,
+              "the write run must splice the Version cell's link to the newest release")
+        check(written_page == fresh_page,
+              "the CLI's write output must match splicing the same content in directly, in-process")
 
         check_argv = [sys.executable, str(SCRIPT_PATH), "--check", str(product_page_path),
                       "--changelog", str(changelog_path), "--site-root", str(tmp_path)]
@@ -698,8 +855,10 @@ def selftest() -> int:
 
         rerun = subprocess.run(write_argv, capture_output=True, text=True)
         check(rerun.returncode == 0, "a second write run must still succeed")
-        check(product_page_path.read_text().count(MARK_START) == 1,
-              "a second write run must not duplicate the whats-new markers on a real file")
+        rerun_page = product_page_path.read_text()
+        check(rerun_page.count(MARK_START) == 1 and rerun_page.count(LINK_MARK_START) == 1,
+              "a second write run must not duplicate either whats-new marker pair on a real file")
+        check(rerun_page == written_page, "a second write run must reproduce byte-identical output")
 
     # A malformed changelog must stop the CLI before it writes anything,
     # rather than silently folding a heading into the wrong release or
@@ -722,12 +881,13 @@ def selftest() -> int:
         check(product_page_path.read_text() == FIXTURE_PRODUCT_PAGE,
               "a malformed changelog must leave the product page untouched")
 
-    # --check must cover the product page's whats-new markers too, not
-    # only the separate changelog page file.
+    # --check must cover the product page's whats-new strip and Version
+    # link too, not only the separate changelog page file.
     def _check_against(product_page_html: str) -> subprocess.CompletedProcess:
         """Runs --check in a fresh temp dir where the changelog page is
         already correct for this exact product_page_html, so a failure can
-        only come from the whats-new markers this test is exercising."""
+        only come from the whats-new strip or Version-cell link this test
+        is exercising."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = pathlib.Path(tmp)
             product_page_path = tmp_path / "task-manager" / "index.html"
@@ -743,26 +903,41 @@ def selftest() -> int:
             return subprocess.run(argv, capture_output=True, text=True)
 
     result = _check_against(FIXTURE_PRODUCT_PAGE)
-    check(result.returncode == 1, f"--check must fail when the whats-new markers are missing: {result.stderr!r}")
+    check(result.returncode == 1, f"--check must fail when both whats-new marker pairs are missing: {result.stderr!r}")
     check(len(result.stderr.strip().splitlines()) == 1, f"--check must report a missing marker in one line: {result.stderr!r}")
 
-    duplicated_marker = marked_once.replace(MARK_START, MARK_START + MARK_START, 1)
+    result = _check_against(marked_once)
+    check(result.returncode == 1,
+          f"--check must fail when both marker pairs exist but nothing has been spliced in yet: {result.stderr!r}")
+
+    # The remaining corruptions are each applied to an otherwise-fresh page,
+    # so a failure can only be attributed to the one thing this test broke.
+    duplicated_marker = fresh_page.replace(MARK_START, MARK_START + MARK_START, 1)
     result = _check_against(duplicated_marker)
     check(result.returncode == 1, f"--check must fail when a whats-new marker is duplicated: {result.stderr!r}")
 
-    start_i = marked_once.index(MARK_START)
-    end_i = marked_once.index(MARK_END)
-    reversed_order = (marked_once[:start_i] + MARK_END + _WHATS_NEW_GAP + MARK_START
-                       + marked_once[end_i + len(MARK_END):])
+    duplicated_link_marker = fresh_page.replace(LINK_MARK_START, LINK_MARK_START + LINK_MARK_START, 1)
+    result = _check_against(duplicated_link_marker)
+    check(result.returncode == 1, f"--check must fail when a whats-new-link marker is duplicated: {result.stderr!r}")
+
+    start_i = fresh_page.index(MARK_START)
+    end_i = fresh_page.index(MARK_END)
+    strip_inner_now = fresh_page[start_i + len(MARK_START):end_i]
+    reversed_order = (fresh_page[:start_i] + MARK_END + strip_inner_now + MARK_START
+                       + fresh_page[end_i + len(MARK_END):])
     result = _check_against(reversed_order)
     check(result.returncode == 1, f"--check must fail when the end marker comes before the start marker: {result.stderr!r}")
 
-    stale_content = marked_once.replace(MARK_END, "<p>leftover</p>" + MARK_END, 1)
+    stale_content = fresh_page.replace(MARK_END, "<p>leftover</p>" + MARK_END, 1)
     result = _check_against(stale_content)
-    check(result.returncode == 1, f"--check must fail when something has been left between the whats-new markers: {result.stderr!r}")
+    check(result.returncode == 1, f"--check must fail when something stale has been left between the whats-new markers: {result.stderr!r}")
 
-    result = _check_against(marked_once)
-    check(result.returncode == 0, f"--check must pass right after the markers are freshly inserted: {result.stderr!r}")
+    stale_link = fresh_page.replace(LINK_MARK_END, '<a href="old">old</a>' + LINK_MARK_END, 1)
+    result = _check_against(stale_link)
+    check(result.returncode == 1, f"--check must fail when the Version cell's link is stale: {result.stderr!r}")
+
+    result = _check_against(fresh_page)
+    check(result.returncode == 0, f"--check must pass once both marker pairs hold today's real content: {result.stderr!r}")
 
     if failures:
         for f in failures:

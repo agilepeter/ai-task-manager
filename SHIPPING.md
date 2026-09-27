@@ -83,7 +83,9 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
    rebuilds the demo itself, copies `dist-demo/` into
    `staasfund/task-manager/demo/` and bump the page's iframe `?v=`; bring the AI Task
    Manager rows in the site's `llms.txt` and `llms-full.txt` current by hand. Skipping
-   this step after 0.1.0 left the site showing a stale demo build.
+   this step after 0.1.0 left the site showing a stale demo build. The same script
+   also regenerates the changelog page and refreshes the product page's what's-new
+   strip and Version-cell link for the tagged release.
 
 ## Still upstream's
 

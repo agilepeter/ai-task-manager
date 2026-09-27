@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Rebuild the browser demo and copy it into the staas.fund product page.
-# Writes to exactly one folder: <site>/task-manager/demo/. It never commits or
-# pushes: a push to that repo is a deploy, and that stays a human decision.
+# Writes the demo to <site>/task-manager/demo/, regenerates
+# <site>/task-manager/changelog/ from CHANGELOG.md, and refreshes the product
+# page's two marked spots for the newest release: the what's-new strip under
+# the facts grid, and the Version cell's "See what changed" link. It never
+# commits or pushes: a push to that repo is a deploy, and that stays a human
+# decision.
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 site="${1:-$here/../staasfund}"
@@ -17,5 +21,6 @@ rm -f "$dest/index.html" "$dest"/assets/demo-*.css "$dest"/assets/demo-*.js
 cp dist-demo/assets/demo-*.css dist-demo/assets/demo-*.js "$dest/assets/"
 cp dist-demo/demo.html "$dest/index.html"
 python3 "$here/scripts/bump-demo-version.py" "$site/task-manager/index.html"
+python3 "$here/scripts/changelog-page.py" "$site/task-manager/index.html"
 
 echo "Demo copied to $dest. Review, then commit and push the site yourself."
