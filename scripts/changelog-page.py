@@ -43,6 +43,11 @@ CHANGELOG_URL = "https://staas.fund/task-manager/changelog/"
 DEFAULT_CHANGELOG = SCRIPT_PATH.parent.parent / "CHANGELOG.md"
 MARK_START = "<!-- whats-new:start -->"
 MARK_END = "<!-- whats-new:end -->"
+# The indentation ensure_whats_new_markers() writes both before the start
+# marker and between the two markers. Naming it once means the writer and
+# the --check reader can never quietly disagree about what "nothing has
+# been spliced in yet" looks like.
+_WHATS_NEW_GAP = "\n      "
 
 
 @dataclass
@@ -57,31 +62,44 @@ class Release:
 # ---------------------------------------------------------------------------
 
 _VERSION_RE = re.compile(r"^## (\S+) — (\d{4}-\d{2}-\d{2})\s*$", re.MULTILINE)
+_HEADING_RE = re.compile(r"^## .*$", re.MULTILINE)
 _SECTION_RE = re.compile(r"^### (.+?)\s*$", re.MULTILINE)
 
 
 def parse_changelog(text: str) -> list[Release]:
-    """One Release per '## <version> — <date>' heading. The file is
-    already written newest first, so this only ever preserves that order;
-    it never sorts by version number itself. The intro paragraph above the
-    first heading, and every other section kind a version happens to use
-    (Added, Changed, Fixed, Removed, whatever heading is actually there),
-    is left for the caller to decide what to do with."""
+    """One Release per dated version heading, kept in the order the file
+    already lists them newest first; this never sorts by version number
+    itself. Every line starting with '## ' has to be one of those matched
+    headings. Left unchecked, an undated or otherwise malformed one is
+    invisible as a boundary, so its whole block -- version, date, every
+    bullet under it -- would silently fold into whichever release came
+    before it instead of forming one of its own; a repeated section kind
+    inside one release would just as quietly replace the list already
+    collected for it, since sections are keyed by name. Both are treated
+    as a malformed file and raise, rather than losing data underneath the
+    caller without saying so."""
     headers = list(_VERSION_RE.finditer(text))
+    matched_starts = {m.start() for m in headers}
+    for m in _HEADING_RE.finditer(text):
+        if m.start() not in matched_starts:
+            raise ValueError(f"changelog heading is not a valid release heading: {m.group(0)!r}")
     releases = []
     for i, m in enumerate(headers):
         body_end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
         body = text[m.end():body_end]
-        releases.append(Release(version=m.group(1), date=m.group(2), sections=_parse_sections(body)))
+        releases.append(Release(version=m.group(1), date=m.group(2), sections=_parse_sections(body, m.group(1))))
     return releases
 
 
-def _parse_sections(body: str) -> dict[str, list[str]]:
+def _parse_sections(body: str, version: str) -> dict[str, list[str]]:
     headers = list(_SECTION_RE.finditer(body))
     sections: dict[str, list[str]] = {}
     for i, m in enumerate(headers):
         end = headers[i + 1].start() if i + 1 < len(headers) else len(body)
-        sections[m.group(1).strip()] = _parse_bullets(body[m.end():end])
+        name = m.group(1).strip()
+        if name in sections:
+            raise ValueError(f"'### {name}' appears twice in the {version} release")
+        sections[name] = _parse_bullets(body[m.end():end])
     return sections
 
 
@@ -309,7 +327,7 @@ def ensure_whats_new_markers(product_page_html: str) -> str:
     anchor = '<dl class="tm-facts">'
     start = product_page_html.index(anchor)
     close = product_page_html.index("</dl>", start) + len("</dl>")
-    markers = f"\n      {MARK_START}\n      {MARK_END}"
+    markers = f"{_WHATS_NEW_GAP}{MARK_START}{_WHATS_NEW_GAP}{MARK_END}"
     return product_page_html[:close] + markers + product_page_html[close:]
 
 
@@ -393,6 +411,23 @@ def _check(releases: list[Release], product_page_html: str, site_root: pathlib.P
     if target.read_text() != rendered:
         print(f"stale: {target} does not match what CHANGELOG.md renders today", file=sys.stderr)
         return 1
+
+    if product_page_html.count(MARK_START) != 1 or product_page_html.count(MARK_END) != 1:
+        print("stale: the product page's whats-new markers are missing or appear more than once", file=sys.stderr)
+        return 1
+    start = product_page_html.index(MARK_START) + len(MARK_START)
+    end = product_page_html.index(MARK_END)
+    if end < start:
+        print("stale: the product page's whats-new end marker comes before its start marker", file=sys.stderr)
+        return 1
+    # Nothing calls splice() with render_whats_new()'s output yet, so the
+    # one correct thing between the markers today is the plain gap
+    # ensure_whats_new_markers() itself writes. Once a later change starts
+    # actually splicing a rendered strip in, this is the one line that
+    # needs to change for the drift check to keep covering it.
+    if product_page_html[start:end] != _WHATS_NEW_GAP:
+        print("stale: the product page's whats-new strip does not match what belongs there right now", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -411,7 +446,11 @@ def main(argv: list[str]) -> int:
         return 1
     site_root = pathlib.Path(site_root_arg).resolve() if site_root_arg else product_page_path.parent.parent
 
-    releases = parse_changelog(changelog_path.read_text())
+    try:
+        releases = parse_changelog(changelog_path.read_text())
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
     product_page_html = product_page_path.read_text()
 
     if check:
@@ -503,6 +542,36 @@ FIXTURE_PRODUCT_PAGE = """<!DOCTYPE html>
 </html>
 """
 
+FIXTURE_BAD_HEADING = """## 0.2.0 — 2026-01-02
+
+### Added
+
+- Real bullet for 0.2.0.
+
+## 1.9.0
+
+### Added
+
+- An undated heading must not silently fold into the release above it.
+
+## 0.1.0 — 2026-01-01
+
+### Added
+
+- Real bullet for 0.1.0.
+"""
+
+FIXTURE_REPEATED_SECTION = """## 0.3.0 — 2026-01-03
+
+### Added
+
+- First Added bullet.
+
+### Added
+
+- A second Added heading in the same release must not replace the first list.
+"""
+
 
 def selftest() -> int:
     failures: list[str] = []
@@ -538,6 +607,18 @@ def selftest() -> int:
     check("A &amp; B" in escaped_bullet, f"surrounding text not escaped: {escaped_bullet!r}")
 
     check(anchor_id("0.1.2") == "v0-1-2", "anchor_id must turn dots into hyphens")
+
+    try:
+        parse_changelog(FIXTURE_BAD_HEADING)
+        failures.append("parse_changelog must raise on an undated '## ' heading instead of folding it into the release above")
+    except ValueError as e:
+        check("1.9.0" in str(e), f"the bad-heading error must name the offending line: {e}")
+
+    try:
+        parse_changelog(FIXTURE_REPEATED_SECTION)
+        failures.append("parse_changelog must raise when a section kind repeats inside one release instead of overwriting it")
+    except ValueError as e:
+        check("Added" in str(e) and "0.3.0" in str(e), f"the repeated-section error must name the kind and the release: {e}")
 
     page = render_page(releases, FIXTURE_PRODUCT_PAGE)
     check('id="v0-1-2"' in page and 'id="v0-1-1"' in page, "release sections need their version anchors")
@@ -619,6 +700,69 @@ def selftest() -> int:
         check(rerun.returncode == 0, "a second write run must still succeed")
         check(product_page_path.read_text().count(MARK_START) == 1,
               "a second write run must not duplicate the whats-new markers on a real file")
+
+    # A malformed changelog must stop the CLI before it writes anything,
+    # rather than silently folding a heading into the wrong release or
+    # losing a repeated section's bullets.
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = pathlib.Path(tmp)
+        product_page_path = tmp_path / "task-manager" / "index.html"
+        product_page_path.parent.mkdir(parents=True)
+        product_page_path.write_text(FIXTURE_PRODUCT_PAGE)
+        changelog_path = tmp_path / "CHANGELOG.md"
+        changelog_path.write_text(FIXTURE_BAD_HEADING)
+
+        argv = [sys.executable, str(SCRIPT_PATH), str(product_page_path),
+                "--changelog", str(changelog_path), "--site-root", str(tmp_path)]
+        result = subprocess.run(argv, capture_output=True, text=True)
+        check(result.returncode == 1, f"a malformed changelog must exit 1, got {result.returncode}")
+        check(len(result.stderr.strip().splitlines()) == 1, f"the failure must be one stderr line: {result.stderr!r}")
+        check(not (tmp_path / "task-manager" / "changelog" / "index.html").exists(),
+              "a malformed changelog must write nothing")
+        check(product_page_path.read_text() == FIXTURE_PRODUCT_PAGE,
+              "a malformed changelog must leave the product page untouched")
+
+    # --check must cover the product page's whats-new markers too, not
+    # only the separate changelog page file.
+    def _check_against(product_page_html: str) -> subprocess.CompletedProcess:
+        """Runs --check in a fresh temp dir where the changelog page is
+        already correct for this exact product_page_html, so a failure can
+        only come from the whats-new markers this test is exercising."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            product_page_path = tmp_path / "task-manager" / "index.html"
+            product_page_path.parent.mkdir(parents=True)
+            product_page_path.write_text(product_page_html)
+            changelog_path = tmp_path / "CHANGELOG.md"
+            changelog_path.write_text(FIXTURE_CHANGELOG)
+            target = tmp_path / "task-manager" / "changelog" / "index.html"
+            target.parent.mkdir(parents=True)
+            target.write_text(render_page(releases, product_page_html))
+            argv = [sys.executable, str(SCRIPT_PATH), "--check", str(product_page_path),
+                    "--changelog", str(changelog_path), "--site-root", str(tmp_path)]
+            return subprocess.run(argv, capture_output=True, text=True)
+
+    result = _check_against(FIXTURE_PRODUCT_PAGE)
+    check(result.returncode == 1, f"--check must fail when the whats-new markers are missing: {result.stderr!r}")
+    check(len(result.stderr.strip().splitlines()) == 1, f"--check must report a missing marker in one line: {result.stderr!r}")
+
+    duplicated_marker = marked_once.replace(MARK_START, MARK_START + MARK_START, 1)
+    result = _check_against(duplicated_marker)
+    check(result.returncode == 1, f"--check must fail when a whats-new marker is duplicated: {result.stderr!r}")
+
+    start_i = marked_once.index(MARK_START)
+    end_i = marked_once.index(MARK_END)
+    reversed_order = (marked_once[:start_i] + MARK_END + _WHATS_NEW_GAP + MARK_START
+                       + marked_once[end_i + len(MARK_END):])
+    result = _check_against(reversed_order)
+    check(result.returncode == 1, f"--check must fail when the end marker comes before the start marker: {result.stderr!r}")
+
+    stale_content = marked_once.replace(MARK_END, "<p>leftover</p>" + MARK_END, 1)
+    result = _check_against(stale_content)
+    check(result.returncode == 1, f"--check must fail when something has been left between the whats-new markers: {result.stderr!r}")
+
+    result = _check_against(marked_once)
+    check(result.returncode == 0, f"--check must pass right after the markers are freshly inserted: {result.stderr!r}")
 
     if failures:
         for f in failures:
