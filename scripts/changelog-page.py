@@ -40,6 +40,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from html.parser import HTMLParser
 
 SCRIPT_PATH = pathlib.Path(__file__).resolve()
 REPO_URL = "https://github.com/agilepeter/ai-task-manager"
@@ -139,6 +140,14 @@ _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 # never still lying around for this pattern to mistake for two single ones.
 _EM_RE = re.compile(r"\*(?!\s)(.+?)(?<!\s)\*")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+# Three asterisks on each side are bold and emphasis at once. Matched before
+# bold, so the bold pass never splits the run and leaves tags that open in one
+# order and close in another.
+_BOLD_EM_RE = re.compile(r"\*\*\*(.+?)\*\*\*")
+# Code spans and links are found in ONE left-to-right pass, whichever starts
+# first winning: a code sample that shows link syntax stays code, and a link
+# whose address holds a backtick or an asterisk stays a link.
+_CODE_OR_LINK_RE = re.compile(r"`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)")
 _STASH_RE = re.compile("\x00(\\d+)\x00")
 
 
@@ -153,19 +162,66 @@ def render_inline(md: str) -> str:
     replaced, before emphasis ever looks at the text, so the two asterisks
     of a bold span can never be misread as a pair of single ones; a lone or
     unclosed asterisk that survives both passes was never Markdown to begin
-    with and is left exactly as escaping produced it."""
+    with and is left exactly as escaping produced it. A link's address is
+    set aside whole, like a code span, so nothing inside a URL is ever read
+    as Markdown; and whatever the input, the result is checked with a real
+    HTML parser, falling back to the asterisks as written if emphasis would
+    have produced tags that cross."""
     text = html.escape(md, quote=False).replace("—", " - ").replace("→", "->")
     stashed: list[str] = []
 
-    def stash(m: re.Match) -> str:
-        stashed.append(f"<code>{m.group(1)}</code>")
+    def keep(fragment: str) -> str:
+        stashed.append(fragment)
         return f"\x00{len(stashed) - 1}\x00"
 
-    text = _CODE_RE.sub(stash, text)
-    text = _LINK_RE.sub(lambda m: f'<a href="{m.group(2)}" rel="noopener">{m.group(1)}</a>', text)
+    def restore(rendered: str) -> str:
+        return _STASH_RE.sub(lambda m: stashed[int(m.group(1))], rendered)
+
+    def code_or_link(m: re.Match) -> str:
+        if m.group(1) is not None:
+            return keep(f"<code>{m.group(1)}</code>")
+        # A link's address goes out of reach whole: nothing inside a URL is
+        # Markdown, whatever it happens to contain. Its label stays in place
+        # and is rendered like any other prose, code spans included.
+        label = _CODE_RE.sub(lambda c: keep(f"<code>{c.group(1)}</code>"), m.group(2))
+        address = m.group(3).replace('"', "&quot;")
+        return f'<a href="{keep(address)}" rel="noopener">{label}</a>'
+
+    text = _CODE_OR_LINK_RE.sub(code_or_link, text)
+    without_emphasis = text
+    text = _BOLD_EM_RE.sub(lambda m: f"<strong><em>{m.group(1)}</em></strong>", text)
     text = _BOLD_RE.sub(lambda m: f"<strong>{m.group(1)}</strong>", text)
     text = _EM_RE.sub(lambda m: f"<em>{m.group(1)}</em>", text)
-    return _STASH_RE.sub(lambda m: stashed[int(m.group(1))], text)
+    rendered = restore(text)
+    if not _well_nested(rendered):
+        # Asterisks that cross each other have no sensible reading as
+        # emphasis. Print them as written instead of emitting tags that open
+        # in one order and close in another.
+        rendered = restore(without_emphasis)
+    return rendered
+
+
+class _NestingChecker(HTMLParser):
+    """Records whether every tag closes in the reverse of the order it opened."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.open_tags: list[str] = []
+        self.ok = True
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        self.open_tags.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self.open_tags or self.open_tags.pop() != tag:
+            self.ok = False
+
+
+def _well_nested(fragment: str) -> bool:
+    checker = _NestingChecker()
+    checker.feed(fragment)
+    checker.close()
+    return checker.ok and not checker.open_tags
 
 
 def anchor_id(version: str) -> str:
@@ -738,6 +794,43 @@ def selftest() -> int:
           f"an unclosed asterisk must stay literal: {render_inline('*unclosed')!r}")
     check(render_inline("2 * 3 * 4") == "2 * 3 * 4",
           f"asterisks with spaces on both sides (multiplication, not emphasis) must stay literal: {render_inline('2 * 3 * 4')!r}")
+
+    triple = render_inline("***bold and em***")
+    check(triple == "<strong><em>bold and em</em></strong>",
+          f"three asterisks each side must nest bold around emphasis: {triple!r}")
+    star_url = render_inline("[text](https://example.com/*star*/page)")
+    check(star_url == '<a href="https://example.com/*star*/page" rel="noopener">text</a>',
+          f"an asterisk inside a link address must stay part of the address: {star_url!r}")
+    bold_url = render_inline("[t](https://example.com/**x**/y)")
+    check('href="https://example.com/**x**/y"' in bold_url and "<strong>" not in bold_url,
+          f"double asterisks inside a link address must stay part of the address: {bold_url!r}")
+    tick_url = render_inline("[t](https://example.com/`x`/y)")
+    check('href="https://example.com/`x`/y"' in tick_url and "<code>" not in tick_url,
+          f"a backtick inside a link address must stay part of the address: {tick_url!r}")
+    quote_url = render_inline('[t](https://example.com/?q="x")')
+    check('href="https://example.com/?q=&quot;x&quot;"' in quote_url,
+          f"a double quote inside a link address must be escaped for the attribute: {quote_url!r}")
+    code_label = render_inline("[`cfg` file](https://example.com/cfg)")
+    check(code_label == '<a href="https://example.com/cfg" rel="noopener"><code>cfg</code> file</a>',
+          f"code inside a link label must render as code inside the link: {code_label!r}")
+    em_label = render_inline("[*a*](https://example.com)")
+    check(em_label == '<a href="https://example.com" rel="noopener"><em>a</em></a>',
+          f"emphasis inside a link label must render inside the link: {em_label!r}")
+    code_with_link_syntax = render_inline("write `[text](url)` to link")
+    check(code_with_link_syntax == "write <code>[text](url)</code> to link",
+          f"link syntax shown inside a code span must stay code: {code_with_link_syntax!r}")
+    crossed = render_inline("*a **b* c**")
+    check(crossed == "*a **b* c**",
+          f"asterisks that cross must print as written, never as tags that cross: {crossed!r}")
+    for sample in (
+        "*a*", "**b**", "**b** and *a*", "a `2 * 3` span", "a * lone one", "*unclosed", "2 * 3 * 4",
+        "***bold and em***", "[text](https://example.com/*star*/page)", "[t](https://example.com/**x**/y)",
+        "[t](https://example.com/`x`/y)", "[`cfg` file](https://example.com/cfg)", "[*a*](https://example.com)",
+        "write `[text](url)` to link", "*a **b* c**", "**a *b** c*", "one *two* three*", "(*a*), *b*.",
+        "**A *lively* `feature`.** The rest.",
+    ):
+        check(_well_nested(render_inline(sample)),
+              f"every rendering must close its tags in the order it opened them: {sample!r} -> {render_inline(sample)!r}")
 
     # _lead_text() and render_whats_new() work from the bold lead's raw
     # markdown, not render_inline()'s output, so emphasis or code sitting
