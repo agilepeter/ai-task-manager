@@ -194,12 +194,11 @@ fn diff_names(old: &[String], new: &[String], what: &'static str, added_key: &'s
     // Counted, not just looked up: the same name can be defined in two projects, and a
     // second definition appearing is a change even though the name was already known.
     let times = |list: &[String], name: &String| list.iter().filter(|n| *n == name).count();
-    let mut seen: Vec<&String> = Vec::new();
+    let mut seen: std::collections::HashSet<&String> = std::collections::HashSet::new();
     for name in new.iter().chain(old.iter()) {
-        if seen.contains(&name) {
+        if !seen.insert(name) {
             continue;
         }
-        seen.push(name);
         let (before, after) = (times(old, name), times(new, name));
         for _ in before..after {
             out.push(change("added", what, name, Msg::new(added_key).var("name", name)));
@@ -282,10 +281,17 @@ pub fn diff(old: &Snapshot, new: &Snapshot) -> Vec<Change> {
 
 /// Adds today's snapshot, replacing anything already on file for the same
 /// day -- so a refresh loop that happens to record twice in one day never
-/// grows the file -- then drops anything older than `KEEP_DAYS`, measured
-/// from the day just recorded. Written with the same owner-only atomic swap
-/// every other local settings file in this app uses, so a crash mid-write
-/// can never leave a half-written history behind.
+/// grows the file -- then drops anything older than `KEEP_DAYS`. The rule is
+/// judged against the NEWEST date now on file, never against the one just
+/// recorded: a machine's clock can step backward (a bad NTP sync, a manual
+/// change, daylight-saving weirdness), and recording an older day after
+/// newer ones already exist must never treat those newer, already-stored
+/// snapshots as "impossibly far in the future" and drop them. Measuring
+/// against the newest on file instead means every snapshot's age is
+/// necessarily zero or positive, so nothing already on disk is ever removed
+/// for merely being newer than the one just written. Written with the same
+/// owner-only atomic swap every other local settings file in this app uses,
+/// so a crash mid-write can never leave a half-written history behind.
 pub fn record_at(dir: &Path, snap: Snapshot) -> std::io::Result<()> {
     let path = store_path(dir);
     let mut store: Store = std::fs::read_to_string(&path)
@@ -293,9 +299,9 @@ pub fn record_at(dir: &Path, snap: Snapshot) -> std::io::Result<()> {
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or_default();
     store.snapshots.retain(|s| s.taken != snap.taken);
-    let taken = snap.taken.clone();
     store.snapshots.push(snap);
-    store.snapshots.retain(|s| days_between(&s.taken, &taken).is_some_and(|d| (0..=KEEP_DAYS).contains(&d)));
+    let newest = store.snapshots.iter().map(|s| s.taken.as_str()).max().unwrap_or("").to_string();
+    store.snapshots.retain(|s| days_between(&s.taken, &newest).is_some_and(|d| (0..=KEEP_DAYS).contains(&d)));
     store.snapshots.sort_by(|a, b| a.taken.cmp(&b.taken));
     store.version = STORE_VERSION;
     let body = serde_json::to_string_pretty(&store).map_err(std::io::Error::other)?;
@@ -359,9 +365,17 @@ pub fn opportunities(c: &SetupChanges) -> Vec<Opportunity> {
     let guardrail =
         c.changes.iter().filter(|ch| ch.kind == "removed" && matches!(ch.what.as_str(), "deny" | "shell" | "hook")).count();
     if guardrail > 0 {
+        // "learn", not "tighten": this is the one finding built from history
+        // rather than from the present state of the machine, and a diff can
+        // only say that a rule disappeared, never why. Someone may have
+        // loosened a rule on purpose (a false positive that kept blocking a
+        // real command); that is a legitimate choice this app cannot second-
+        // guess from a before/after comparison alone. So it stays its own
+        // finding, shown first among the changes, but scored as "worth a
+        // look" rather than as a failing.
         out.push(Opportunity::from_msgs(
             "guardrail-removed",
-            "tighten",
+            "learn",
             Msg::new("finding.guardrail-removed.title").count(guardrail as i64),
             Some(Msg::new("finding.guardrail-removed.detail").count(guardrail as i64)),
             None,
@@ -454,7 +468,7 @@ mod tests {
         let opps = opportunities(&sc);
         assert_eq!(opps.len(), 1);
         assert_eq!(opps[0].id, "guardrail-removed");
-        assert_eq!(opps[0].kind, "tighten");
+        assert_eq!(opps[0].kind, "learn", "whether a rule loss was on purpose cannot be judged from a diff");
     }
 
     #[test]
@@ -469,7 +483,30 @@ mod tests {
         let opps = opportunities(&sc);
         assert_eq!(opps.len(), 1);
         assert_eq!(opps[0].id, "guardrail-removed");
-        assert_eq!(opps[0].kind, "tighten");
+        assert_eq!(opps[0].kind, "learn", "whether a rule loss was on purpose cannot be judged from a diff");
+    }
+
+    /// A guardrail loss is real and worth surfacing, but it is the one
+    /// finding this module builds from history rather than from the present
+    /// state of the machine -- a diff can say a rule disappeared, never why
+    /// it did, so it must not count against the audit score the way a
+    /// "tighten" finding does. It still comes first among the two possible
+    /// findings this module emits, ahead of the generic "setup-changed" one,
+    /// when both apply at once.
+    #[test]
+    fn a_guardrail_gone_is_worth_a_look_not_a_failing() {
+        let old = Snapshot {
+            agents: vec!["reviewer".into()],
+            deny: 5,
+            ..empty_snapshot("2026-09-01")
+        };
+        let new = Snapshot { agents: vec!["reviewer".into(), "auditor".into()], deny: 3, ..empty_snapshot("2026-09-08") };
+        let sc = SetupChanges { since: Some(old.taken.clone()), changes: diff(&old, &new), days_of_history: 7 };
+        let opps = opportunities(&sc);
+        assert_eq!(opps.len(), 2, "one guardrail loss plus one ordinary change: two findings, not merged");
+        assert_eq!(opps[0].id, "guardrail-removed", "the guardrail finding leads");
+        assert_eq!(opps[0].kind, "learn");
+        assert_eq!(opps[1].id, "setup-changed");
     }
 
     #[test]
@@ -522,6 +559,23 @@ mod tests {
         let stored = load_from(&dir);
         assert_eq!(stored.len(), 1, "recording twice on the same day never grows the file");
         assert_eq!(stored[0].deny, 2, "the later write for the same day wins");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_clock_that_steps_back_loses_no_history() {
+        let dir = tmp_dir("clock-back");
+        record_at(&dir, empty_snapshot("2026-09-25")).unwrap();
+        record_at(&dir, empty_snapshot("2026-09-26")).unwrap();
+        // The clock on this machine jumps backward and a snapshot for an
+        // already-passed day is recorded after two newer ones exist. None of
+        // the three should be judged "too new to be real" and dropped: the
+        // newest one on file after this write is still 2026-09-26, and every
+        // one of the three is well within KEEP_DAYS of that.
+        record_at(&dir, empty_snapshot("2026-09-20")).unwrap();
+        let stored = load_from(&dir);
+        let dates: Vec<&str> = stored.iter().map(|s| s.taken.as_str()).collect();
+        assert_eq!(dates, vec!["2026-09-20", "2026-09-25", "2026-09-26"], "a clock stepping back must not lose history: {dates:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

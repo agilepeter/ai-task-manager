@@ -749,7 +749,16 @@ function renderChanges(): string {
       </div>`,
     )
     .join("");
-  const hint = c.since == null ? T("empty.changesFirstRun") : T("empty.changesNone", { since: c.since });
+  // `T00:00:00` forces this to parse as local midnight rather than UTC
+  // midnight (same as `nextRenewal` in ledger.ts): a bare `new Date(c.since)`
+  // on a date-only string like "2026-09-18" parses as UTC, which prints as
+  // the day before in any timezone behind UTC.
+  const hint =
+    c.since == null
+      ? T("empty.changesFirstRun")
+      : T("empty.changesNone", {
+          since: new Date(`${c.since}T00:00:00`).toLocaleDateString(localeTag(), { month: "short", day: "numeric" }),
+        });
   return section("changes", T("section.changes"), c.changes.length, rows, hint);
 }
 

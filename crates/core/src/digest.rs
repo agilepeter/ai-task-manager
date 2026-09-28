@@ -91,7 +91,18 @@ fn prior7(daily: &[f64]) -> f64 {
 /// still sends the digest -- the line below is not merely appended to an
 /// otherwise-empty message, it can be the entire reason this week's digest
 /// exists.
-pub fn build(spend: &[ProviderSpend], ledger: &LedgerView, changes_this_week: usize) -> Option<Digest> {
+///
+/// `changes_since` is that same comparison's start date
+/// (`changes::SetupChanges::since`), plain ISO (`YYYY-MM-DD`): the digest has
+/// no other date on its face to match, and this module has no locale-aware
+/// date renderer of its own to reach for, so the line just says the day
+/// plainly rather than pretending it was always "this week" -- true only by
+/// coincidence, since the comparison can span anywhere from a couple of days
+/// on a fresh install to the better part of a month if the app went unopened.
+/// `None` only when `changes_this_week` is also 0 (no earlier snapshot means
+/// no changes to report either), so the line is skipped rather than dated
+/// with nothing to date it against.
+pub fn build(spend: &[ProviderSpend], ledger: &LedgerView, changes_this_week: usize, changes_since: Option<&str>) -> Option<Digest> {
     let week: f64 = spend.iter().map(|p| last7(&p.daily_cost)).sum();
     let before: f64 = spend.iter().map(|p| prior7(&p.daily_cost)).sum();
     let renewing: Vec<&crate::ledger::ItemView> =
@@ -163,7 +174,9 @@ pub fn build(spend: &[ProviderSpend], ledger: &LedgerView, changes_this_week: us
         ),
     }
     if changes_this_week > 0 {
-        body.push(Msg::new("digest.setupChanged").count(changes_this_week as i64));
+        if let Some(date) = changes_since {
+            body.push(Msg::new("digest.setupChanged").var("date", date).count(changes_this_week as i64));
+        }
     }
     Some(Digest { title: Msg::new("digest.title"), body })
 }
@@ -241,6 +254,18 @@ mod tests {
         view(&items, d(today), &HashMap::new())
     }
 
+    /// The digest used to say "this week" for the setup-changed line no
+    /// matter what the comparison actually spanned -- two days for a
+    /// freshly-installed machine, or a month if the app went unopened for a
+    /// while. It should instead name the actual day the comparison started
+    /// from, the same date `changes::SetupChanges::since` already carries.
+    #[test]
+    fn the_setup_line_names_the_day_it_compares_with() {
+        let quiet = provider(&[0.0; 14], &[]);
+        let got = build(&[quiet], &ledger(None, "2026-09-21"), 3, Some("2026-09-14")).unwrap();
+        assert_eq!(en_body(&got.body), "3 things changed in your setup since 2026-09-14.");
+    }
+
     #[test]
     fn it_goes_out_once_a_week_from_nine_and_catches_up_after_a_missed_day() {
         let monday = d("2026-09-21");
@@ -262,7 +287,7 @@ mod tests {
         let acme: Vec<f64> = vec![15.0; 7];
         let misc: Vec<f64> = vec![5.0; 7];
         let sp = provider(&tail, &[("acme/web", &acme), ("tools", &misc), ("(unsorted)", &[99.0; 7])]);
-        let got = build(&[sp], &ledger(Some("2026-09-24"), "2026-09-21"), 0).unwrap();
+        let got = build(&[sp], &ledger(Some("2026-09-24"), "2026-09-21"), 0, None).unwrap();
         assert_eq!(crate::i18n::render("en", &got.title), "Your AI week");
         assert_eq!(
             en_body(&got.body),
@@ -273,11 +298,11 @@ mod tests {
     #[test]
     fn a_steady_week_says_so_and_an_empty_one_says_nothing() {
         let steady = provider(&[10.0; 14], &[]);
-        let body = en_body(&build(&[steady], &ledger(None, "2026-09-21"), 0).unwrap().body);
+        let body = en_body(&build(&[steady], &ledger(None, "2026-09-21"), 0, None).unwrap().body);
         assert_eq!(body, "$70 of AI usage in 7 days, about the same as the week before.");
-        assert!(build(&[provider(&[], &[])], &ledger(None, "2026-09-21"), 0).is_none());
+        assert!(build(&[provider(&[], &[])], &ledger(None, "2026-09-21"), 0, None).is_none());
         // Nothing spent, but a renewal is still worth the note.
-        let only_renewal = build(&[provider(&[], &[])], &ledger(Some("2026-09-21"), "2026-09-21"), 0).unwrap();
+        let only_renewal = build(&[provider(&[], &[])], &ledger(Some("2026-09-21"), "2026-09-21"), 0, None).unwrap();
         assert_eq!(en_body(&only_renewal.body), "Claude Max renews today ($200).");
     }
 
@@ -286,16 +311,16 @@ mod tests {
         let quiet = provider(&[0.0; 14], &[]);
         // No spend and no renewal: on its own this week sends nothing at all
         // (covered above). Three setup changes are reason enough by themselves.
-        let got = build(&[quiet.clone()], &ledger(None, "2026-09-21"), 3).unwrap();
-        assert_eq!(en_body(&got.body), "3 things changed in your setup this week.");
-        assert!(build(&[quiet], &ledger(None, "2026-09-21"), 0).is_none(), "still nothing to say with zero changes");
+        let got = build(&[quiet.clone()], &ledger(None, "2026-09-21"), 3, Some("2026-09-14")).unwrap();
+        assert_eq!(en_body(&got.body), "3 things changed in your setup since 2026-09-14.");
+        assert!(build(&[quiet], &ledger(None, "2026-09-21"), 0, None).is_none(), "still nothing to say with zero changes");
 
         // A normal week with spend gains the line at the end, after everything else.
         let steady = provider(&[10.0; 14], &[]);
-        let with_changes = build(&[steady], &ledger(None, "2026-09-21"), 1).unwrap();
+        let with_changes = build(&[steady], &ledger(None, "2026-09-21"), 1, Some("2026-09-14")).unwrap();
         assert_eq!(
             en_body(&with_changes.body),
-            "$70 of AI usage in 7 days, about the same as the week before. 1 thing changed in your setup this week."
+            "$70 of AI usage in 7 days, about the same as the week before. 1 thing changed in your setup since 2026-09-14."
         );
     }
 }
