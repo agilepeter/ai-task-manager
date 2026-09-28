@@ -894,7 +894,7 @@ export function renderAgentsDoor(inv: Inventory, runningNow: number, cost30: num
       <button class="inv-head" id="agents-door-btn" title="${esc(T("agents.tip"))}">
         <span class="inv-row-main">
           <span class="inv-name">${esc(T("agents.button"))}</span>
-          <span class="inv-sub">${esc(summary)}</span>
+          <span class="inv-sub inv-sub-wrap">${esc(summary)}</span>
         </span>
         <span class="inv-caret" aria-hidden="true">&rsaquo;</span>
       </button>
