@@ -650,7 +650,7 @@
   "agents.summary.running.other": "{count} en ejecución",
   "agents.section.running": "En ejecución ahora",
   "agents.section.yours": "Tus agentes",
-  "agents.section.worthALook": "Vale la pena mirar",
+  "agents.section.worthALook": "Vale la pena revisar",
   "agents.empty.noSubagentRuns": "Ningún subagente se ha ejecutado en los últimos 30 días. El coste de un agente personalizado o integrado aparecerá aquí la próxima vez que se ejecute uno.",
   "agents.empty.nothingToFlag": "Nada que señalar sobre tus agentes por ahora.",
   "agents.guardrailFailing.one": "{count} verificación de seguridad de agentes necesita atención",
