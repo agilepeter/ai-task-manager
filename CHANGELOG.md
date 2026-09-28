@@ -37,13 +37,20 @@ release history is kept verbatim in
   guardrail checks reads as a sentence with its button beneath. The Audit
   and the Agents view refresh when the popover is opened again, at most once
   a minute, and a rescan fills them from what it just read without scanning
-  twice. One Japanese string spaces a name as the rest of its file does, and
-  the tooltip on the Agents button says spend, as the figure does.
+  twice. A refresh that failed retries the moment the popover is opened
+  again, rather than waiting out that minute. One Japanese string spaces a
+  name as the rest of its file does, and the tooltip on the Agents button
+  says spend, as the figure does.
 
 ### Fixed
 
 - **Closing the Audit left the keyboard focus nowhere.** Closing the Audit,
   or the new Agents view, returns focus to the button that opened it.
+- **A failed subagent-spend read showed as $0.00, Never run, and zero
+  built-in agents, as if that were all true.** The stats figure and the
+  Inventory door row show a question mark instead, Your agents shows no
+  spend line at all rather than claiming one, and the built-in section names
+  the error in place of its rows.
 - **A link in this changelog to a file in the repository answered 404 on the
   changelog page.** It points at the repository now.
 - **The product page stated an old version in two places** after a release:
