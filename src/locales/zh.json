@@ -628,7 +628,7 @@
   "agents.section.running": "正在运行",
   "agents.section.yours": "你的智能体",
   "agents.section.worthALook": "值得关注",
-  "agents.empty.noSubagentRuns": "最近 30 天没有子智能体运行过。自定义或内置智能体的成本会在下次运行时显示在这里。",
+  "agents.empty.noSubagentRuns": "最近 30 天没有子智能体运行过。自定义或内置智能体的花费会在下次运行时显示在这里。",
   "agents.empty.nothingToFlag": "目前没有关于你的智能体需要标记的内容。",
   "agents.guardrailFailing.other": "{count} 项智能体护栏检查需要关注",
   "agents.openAudit": "打开审计",
