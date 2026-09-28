@@ -758,7 +758,7 @@ function renderChanges(): string {
     .map(
       (ch) => `
       <div class="inv-row">
-        <div class="inv-row-main"><span class="inv-name">${esc(tm(ch.msg))}</span></div>
+        <div class="inv-row-main"><span class="inv-name inv-change">${esc(tm(ch.msg))}</span></div>
       </div>`,
     )
     .join("");
@@ -818,12 +818,12 @@ function render(): void {
     </div>
     <p class="inv-note">${esc(T("note", { scanned }))}</p>
     ${renderOpportunities(inv.opportunities)}
+    ${renderChanges()}
     ${renderRunning()}
     ${renderSignIns()}
     ${renderTools(inv)}
     ${renderMcp(mcp)}
-    ${renderSetup(inv, agents, skills, agentSpend)}
-    ${renderChanges()}`;
+    ${renderSetup(inv, agents, skills, agentSpend)}`;
 }
 
 /// Cheap next to a full scan, so it refreshes on its own whenever the view is

@@ -673,7 +673,7 @@
   "finding.guardrail-removed.title.one": "Se eliminó una protección de tu configuración",
   "finding.guardrail-removed.title.other": "Se eliminaron {count} protecciones de tu configuración",
   "finding.guardrail-removed.detail.one": "Una regla de denegación, un hook o una cobertura del shell que antes limitaba lo que se ejecuta en este equipo ha desaparecido desde la última comprobación. Vale la pena saber si fue intencional.",
-  "finding.guardrail-removed.detail.other": "{count} elementos que antes limitaban lo que se ejecuta en este equipo -- reglas de denegación, hooks, cobertura del shell -- han desaparecido desde la última comprobación. Vale la pena saber si fue intencional.",
+  "finding.guardrail-removed.detail.other": "{count} elementos que antes limitaban lo que se ejecuta en este equipo (reglas de denegación, hooks, cobertura del shell) han desaparecido desde la última comprobación. Vale la pena saber si fue intencional.",
   "finding.setup-changed.title.one": "1 otra cosa cambió en tu configuración",
   "finding.setup-changed.title.other": "{count} otras cosas cambiaron en tu configuración",
   "finding.setup-changed.detail.one": "Un servidor, agente, skill o permiso cambió desde la última comprobación. Consulta Cambios en la pestaña Inventario para ver qué.",

@@ -46,6 +46,7 @@ const WHERE: Record<string, "inventory" | "ledger" | "usage"> = {
   ledger: "ledger", "ledger-idle": "ledger", "ledger-dates": "ledger",
   clients: "usage", "areas-unsorted": "usage", "mix-top-heavy": "usage", "session-long-lived": "usage",
   "cache-read-share": "usage", "subagent-share": "usage",
+  "mcp-context-heavy": "inventory", "guardrail-removed": "inventory", "setup-changed": "inventory",
 };
 
 function esc(s: string): string {

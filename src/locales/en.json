@@ -673,7 +673,7 @@
   "finding.guardrail-removed.title.one": "A guardrail was removed from your setup",
   "finding.guardrail-removed.title.other": "{count} guardrails were removed from your setup",
   "finding.guardrail-removed.detail.one": "A deny rule, a hook, or shell coverage that used to limit what runs on this machine is gone since the last check. Worth knowing whether that was on purpose.",
-  "finding.guardrail-removed.detail.other": "{count} things that used to limit what runs on this machine -- deny rules, hooks, shell coverage -- are gone since the last check. Worth knowing whether that was on purpose.",
+  "finding.guardrail-removed.detail.other": "{count} things that used to limit what runs on this machine (deny rules, hooks, shell coverage) are gone since the last check. Worth knowing whether that was on purpose.",
   "finding.setup-changed.title.one": "1 other thing changed in your setup",
   "finding.setup-changed.title.other": "{count} other things changed in your setup",
   "finding.setup-changed.detail.one": "A server, agent, skill or permission changed since the last check. See Changes in the Inventory tab for what.",

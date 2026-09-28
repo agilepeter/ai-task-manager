@@ -2934,6 +2934,11 @@ body.no-glass #star-box {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A change is a sentence, not a name: it wraps instead of losing its end. */
+.inv-name.inv-change {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .inv-sub {
   font-size: 10.5px;
   color: var(--muted-foreground);

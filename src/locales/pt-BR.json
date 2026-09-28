@@ -673,7 +673,7 @@
   "finding.guardrail-removed.title.one": "1 proteção foi removida da sua configuração",
   "finding.guardrail-removed.title.other": "{count} proteções foram removidas da sua configuração",
   "finding.guardrail-removed.detail.one": "Uma regra de negação, um hook ou uma cobertura do shell que antes limitava o que roda nesta máquina sumiu desde a última verificação. Vale a pena saber se isso foi intencional.",
-  "finding.guardrail-removed.detail.other": "{count} coisas que antes limitavam o que roda nesta máquina -- regras de negação, hooks, cobertura do shell -- sumiram desde a última verificação. Vale a pena saber se isso foi intencional.",
+  "finding.guardrail-removed.detail.other": "{count} coisas que antes limitavam o que roda nesta máquina (regras de negação, hooks, cobertura do shell) sumiram desde a última verificação. Vale a pena saber se isso foi intencional.",
   "finding.setup-changed.title.one": "1 outra coisa mudou na sua configuração",
   "finding.setup-changed.title.other": "{count} outras coisas mudaram na sua configuração",
   "finding.setup-changed.detail.one": "Um servidor, agente, skill ou permissão mudou desde a última verificação. Veja Mudanças na aba Inventário.",

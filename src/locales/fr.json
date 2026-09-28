@@ -673,7 +673,7 @@
   "finding.guardrail-removed.title.one": "Une protection a été supprimée de votre configuration",
   "finding.guardrail-removed.title.other": "{count} protections ont été supprimées de votre configuration",
   "finding.guardrail-removed.detail.one": "Une règle de refus, un hook ou une couverture du shell qui limitait ce qui s'exécute sur cette machine a disparu depuis la dernière vérification. Il vaut la peine de savoir si c'était voulu.",
-  "finding.guardrail-removed.detail.other": "{count} éléments qui limitaient ce qui s'exécute sur cette machine -- règles de refus, hooks, couverture du shell -- ont disparu depuis la dernière vérification. Il vaut la peine de savoir si c'était voulu.",
+  "finding.guardrail-removed.detail.other": "{count} éléments qui limitaient ce qui s'exécute sur cette machine (règles de refus, hooks, couverture du shell) ont disparu depuis la dernière vérification. Il vaut la peine de savoir si c'était voulu.",
   "finding.setup-changed.title.one": "1 autre chose a changé dans votre configuration",
   "finding.setup-changed.title.other": "{count} autres choses ont changé dans votre configuration",
   "finding.setup-changed.detail.one": "Un serveur, un agent, une compétence ou une permission a changé depuis la dernière vérification. Voir Changements dans l'onglet Inventaire.",
