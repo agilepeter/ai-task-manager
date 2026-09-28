@@ -39,6 +39,8 @@ let host: AuditHost | null = null;
 let report: AuditReport | null = null;
 let note = "";
 let firstRun = false;
+/** The button that opened this view (see openAudit()), restored on close. */
+let opener: HTMLElement | null = null;
 
 /** Which tab (or the Agents view) fixes a check, when one does. The three
  *  agent guardrail checks (agent-tools, agent-model, deny-shell) and
@@ -141,15 +143,44 @@ function render(): void {
   el.innerHTML = head + sections;
 }
 
+/// Same decision agents.ts's closeFocusTarget() makes, kept as this view's
+/// own copy rather than shared (see that file's comment on why it takes
+/// `openerStillInDocument` as a parameter instead of reading the DOM itself:
+/// it is what makes this testable without a real one). Every view here keeps
+/// its own tiny esc(); this is the same convention for focus-restore.
+export function closeFocusTarget(
+  opener: HTMLElement | null,
+  openerStillInDocument: boolean,
+  fallback: HTMLElement | null,
+): HTMLElement | null {
+  if (opener && openerStillInDocument) return opener;
+  return fallback;
+}
+
 function close(): void {
   document.body.classList.remove("audit-open");
+  const fallback = document.querySelector<HTMLElement>("#audit-open-btn");
+  const stillThere = opener != null && document.contains(opener);
+  closeFocusTarget(opener, stillThere, fallback)?.focus();
+  opener = null;
   if (firstRun) {
     firstRun = false;
     host?.markSeen();
   }
 }
 
-export function openAudit(): void {
+/// `opener` is the button close() returns focus to, when it is still in the
+/// document -- same reasoning as agents.ts's openAgents(): WebKit does not
+/// focus a button on a mouse click, so the click handler has to hand this in
+/// explicitly rather than close() reading `document.activeElement` back.
+/// Left out for the two callers with no real button to return to: the
+/// first-run auto-open (maybeFirstRunAudit(), no click happened at all) and
+/// the Agents view's own "Open Audit" line (src/agents.ts's
+/// #agents-open-audit, which closes the Agents panel first -- its own button
+/// is still technically attached but off-screen, not where focus belongs) --
+/// close() then falls back to #audit-open-btn on its own.
+export function openAudit(opener_: HTMLElement | null = null): void {
+  opener = opener_;
   document.body.classList.add("audit-open");
   note = "";
   render();
@@ -177,7 +208,8 @@ export function setupAudit(h: AuditHost): void {
   host = h;
   document.querySelector("#audit-close")?.addEventListener("click", close);
   document.addEventListener("click", (e) => {
-    if ((e.target as HTMLElement).closest("#audit-open-btn")) openAudit();
+    const btn = (e.target as HTMLElement).closest<HTMLElement>("#audit-open-btn");
+    if (btn) openAudit(btn);
   });
   document.querySelector("#audit-body")?.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
