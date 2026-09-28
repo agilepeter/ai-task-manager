@@ -82,7 +82,7 @@ directory with upstream Pane would let the two apps overwrite each other.
   scanner skipped every line of a session log that was not an assistant
   line. From 0.1.3 it makes one exception: a line holding a `tool_result`,
   read only for as long as one of your open MCP calls has not yet been
-  answered. All it takes from that line is the LENGTH of the result. The
+  answered. All it takes from that line is the length of the result. The
   result's content, the tool's input, the tool's name and your prompt are
   never stored, logged or returned. The scan cache keeps only a server's
   name, a day, a count of calls and a number of bytes -- nothing else about

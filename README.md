@@ -27,7 +27,7 @@ macOS and Windows. No account, no cloud, no telemetry.
 
 ### Read this first
 
-**Version 0.1.0 is on [GitHub Releases](https://github.com/agilepeter/ai-task-manager/releases/latest):** a universal `.dmg` for
+**The latest version is on [GitHub Releases](https://github.com/agilepeter/ai-task-manager/releases/latest):** a universal `.dmg` for
 macOS (Intel and Apple Silicon) and a `-setup.exe` plus `.msi` for Windows 10 and
 11, built from the tagged source by `release.yml`. There is no code signing
 certificate on either platform yet, so both operating systems will say so the
@@ -67,7 +67,7 @@ minutes. Later builds take seconds.
 You get two things under `target/release/bundle/`:
 
 - `macos/AI Task Manager.app` -> drag it to `/Applications`
-- `dmg/AI Task Manager_0.1.0_<arch>.dmg` -> the same app, packaged to hand to
+- `dmg/AI Task Manager_<version>_<arch>.dmg` -> the same app, packaged to hand to
   someone else
 
 Open the app. It lives in the **menu bar**, not the Dock: the app runs as a
@@ -138,8 +138,8 @@ npm run tauri build
 
 Installers land in `target\release\bundle\`:
 
-- `nsis\AI Task Manager_0.1.0_x64-setup.exe` -> per-user install, no admin
-- `msi\AI Task Manager_0.1.0_x64_en-US.msi` -> for Group Policy or scripted rollout
+- `nsis\AI Task Manager_<version>_x64-setup.exe` -> per-user install, no admin
+- `msi\AI Task Manager_<version>_x64_en-US.msi` -> for Group Policy or scripted rollout
 
 Run either one, then look for the icon in the system tray next to the clock and
 click it.
@@ -150,7 +150,7 @@ The installer is not code-signed, so Windows shows **"Windows protected your
 PC."** Click **More info > Run anyway**. There is no way around this short of a
 code-signing certificate.
 
-Silent install, for scripts: `"AI Task Manager_0.1.0_x64-setup.exe" /S`
+Silent install, for scripts: `"AI Task Manager_<version>_x64-setup.exe" /S`
 
 **Uninstall**
 
