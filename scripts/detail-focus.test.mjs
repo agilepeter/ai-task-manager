@@ -32,9 +32,15 @@ async function buildDetailModule() {
   const strippedFormat = formatSource.replace('import { localeTag, plural, t } from "./i18n";', "");
   if (strippedFormat === formatSource) throw new Error("no substitution matched -- src/format.ts's source shape moved under this test");
 
+  // src/focus.ts has no imports of its own, so it is appended as is --
+  // detail.ts's own `import { focusOrFallback } from "./focus";` is dropped
+  // below, since this one copy already puts it in scope.
+  const focusSource = await readFile(new URL("../src/focus.ts", import.meta.url), "utf8");
+
   const detailSource = await readFile(new URL("../src/detail.ts", import.meta.url), "utf8");
   const strippedDetail = detailSource
     .replace('import { invoke } from "@tauri-apps/api/core";', 'const invoke = async () => { throw new Error("invoke() is not stubbed in this test"); };')
+    .replace('import { focusOrFallback } from "./focus";', "")
     .replace('import { displayMetricDetail, displayMetricLabel, localeTag, plural, t } from "./i18n";', "")
     .replace('import { money, relativeActivity, tokens } from "./format";', "")
     // src/i18n.ts exports its own top-level `render(locale, msg)`; detail.ts's
@@ -44,7 +50,7 @@ async function buildDetailModule() {
     .replace(/\brender\b/g, "__detailRender");
   if (strippedDetail === detailSource) throw new Error("no substitution matched -- src/detail.ts's source shape moved under this test");
 
-  const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${strippedDetail}`, {
+  const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${focusSource}\n${strippedDetail}`, {
     compilerOptions: { module: ts.ModuleKind.ESNext },
   }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);

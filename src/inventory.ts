@@ -4,6 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { showLedger } from "./ledger";
+import { focusOrFallback } from "./focus";
 import { localeTag, plural, t, tm, type Msg } from "./i18n";
 import { byteSize, money, relativeDay, tokens } from "./format";
 
@@ -1209,9 +1210,11 @@ export function setupViews(h: InventoryHost): void {
       render();
       // Cancel puts the Pin button back -- a fresh node, re-found by the same
       // key, never the stale element that opened this (see pinOpenerKey's
-      // own comment). Absent (the server list changed underneath, or this
-      // was somehow reached with no recorded opener) falls back to nowhere.
-      if (pinOpenerKey) document.querySelector<HTMLElement>(`[data-pin="${CSS.escape(pinOpenerKey)}"]`)?.focus();
+      // own comment). focusOrFallback() (src/focus.ts) covers both "absent"
+      // (the server list changed underneath) and the WebKit "Tab stops
+      // responding" behaviour a bare focus-nowhere left behind, found live.
+      const restore = pinOpenerKey ? document.querySelector<HTMLElement>(`[data-pin="${CSS.escape(pinOpenerKey)}"]`) : null;
+      focusOrFallback(restore);
       pinOpenerKey = null;
       return;
     }

@@ -43,16 +43,22 @@ async function buildAuditModule() {
   const localesDir = new URL("../src/locales/", import.meta.url);
   const inlinedI18n = await inlineLocaleImports(i18nSource, localesDir);
 
+  // src/focus.ts has no imports of its own, so it is appended as is --
+  // audit.ts's own `import { focusOrFallback } from "./focus";` is dropped
+  // below, since this one copy already puts it in scope.
+  const focusSource = await readFile(new URL("../src/focus.ts", import.meta.url), "utf8");
+
   const auditSource = await readFile(new URL("../src/audit.ts", import.meta.url), "utf8");
   const stripped = auditSource
     .replace('import { invoke } from "@tauri-apps/api/core";', "")
+    .replace('import { focusOrFallback } from "./focus";', "")
     .replace('import { plural, t, tm, type Msg } from "./i18n";', "")
     // A whole-word rename (declaration and every call site, bare `render()`
     // or a bare callback reference alike -- audit.ts has none of the latter
     // today, but the pattern costs nothing and stays correct either way).
     .replace(/\brender\b/g, "__unusedAuditRender");
   if (stripped === auditSource) throw new Error("no substitution matched -- src/audit.ts's source shape moved under this test");
-  const code = ts.transpileModule(`${inlinedI18n}\n${stripped}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+  const code = ts.transpileModule(`${inlinedI18n}\n${focusSource}\n${stripped}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 
@@ -85,6 +91,10 @@ function makeFakeDocument() {
   return {
     elements,
     body: {
+      // close()'s own fallback (`?? document.body`, see index.html's comment
+      // on body's tabindex="-1") calls .focus() on this when nothing else
+      // panned out -- a no-op here is enough for this suite's own tests.
+      focus() {},
       classList: {
         contains: (c) => bodyClasses.has(c),
         add: (c) => bodyClasses.add(c),

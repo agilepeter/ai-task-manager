@@ -4,6 +4,7 @@
 // only draws it. Statuses are always a word as well as a colour.
 
 import { invoke } from "@tauri-apps/api/core";
+import { focusOrFallback } from "./focus";
 import { plural, t, tm, type Msg } from "./i18n";
 
 const T = (k: string, v?: Record<string, string | number>) => t(`audit.${k}`, v);
@@ -207,7 +208,7 @@ function close(): void {
   document.querySelector("#audit")?.setAttribute("inert", "");
   const fallback = document.querySelector<HTMLElement>("#audit-open-btn");
   const stillThere = opener != null && document.contains(opener);
-  closeFocusTarget(opener, stillThere, fallback)?.focus();
+  focusOrFallback(closeFocusTarget(opener, stillThere, fallback));
   opener = null;
   if (firstRun) {
     firstRun = false;

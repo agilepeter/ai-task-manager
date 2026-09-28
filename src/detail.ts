@@ -8,6 +8,7 @@
 // legend with live values; line charts get a crosshair, bars a per-mark tip.
 
 import { invoke } from "@tauri-apps/api/core";
+import { focusOrFallback } from "./focus";
 import { displayMetricDetail, displayMetricLabel, localeTag, plural, t } from "./i18n";
 import { money, relativeActivity, tokens } from "./format";
 
@@ -1225,7 +1226,12 @@ function close(): void {
   // this page was open) falls back to nowhere rather than guessing which
   // other card is "right".
   const stillThere = opener != null && document.contains(opener);
-  closeFocusTarget(opener, stillThere, null)?.focus();
+  // focusOrFallback(), not a bare `?.focus()`: the opener here can be a
+  // plain, non-focusable card element (Detail opened by clicking a card's
+  // text name rather than its "Details" button) -- calling .focus() on that
+  // is a silent no-op, which left Tab just as stuck as no target at all.
+  // See src/focus.ts for the full story.
+  focusOrFallback(closeFocusTarget(opener, stillThere, null));
   opener = null;
 }
 
@@ -1411,12 +1417,15 @@ export function setupDetail(src: DetailSource): void {
       return;
     }
     render();
+    // focusOrFallback() on every branch: see src/focus.ts -- a defensive
+    // fallback in case one of these freshly-rendered targets is ever absent
+    // for a reason this code does not yet know about.
     if (ruleFocusAfter === "first") {
-      document.querySelector<HTMLElement>('[data-rule-client="0"]')?.focus();
+      focusOrFallback(document.querySelector<HTMLElement>('[data-rule-client="0"]'));
     } else if (ruleFocusAfter === "last") {
-      document.querySelector<HTMLElement>(`[data-rule-client="${(draftRules?.length ?? 1) - 1}"]`)?.focus();
+      focusOrFallback(document.querySelector<HTMLElement>(`[data-rule-client="${(draftRules?.length ?? 1) - 1}"]`));
     } else if (ruleFocusAfter === "edit-button") {
-      document.querySelector<HTMLElement>("#dt-rule-edit")?.focus();
+      focusOrFallback(document.querySelector<HTMLElement>("#dt-rule-edit"));
     }
     ruleFocusAfter = null;
   });

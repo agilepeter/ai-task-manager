@@ -8,7 +8,14 @@
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 
-  <body>
+  <!-- tabindex="-1": never a Tab stop (src/tabbable.ts skips anything that
+       already carries an explicit tabindex), but always a valid target for
+       .focus(). src/focus.ts's focusOrFallback() lands here whenever a
+       panel's own opener or fallback is missing, detached, or simply not
+       focusable -- see that file for the full story (a WebKit quirk found
+       live: Tab stops responding for the rest of the app once focus is
+       forced away from a closing panel with nothing explicit to land on). -->
+  <body tabindex="-1">
     <!-- Liquid-glass lens (prasen.dev original): rounded-rect SDF lens map —
          refraction hugs the rim, center stays optically flat — with R/G/B
          displaced at different strengths for a real prism fringe. Filter

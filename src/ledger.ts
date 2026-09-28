@@ -3,6 +3,7 @@
 // numbers; a detected plan is offered by name only, never with a guessed price.
 
 import { invoke } from "@tauri-apps/api/core";
+import { focusOrFallback } from "./focus";
 import { localeTag, plural, t } from "./i18n";
 import { money } from "./format";
 
@@ -74,7 +75,12 @@ function editOpenerSelector(o: NonNullable<typeof editOpener>): string {
 function restoreEditFocus(): void {
   if (editing || !editOpener) return;
   const sel = editOpenerSelector(editOpener);
-  (document.querySelector<HTMLElement>(sel) ?? document.querySelector<HTMLElement>("#lg-add"))?.focus();
+  // focusOrFallback() (src/focus.ts): the form's own fields are gone from the
+  // DOM the instant this runs (editing is now null), and simply leaving
+  // focus wherever that forced it, with nothing re-focused, reproduces the
+  // same "Tab stops responding" WebKit behaviour found live for every other
+  // panel in this app.
+  focusOrFallback(document.querySelector<HTMLElement>(sel) ?? document.querySelector<HTMLElement>("#lg-add"));
   editOpener = null;
 }
 

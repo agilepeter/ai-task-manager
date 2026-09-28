@@ -28,6 +28,11 @@ async function buildAboutModule() {
 
   const brandSource = await readFile(new URL("../src/brand.ts", import.meta.url), "utf8");
 
+  // src/focus.ts has no imports of its own, so it is appended as is --
+  // about.ts's own `import { focusOrFallback } from "./focus";` is dropped
+  // below, since this one copy already puts it in scope.
+  const focusSource = await readFile(new URL("../src/focus.ts", import.meta.url), "utf8");
+
   const aboutSource = await readFile(new URL("../src/about.ts", import.meta.url), "utf8");
   const strippedAbout = aboutSource
     .replace(
@@ -36,6 +41,7 @@ async function buildAboutModule() {
     )
     .replace('import { getVersion } from "@tauri-apps/api/app";', 'const getVersion = async () => "0.0.0-test";')
     .replace('import { BRAND, CREDITS } from "./brand";', "")
+    .replace('import { focusOrFallback } from "./focus";', "")
     .replace('import { t } from "./i18n";', "")
     // src/i18n.ts exports its own top-level `render(locale, msg)`; about.ts's
     // own private `render(version)` would otherwise collide with it once the
@@ -46,7 +52,7 @@ async function buildAboutModule() {
     .replace(/\brender\b/g, "__aboutRender");
   if (strippedAbout === aboutSource) throw new Error("no substitution matched -- src/about.ts's source shape moved under this test");
 
-  const code = ts.transpileModule(`${inlinedI18n}\n${brandSource}\n${strippedAbout}`, {
+  const code = ts.transpileModule(`${inlinedI18n}\n${brandSource}\n${focusSource}\n${strippedAbout}`, {
     compilerOptions: { module: ts.ModuleKind.ESNext },
   }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
@@ -82,6 +88,10 @@ function makeFakeDocument() {
   return {
     elements,
     body: {
+      // close()'s own fallback (`?? document.body`, see index.html's comment
+      // on body's tabindex="-1") calls .focus() on this when nothing else
+      // panned out -- a no-op here is enough for this suite's own tests.
+      focus() {},
       classList: {
         contains: (c) => bodyClasses.has(c),
         add: (c) => bodyClasses.add(c),

@@ -9,7 +9,20 @@
     <script type="module" src="/src/demo/boot.ts" defer></script>
   </head>
 
-  <body>
+  <!-- tabindex="-1": never a Tab stop (my.tabbable.ts skips anything that
+       already carries an explicit tabindex, so this plain attribute is
+       enough), but a valid target for `.focus()` -- a panel that closes with
+       nowhere better to send focus (src/detail.ts's own close(), which has no
+       single fixed opener) falls back to this element instead of leaving
+       nothing focused at all. A bare native <body> with NOTHING focused is
+       not equivalent: found live in Playwright WebKit that once `inert` on a
+       closing panel forces the browser to blur its own focused descendant
+       with no explicit next focus target, Tab stops responding entirely
+       until something re-establishes a real focus position -- a plain mouse
+       click "fixes" it by accident, but a keyboard-only user would be stuck.
+       Explicitly focusing this element is what a fallback with a real
+       tabindex on it actually recovers from that state. -->
+  <body tabindex="-1">
     <!-- Liquid-glass lens (prasen.dev original): rounded-rect SDF lens map —
          refraction hugs the rim, center stays optically flat — with R/G/B
          displaced at different strengths for a real prism fringe. Filter

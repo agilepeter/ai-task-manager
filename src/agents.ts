@@ -14,6 +14,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { money } from "./format";
+import { focusOrFallback } from "./focus";
 import { plural, t } from "./i18n";
 import {
   agentRows,
@@ -404,7 +405,7 @@ function close(): void {
   document.querySelector("#agents")?.setAttribute("inert", "");
   const fallback = document.querySelector<HTMLElement>("#agents-open-btn");
   const stillThere = opener != null && document.contains(opener);
-  closeFocusTarget(opener, stillThere, fallback)?.focus();
+  focusOrFallback(closeFocusTarget(opener, stillThere, fallback));
   opener = null;
 }
 

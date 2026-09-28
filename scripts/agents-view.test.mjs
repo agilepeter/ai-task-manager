@@ -46,10 +46,17 @@ async function buildAgentsModule() {
   const strippedFormat = formatSource.replace('import { localeTag, plural, t } from "./i18n";', "");
   if (strippedFormat === formatSource) throw new Error("no substitution matched -- src/format.ts's source shape moved under this test");
 
+  // src/focus.ts has no imports of its own, so it is appended as is -- both
+  // inventory.ts's and agents.ts's own `import { focusOrFallback } from
+  // "./focus";` are dropped below, since the one copy here already puts it
+  // in scope for both.
+  const focusSource = await readFile(new URL("../src/focus.ts", import.meta.url), "utf8");
+
   const inventorySource = await readFile(new URL("../src/inventory.ts", import.meta.url), "utf8");
   const strippedInventory = inventorySource
     .replace('import { invoke } from "@tauri-apps/api/core";', "")
     .replace('import { showLedger } from "./ledger";', "")
+    .replace('import { focusOrFallback } from "./focus";', "")
     .replace('import { localeTag, plural, t, tm, type Msg } from "./i18n";', "")
     .replace('import { byteSize, money, relativeDay, tokens } from "./format";', "")
     // A whole-word rename, not just a declaration move: every bare `render()`
@@ -73,6 +80,7 @@ async function buildAgentsModule() {
   const strippedAgents = agentsSource
     .replace('import { invoke } from "@tauri-apps/api/core";', "")
     .replace('import { money } from "./format";', "")
+    .replace('import { focusOrFallback } from "./focus";', "")
     .replace('import { plural, t } from "./i18n";', "")
     .replace(
       `import {
@@ -108,7 +116,7 @@ async function buildAgentsModule() {
     .replace(/\bT\b/g, "__agentsT");
   if (strippedAgents === agentsSource) throw new Error("no substitution matched -- src/agents.ts's source shape moved under this test");
 
-  const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${strippedInventory}\n${strippedAgents}`, {
+  const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${focusSource}\n${strippedInventory}\n${strippedAgents}`, {
     compilerOptions: { module: ts.ModuleKind.ESNext },
   }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
@@ -146,6 +154,11 @@ function makeFakeDocument() {
   return {
     elements,
     body: {
+      // close()'s own fallback (`?? document.body`, see index.html's comment
+      // on body's tabindex="-1") calls .focus() on this when nothing else
+      // panned out -- a no-op here is enough, since these tests never open
+      // this module's private close() with no real opener AND no fallback.
+      focus() {},
       classList: {
         contains: (c) => bodyClasses.has(c),
         add: (c) => bodyClasses.add(c),

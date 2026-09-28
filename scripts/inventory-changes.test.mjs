@@ -35,15 +35,21 @@ async function buildInventoryModule() {
   const formatSource = await readFile(new URL("../src/format.ts", import.meta.url), "utf8");
   const strippedFormat = formatSource.replace('import { localeTag, plural, t } from "./i18n";', "");
   if (strippedFormat === formatSource) throw new Error("no substitution matched -- src/format.ts's source shape moved under this test");
+  // src/focus.ts has no imports of its own, so it is appended as is --
+  // inventory.ts's own `import { focusOrFallback } from "./focus";` is
+  // dropped below, since this one copy already puts it in scope.
+  const focusSource = await readFile(new URL("../src/focus.ts", import.meta.url), "utf8");
+
   const inventorySource = await readFile(new URL("../src/inventory.ts", import.meta.url), "utf8");
   const stripped = inventorySource
     .replace('import { invoke } from "@tauri-apps/api/core";', "")
+    .replace('import { focusOrFallback } from "./focus";', "")
     .replace('import { showLedger } from "./ledger";', "")
     .replace('import { localeTag, plural, t, tm, type Msg } from "./i18n";', "")
     .replace('import { byteSize, money, relativeDay, tokens } from "./format";', "")
     .replace("function render(): void {", "function __unusedInventoryRender(): void {");
   if (stripped === inventorySource) throw new Error("no substitution matched -- src/inventory.ts's source shape moved under this test");
-  const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${stripped}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+  const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${focusSource}\n${stripped}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 

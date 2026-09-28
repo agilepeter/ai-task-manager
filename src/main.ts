@@ -5,6 +5,7 @@ import { rerender as rerenderAbout, setupAbout } from "./about";
 import { rerender as rerenderLedger, setupLedger } from "./ledger";
 import { applySavedWide, cardExtras, refreshDetail, rerender as rerenderDetail, setupDetail } from "./detail";
 import { watchTabbable } from "./tabbable";
+import { focusOrFallback } from "./focus";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -1896,7 +1897,10 @@ function appConfirm(opts: {
       dismissConfirm = null;
       document.removeEventListener("keydown", onKey, true);
       overlay.remove();
-      if (opener && opener !== document.body && document.contains(opener)) opener.focus();
+      // focusOrFallback() (src/focus.ts): overlay.remove() just destroyed
+      // whatever had focus inside it (#confirm-ok/#confirm-cancel).
+      const restore = opener && opener !== document.body && document.contains(opener) ? opener : null;
+      focusOrFallback(restore);
       resolve(ok);
     };
     dismissConfirm = () => done(false);
@@ -2382,7 +2386,18 @@ function setDrawer(open: boolean, opener: HTMLElement | null = null): void {
     drawerOpener = opener;
     renderDrawerBody();
     // Local JSON list — cheap, and required if Customize opens before Settings.
-    for (const manager of siteKeyManagers) void manager.load();
+    const loads = siteKeyManagers.map((manager) => manager.load());
+    // Each load's own success path re-renders the drawer body when
+    // customizeOpen is true (loadOneNewApiSites(), for a manager with any
+    // configured site or key), which would otherwise destroy the very button
+    // the immediate focus() below just landed on the instant that load
+    // settles -- found live in Playwright: the click opened Customize, but
+    // activeElement read back as <body> a moment later. Refocus once every
+    // load has settled, guarded by customizeOpen in case the panel was
+    // already closed again by then.
+    void Promise.allSettled(loads).then(() => {
+      if (customizeOpen) document.querySelector<HTMLElement>("[data-customize-close]")?.focus();
+    });
   }
   document.body.classList.toggle("drawer-open", open);
   document.querySelector("#customize-btn")?.classList.toggle("active", open);
@@ -2395,7 +2410,7 @@ function setDrawer(open: boolean, opener: HTMLElement | null = null): void {
     drawerEl?.setAttribute("inert", "");
     const fallback = document.querySelector<HTMLElement>("#customize-btn");
     const stillThere = drawerOpener != null && document.contains(drawerOpener);
-    panelCloseFocusTarget(drawerOpener, stillThere, fallback)?.focus();
+    focusOrFallback(panelCloseFocusTarget(drawerOpener, stillThere, fallback));
     drawerOpener = null;
   }
 }
@@ -2420,7 +2435,7 @@ function setSettings(open: boolean, opener: HTMLElement | null = null): void {
     settingsEl?.setAttribute("inert", "");
     const fallback = document.querySelector<HTMLElement>("#settings-btn");
     const stillThere = settingsOpener != null && document.contains(settingsOpener);
-    panelCloseFocusTarget(settingsOpener, stillThere, fallback)?.focus();
+    focusOrFallback(panelCloseFocusTarget(settingsOpener, stillThere, fallback));
     settingsOpener = null;
   }
 }

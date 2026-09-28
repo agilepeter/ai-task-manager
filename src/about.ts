@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { BRAND, CREDITS } from "./brand";
+import { focusOrFallback } from "./focus";
 import { t } from "./i18n";
 
 const T = (k: string, v?: Record<string, string | number>) => t(`about.${k}`, v);
@@ -145,7 +146,7 @@ function close(): void {
   document.querySelector("#about")?.setAttribute("inert", "");
   const fallback = document.querySelector<HTMLElement>("#about-btn");
   const stillThere = opener != null && document.contains(opener);
-  closeFocusTarget(opener, stillThere, fallback)?.focus();
+  focusOrFallback(closeFocusTarget(opener, stillThere, fallback));
   opener = null;
 }
 
