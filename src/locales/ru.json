@@ -1052,6 +1052,6 @@
   "error.export.write": "запись {path}: {error}",
   "agents.stat.yours": "Ваши агенты",
   "agents.stat.running": "Выполняется сейчас",
-  "agents.stat.spend": "Расходы на субагентов, 30 дней",
+  "agents.stat.spendLabel": "Расходы на субагентов",
   "inventory.agents.doorLine": "Ваши агенты: {yours} · Выполняется сейчас: {running} · Расходы на субагентов, 30 дней: {spend}"
 }

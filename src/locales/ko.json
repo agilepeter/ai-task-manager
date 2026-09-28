@@ -942,6 +942,6 @@
   "error.export.write": "{path} 쓰기: {error}",
   "agents.stat.yours": "내 에이전트",
   "agents.stat.running": "지금 실행 중",
-  "agents.stat.spend": "서브에이전트 지출, 30일",
+  "agents.stat.spendLabel": "서브에이전트 지출",
   "inventory.agents.doorLine": "내 에이전트: {yours} · 지금 실행 중: {running} · 서브에이전트 지출, 30일: {spend}"
 }

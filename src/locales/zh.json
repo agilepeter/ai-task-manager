@@ -942,6 +942,6 @@
   "error.export.write": "写入 {path}：{error}",
   "agents.stat.yours": "你的智能体",
   "agents.stat.running": "正在运行",
-  "agents.stat.spend": "子智能体花费，30 天",
+  "agents.stat.spendLabel": "子智能体花费",
   "inventory.agents.doorLine": "你的智能体：{yours} · 正在运行：{running} · 子智能体花费，30 天：{spend}"
 }

@@ -942,6 +942,6 @@
   "error.export.write": "{path} の書き込み：{error}",
   "agents.stat.yours": "自分のエージェント",
   "agents.stat.running": "実行中",
-  "agents.stat.spend": "サブエージェントの支出、30 日間",
+  "agents.stat.spendLabel": "サブエージェントの支出",
   "inventory.agents.doorLine": "自分のエージェント：{yours} · 実行中：{running} · サブエージェントの支出、30 日間：{spend}"
 }

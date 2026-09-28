@@ -150,11 +150,19 @@ export function renderAgentsView(
   // so "$0.00" would show as a real, confident zero instead of the unknown it
   // actually is.
   const stats = agentStats(inv, running, spend);
+  // The third figure's label used to carry its own period ("Subagent spend,
+  // 30 days"), which wraps to two lines in Russian, French, Portuguese and
+  // German -- the label alone never does. Split: the noun stays the label,
+  // and the period becomes its own, smaller caption line under this figure
+  // only, reusing "detail.range.last30d" (the same "Last 30 days" every
+  // locale already ships for the history range picker) rather than minting
+  // a second string for the same fact.
+  const stats3 = `<span class="ag-stat-label">${esc(T("stat.spendLabel"))}</span><span class="ag-stat-period">${esc(t("detail.range.last30d"))}</span>`;
   const statsRow = `
     <div class="ag-stats">
       <div class="ag-stat"><span class="ag-stat-n">${stats.yours}</span><span class="ag-stat-label">${esc(T("stat.yours"))}</span></div>
       <div class="ag-stat"><span class="ag-stat-n">${stats.runningNow}</span><span class="ag-stat-label">${esc(T("stat.running"))}</span></div>
-      <div class="ag-stat"><span class="ag-stat-n">${spendError ? "?" : esc(money(stats.spend30))}</span><span class="ag-stat-label">${esc(T("stat.spend"))}</span></div>
+      <div class="ag-stat"><span class="ag-stat-n">${spendError ? "?" : esc(money(stats.spend30))}</span>${stats3}</div>
     </div>`;
 
   // 2. Running now -- the exact rows Inventory used to show, folded above
