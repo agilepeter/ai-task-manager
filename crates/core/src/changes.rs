@@ -12,7 +12,6 @@
 use crate::i18n::{self, Msg};
 use crate::inventory::{Inventory, Opportunity};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::path::Path;
 
 /// A snapshot older than this, measured from today, is too old to be what
@@ -442,20 +441,11 @@ pub fn opportunities(c: &SetupChanges) -> Vec<Opportunity> {
     if c.changes.is_empty() {
         return Vec::new();
     }
-    // A server split across up to three rows (transport/package/pin) is still one thing
-    // that changed, so both findings below count DISTINCT (kind, what, name) things, never
-    // raw Change rows -- otherwise a single server touched three ways would read as three
-    // "things changed" and break the "{count} other things changed" promise
-    // finding.setup-changed's own text makes. `guardrail` rows never share a `(what, name)`
-    // with each other today (each hook event, and the deny/allow/shell rows, produce at
-    // most one row apiece), but de-duplicating them the same way costs nothing and keeps
-    // both counts honest under the same rule.
-    fn thing(ch: &Change) -> (&str, &str, &str) {
-        (ch.kind.as_str(), ch.what.as_str(), ch.name.as_str())
-    }
+    // Both findings count the rows of the Changes list, which is where their text sends
+    // the reader: a number that is not the number of rows there reads as a row gone
+    // missing.
     let mut out = Vec::new();
-    let guardrail: HashSet<_> = c.changes.iter().filter(|ch| ch.guardrail).map(thing).collect();
-    let guardrail = guardrail.len();
+    let guardrail = c.changes.iter().filter(|ch| ch.guardrail).count();
     if guardrail > 0 {
         // "learn", not "tighten": this is the one finding built from history
         // rather than from the present state of the machine, and a diff can
@@ -473,8 +463,7 @@ pub fn opportunities(c: &SetupChanges) -> Vec<Opportunity> {
             None,
         ));
     }
-    let other: HashSet<_> = c.changes.iter().filter(|ch| !ch.guardrail).map(thing).collect();
-    let other = other.len();
+    let other = c.changes.len() - guardrail;
     if other > 0 {
         out.push(Opportunity::from_msgs(
             "setup-changed",
@@ -666,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    fn a_server_changed_two_ways_is_one_other_thing_not_two() {
+    fn each_finding_counts_the_rows_the_list_shows() {
         let old = Snapshot { servers: vec![server_transport("docs", "stdio", Some("docs-mcp@1"), Some(true))], ..empty_snapshot("2026-09-01") };
         let new = Snapshot { servers: vec![server_transport("docs", "http", Some("other-mcp@2"), Some(true))], ..empty_snapshot("2026-09-08") };
         let found = diff(&old, &new);
@@ -676,10 +665,17 @@ mod tests {
         let opps = opportunities(&sc);
         assert_eq!(opps.len(), 1);
         assert_eq!(opps[0].id, "setup-changed");
-        assert_eq!(
-            opps[0].title, "1 other thing changed in your setup",
-            "one server touched two ways is one thing, not two -- the finding's own text promises \"{{count}} other things changed\""
-        );
+        assert_eq!(opps[0].title, "2 other things changed in your setup", "two rows in the list, so two in the finding");
+
+        // The same name defined a second time is a second row, and counts as one.
+        let old = Snapshot { agents: vec!["reviewer".into()], hook_events: vec![("SessionEnd".into(), 2)], deny: 4, ..empty_snapshot("2026-09-01") };
+        let new = Snapshot { agents: vec!["reviewer".into(); 3], hook_events: vec![("SessionEnd".into(), 1)], deny: 2, ..empty_snapshot("2026-09-08") };
+        let found = diff(&old, &new);
+        let (marked, plain) = (found.iter().filter(|c| c.guardrail).count(), found.iter().filter(|c| !c.guardrail).count());
+        assert_eq!((marked, plain), (2, 2), "{found:?}");
+        let opps = opportunities(&SetupChanges { since: Some(old.taken.clone()), changes: found, days_of_history: 7 });
+        assert_eq!(opps[0].title, "2 guardrails were removed from your setup");
+        assert_eq!(opps[1].title, "2 other things changed in your setup");
     }
 
     #[test]

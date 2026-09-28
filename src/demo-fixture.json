@@ -3205,17 +3205,17 @@
      {
       "id": "setup-changed",
       "status": "consider",
-      "title": "5 other things changed in your setup",
-      "detail": "5 servers, agents, skills or permissions changed since the last check. See Changes in the Inventory tab for what.",
+      "title": "6 other things changed in your setup",
+      "detail": "6 servers, agents, skills or permissions changed since the last check. See Changes in the Inventory tab for what.",
       "titleMsg": {
        "key": "finding.setup-changed.title",
        "vars": {},
-       "count": 5
+       "count": 6
       },
       "detailMsg": {
        "key": "finding.setup-changed.detail",
        "vars": {},
-       "count": 5
+       "count": 6
       }
      }
     ]

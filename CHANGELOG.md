@@ -23,17 +23,14 @@ release history is kept verbatim in
   snapshot that is at least a week old, or the oldest one on file, saying
   honestly how far back that reaches; a snapshot dated in the future or more
   than 35 days back is never the one compared against. A server that
-  changed says exactly what: its own row for a different transport, a
-  different package, or its version pin gained or lost, instead of one
-  opaque "changed" line. Two new findings, both "learn" and unscored:
+  changed says what changed, a row each: how it connects, the package it
+  runs, or a version pin gained or lost. Two new findings, both "learn" and unscored:
   `guardrail-removed`, when a deny rule, a hook or shell coverage went away
   and is worth confirming it was meant, and `setup-changed` for everything
-  else that moved -- a server touched more than one way still counts as
-  one thing there, not several. A row the Changes list shows for a
-  guardrail loss now carries the same amber marker, and the same
-  screen-reader label, as a "tighten" opportunity; losing a version pin
-  does not, since that is already scored on its own by `mcp-unpinned`. The
-  weekly digest now names the day it is comparing against.
+  else that moved. Each counts the rows the Changes list shows. A row for a
+  guardrail that went away carries an amber marker and a label a screen
+  reader speaks. Losing a version pin does not, since `mcp-unpinned`
+  already scores it. The weekly digest names the day it compares with.
 - **MCP context cost, in Inventory.** For each MCP server Claude Code has
   configured, how many tool calls it answered and the total size, in bytes,
   of what came back over the last 30 days, shown as a fact on the server's
