@@ -44,6 +44,7 @@ import json
 import os
 import pathlib
 import re
+import urllib.parse
 import subprocess
 import sys
 import tempfile
@@ -163,16 +164,32 @@ _STASH_RE = re.compile("\x00(\\d+)\x00")
 
 
 def on_the_site(address: str) -> str:
-    """A link written for the repository, made to work on the page.
+    """A link written for the repository, made to work on the page, or refused.
 
     CHANGELOG.md links to files beside it (`docs/privacy.md`). On the site
     there is no such file beside the page, so the same link answers 404. A
     link with no scheme that is not an anchor or a site path is a file in the
-    repository, and points there."""
-    if re.match(r"[a-zA-Z][a-zA-Z0-9+.-]*:", address) or address.startswith(("#", "/")):
+    repository, and points there.
+
+    The page is public, so only three kinds of address with a scheme go out:
+    http, https and mailto. Anything else (`javascript:`, `data:`), and an
+    address that begins `//` and so names another host while looking like a
+    path, stops the run: a changelog is written by hand, and a link like
+    that in one is a mistake worth a loud failure."""
+    address = address.strip()
+    if not address:
+        raise ValueError("a link in the changelog has no address")
+    if address.startswith("//"):
+        raise ValueError(f"a link in the changelog names another host without a scheme: {address!r}")
+    scheme = re.match(r"([a-zA-Z][a-zA-Z0-9+.-]*):", address)
+    if scheme:
+        if scheme.group(1).lower() not in ("http", "https", "mailto"):
+            raise ValueError(f"a link in the changelog uses a scheme the page does not publish: {address!r}")
+        return address
+    if address.startswith(("#", "/")):
         return address
     path = address[2:] if address.startswith("./") else address
-    return f"{REPO_URL}/blob/main/{path}"
+    return f"{REPO_URL}/blob/main/{urllib.parse.quote(path, safe='/#?=&%')}"
 
 
 def render_inline(md: str) -> str:
@@ -696,11 +713,11 @@ def _check(releases: list[Release], product_page_html: str, site_root: pathlib.P
         expected = splice(expected, MARK_START, MARK_END, "\n" + render_whats_new(latest) + "\n")
         expected = splice(expected, LINK_MARK_START, LINK_MARK_END, render_version_link(latest))
         expected = sync_release_version(expected, latest.version)
+        rendered = render_page(releases, expected)
     except ValueError as e:
         print(f"stale: {e}", file=sys.stderr)
         return 1
 
-    rendered = render_page(releases, expected)
     target = _changelog_target(site_root)
     if not target.exists():
         print(f"stale: {target} does not exist; run changelog-page.py to generate it", file=sys.stderr)
@@ -776,18 +793,24 @@ def main(argv: list[str]) -> int:
         updated = splice(updated, MARK_START, MARK_END, "\n" + render_whats_new(latest) + "\n")
         updated = splice(updated, LINK_MARK_START, LINK_MARK_END, render_version_link(latest))
         updated = sync_release_version(updated, latest.version)
+        # Rendered from the corrected page, and inside the same refusal: a
+        # link in the changelog that the page will not publish stops the
+        # run here, in one line, with nothing written.
+        rendered_changelog = render_page(releases, updated)
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
     # The changelog page is rendered from the corrected page (updated),
     # not the raw one just read, so its own JSON-LD softwareVersion is
     # never a stale copy of whatever the product page said before this run.
-    rendered_changelog = render_page(releases, updated)
 
     target = _changelog_target(site_root)
     target.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write(target, rendered_changelog)
-    print(f"wrote {target}")
+    if target.exists() and target.read_bytes() == rendered_changelog.encode("utf-8"):
+        print(f"{target} is already current")
+    else:
+        _atomic_write(target, rendered_changelog)
+        print(f"wrote {target}")
 
     if updated != product_page_html:
         _atomic_write(product_page_path, updated)
@@ -962,9 +985,18 @@ def selftest() -> int:
         ("mailto:someone@example.com", "mailto:someone@example.com"),
         ("#v0-1-0", "#v0-1-0"),
         ("/task-manager/", "/task-manager/"),
+        ("HTTPS://EXAMPLE.COM/A", "HTTPS://EXAMPLE.COM/A"),
+        ("docs/a b.md", f"{REPO_URL}/blob/main/docs/a%20b.md"),
     ]:
         got = render_inline(f"See [the file]({written}).")
         check(f'href="{served}"' in got, f"a link to {written!r} should be served as {served!r}: {got!r}")
+    for refused in ["javascript:alert(1)", "JavaScript:alert(1)", "data:text/html,x", "//evil.example/x", "vbscript:x", " "]:
+        try:
+            got = render_inline(f"See [the file]({refused}).")
+        except ValueError:
+            continue
+        # Markdown with a space for an address is not a link at all, and may come back as prose.
+        check("href=" not in got, f"a link to {refused!r} must be refused, not published: {got!r}")
 
     escaped_bullet = render_inline(releases[0].sections["Changed"][0])
     check("<code>&lt;Config&gt;</code>" in escaped_bullet, f"code content not escaped: {escaped_bullet!r}")
@@ -1268,6 +1300,8 @@ def selftest() -> int:
                        + fresh_page[end_i + len(MARK_END):])
     result = _check_against(reversed_order)
     check(result.returncode == 1, f"--check must fail when the end marker comes before the start marker: {result.stderr!r}")
+    check("before its start marker" in result.stderr,
+          f"reversed markers must be refused for being reversed, not for some other reason: {result.stderr!r}")
 
     stale_content = fresh_page.replace(MARK_END, "<p>leftover</p>" + MARK_END, 1)
     result = _check_against(stale_content)
