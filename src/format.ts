@@ -26,7 +26,7 @@ export function tokens(n: number): string {
 /// KB under 1 MB, then MB, then GB from 1024 MB -- the general-purpose byte
 /// formatter, for anything that isn't a file (detail.ts keeps its own
 /// fileSize() for that). MB/KB stay English, like money()'s $ and tokens()'s
-/// B/M/K. Zero is its own case: the KB branch's `Math.max(1, …)` floor exists
+/// B/M/K. Zero is its own case: the KB branch's `Math.max(1, ...)` floor exists
 /// so a handful of real bytes still reads as "1 KB" instead of "0 KB", but
 /// applied to an actual zero it would lie the same way. Anything that is not
 /// a finite, non-negative byte count -- NaN, an unset value that slipped
