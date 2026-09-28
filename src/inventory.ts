@@ -51,7 +51,7 @@ interface LivePace {
 /** One agent host process running right now, folded with whatever plain
  *  subprocesses it spawned. Never a pid on screen: there is no End task for
  *  an agent, only for the MCP servers it starts. */
-interface RunningAgent {
+export interface RunningAgent {
   tool: string;
   pid: number;
   elapsedSecs: number;
@@ -89,7 +89,7 @@ interface PinPlan {
   fileMtimeMs: number;
 }
 
-interface Definition {
+export interface Definition {
   name: string;
   scope: "user" | "project";
   project: string | null;
@@ -101,7 +101,7 @@ interface Definition {
 /// Code ships ("general-purpose", "Explore", "Plan", ...), or an empty name
 /// for a transcript with no attribution line at all (a Definition's own
 /// file stem can never be empty, so this can't collide with a real one).
-interface AgentSpend {
+export interface AgentSpend {
   name: string;
   runs: number;
   cost: number;
@@ -115,7 +115,7 @@ interface AgentSpend {
   byClient: [string, number][];
 }
 
-interface Opportunity {
+export interface Opportunity {
   id: string;
   kind: "tighten" | "learn";
   title: string;
@@ -128,7 +128,7 @@ interface Opportunity {
   learnUrl: string | null;
 }
 
-interface Inventory {
+export interface Inventory {
   mcpServers: McpServer[];
   agents: Definition[];
   skills: Definition[];
@@ -268,9 +268,13 @@ function section(
     </article>`;
 }
 
-function renderOpportunities(list: Opportunity[]): string {
-  const shown = list.filter((o) => kindFilter === "all" || o.kind === kindFilter);
-  const body = shown
+/// The per-item markup for one Opportunity -- shared with the Agents view's
+/// own "Worth a look" section (src/agents.ts), which shows the agent-related
+/// subset of this same list with no filter UI and no collapsible wrapper
+/// around it. Pulled out of renderOpportunities() below so that view reuses
+/// this exact row instead of a second one for the same finding.
+export function renderOpportunityRows(list: Opportunity[]): string {
+  return list
     .map(
       (o) => `
       <div class="inv-opp inv-opp-${o.kind}">
@@ -280,6 +284,11 @@ function renderOpportunities(list: Opportunity[]): string {
       </div>`,
     )
     .join("");
+}
+
+function renderOpportunities(list: Opportunity[]): string {
+  const shown = list.filter((o) => kindFilter === "all" || o.kind === kindFilter);
+  const body = renderOpportunityRows(shown);
   const filter = `
     <label class="inv-filter">${esc(T("filter.show"))}
       <select id="inv-kind">
@@ -489,6 +498,21 @@ export function describeAgent(a: RunningAgent): { title: string; place: string; 
   return { title, place, pace, tip };
 }
 
+/// Defined agents, agents running right now, and 30-day subagent cost -- the
+/// one sentence Inventory's own door row (below, in render()) and the Agents
+/// view's own heading (src/agents.ts) both show, computed here once so the
+/// two can never disagree. Keys live under "agents." -- the view's own
+/// prefix, a sibling of "audit." -- read directly by key rather than through
+/// this file's own T() alias, the same way audit.ts's sectionLabel() reads
+/// "section.*" directly instead of through its own "audit." alias.
+export function agentsSummaryLine(defined: number, runningNow: number, cost30: number): string {
+  return t("agents.summary.line", {
+    defined: plural("agents.summary.defined", defined),
+    running: plural("agents.summary.running", runningNow),
+    cost: money(cost30),
+  });
+}
+
 /// The live agents, folded above the MCP server rows inside the same Running
 /// now section (renderRunning() splices this in). Silent -- returns "" --
 /// when there is nothing to say: most opens of this tab happen with no
@@ -496,7 +520,7 @@ export function describeAgent(a: RunningAgent): { title: string; place: string; 
 /// server list would be noise the servers themselves never had to carry. A
 /// failed scan still surfaces the group, so a permission or lsof gap is
 /// visible rather than swallowed.
-function renderAgents(list: RunningAgent[]): string {
+export function renderAgents(list: RunningAgent[]): string {
   if (!list.length && !runningAgentsError) return "";
   const head = `<div class="inv-grouphead">${esc(T("running.agentsTitle"))} <span class="inv-grouphead-n">${list.length}</span></div>`;
   if (!list.length) {
@@ -568,13 +592,21 @@ function renderRunning(): string {
     ? `<p class="inv-note run-lead">${esc(T("running.summary", { mem: mbLabel(total), processes: plural("inventory.running.processCount", procCount) }))}</p>`
     : "";
   // The server list's own empty/error text is folded into `body` here
-  // (rather than passed as section()'s `hint`), so an agent-only reading (no
-  // servers running) still gets its own line instead of section() replacing
-  // the whole panel -- including the agents block above it -- with the hint.
+  // (rather than passed as section()'s `hint`) so it reads correctly at
+  // zero servers with no help from `keepBody` bypassing it -- kept anyway,
+  // since `hint` itself is passed as "" and section() would otherwise paint
+  // that blank hint instead of the real empty text below.
+  //
+  // Agent host rows used to fold in here, above the server rows -- moved out
+  // to the Agents view (src/agents.ts), which gathers every place agents
+  // used to be shown into one. This section now holds MCP servers only, and
+  // its title, count and memory total were already server-only even while
+  // agents were folded in (both come from `running`, never `runningAgents`),
+  // so nothing about that text needed to change.
   const serverBody = running.length
     ? serverLead + rows
     : `<p class="inv-empty">${esc(runningError ? T("empty.runningError", { error: runningError }) : T("empty.running"))}</p>`;
-  return section("running", T("section.running"), running.length, renderAgents(runningAgents) + serverBody, "", { keepBody: true });
+  return section("running", T("section.running"), running.length, serverBody, "", { keepBody: true });
 }
 
 /// Why a card is empty. Says where the app looked, so "not signed in" and
@@ -669,8 +701,9 @@ export function describeAgentSpend(s: AgentSpend | undefined, nowMs: number): st
 
 /// Custom agent rows, each with its 30-day spend line underneath the name --
 /// skills use the plain defRows() above since they carry no spend of their
-/// own to show.
-function agentRows(list: Definition[], spend: Map<string, AgentSpend>, nowMs: number): string {
+/// own to show. Exported: the Agents view (src/agents.ts) paints its "Your
+/// agents" section with this exact row, never a second renderer for it.
+export function agentRows(list: Definition[], spend: Map<string, AgentSpend>, nowMs: number): string {
   return list
     .map(
       (d) => `
@@ -713,10 +746,13 @@ export function builtInAgentRows(allAgents: Definition[], spend: AgentSpend[], n
   );
 }
 
-/// Agents, skills and guardrails are all "how this machine is configured",
-/// they rarely change, and each was its own accordion. Eight collapsible
-/// sections is a wall; these three are one, with sub-headings inside.
-function renderSetup(inv: Inventory, agents: Definition[], skills: Definition[], spend: AgentSpend[]): string {
+/// Skills and guardrails are both "how this machine is configured", they
+/// rarely change, and each was its own accordion. Two collapsible sections
+/// is a wall; these two are one, with a sub-heading inside. Custom and
+/// built-in agent rows used to sit here too, ahead of Skills -- moved out to
+/// the Agents view (src/agents.ts), which gathers every place agents used to
+/// be shown into one.
+export function renderSetup(inv: Inventory, skills: Definition[]): string {
   const p = inv.permissions;
   const guardrails = [
     [T("setup.defaultModel"), inv.model ?? T("setup.modelNotPinned")],
@@ -737,17 +773,10 @@ function renderSetup(inv: Inventory, agents: Definition[], skills: Definition[],
   const defs = (title: string, list: Definition[], hint: string) =>
     `<div class="inv-grouphead">${esc(title)} <span class="inv-grouphead-n">${list.length}</span></div>` +
     (list.length ? defRows(list) : `<p class="inv-empty">${esc(hint)}</p>`);
-  const nowMs = Date.now();
-  const spendByName = new Map(spend.map((s) => [s.name, s]));
-  const agentsBody =
-    `<div class="inv-grouphead">${esc(T("setup.agents"))} <span class="inv-grouphead-n">${agents.length}</span></div>` +
-    (agents.length ? agentRows(agents, spendByName, nowMs) : `<p class="inv-empty">${esc(T("empty.agents"))}</p>`) +
-    builtInAgentRows(inv.agents, spend, nowMs);
   const body =
-    agentsBody +
     defs(T("setup.skills"), skills, T("empty.skills")) +
     `<div class="inv-grouphead">${esc(T("setup.guardrails"))}</div>${guardrails}`;
-  const count = agents.length + skills.length + p.allow + p.ask + p.deny + inv.hooks.length;
+  const count = skills.length + p.allow + p.ask + p.deny + inv.hooks.length;
   return section("setup", T("section.setup"), count, body, "", { keepBody: true });
 }
 
@@ -813,6 +842,32 @@ function scopeOptions(inv: Inventory): string {
   );
 }
 
+/// The one summary row Inventory shows that opens the Agents view, e.g.
+/// "4 agents, 2 running, $312 in the last 30 days" -- shown even at zero, as
+/// the door to that view's own empty state. It sits first in render(),
+/// right under the toolbar and scan note, because that is where agent rows
+/// themselves used to sit first: renderAgents() was folded in ABOVE the MCP
+/// server rows in Running now, which was itself the first section below
+/// this note. Leading with it also means a user does not have to guess
+/// which of the three old hiding spots (Running now, Setup, Opportunities)
+/// might still say something about agents -- none of them do any more.
+/// Exported and pure (a plain header row, no action control, same as every
+/// other section header in this file) so a test can check it carries no
+/// per-agent control and still renders at zero.
+export function renderAgentsDoor(inv: Inventory, runningNow: number, cost30: number): string {
+  const summary = agentsSummaryLine(inv.agents.length, runningNow, cost30);
+  return `
+    <article class="provider inv-section" data-section="agents-door">
+      <button class="inv-head" id="agents-door-btn" title="${esc(T("agents.tip"))}">
+        <span class="inv-row-main">
+          <span class="inv-name">${esc(T("agents.button"))}</span>
+          <span class="inv-sub">${esc(summary)}</span>
+        </span>
+        <span class="inv-caret" aria-hidden="true">&rsaquo;</span>
+      </button>
+    </article>`;
+}
+
 function render(): void {
   const el = document.querySelector<HTMLElement>("#inventory");
   if (!el) return;
@@ -827,27 +882,29 @@ function render(): void {
   const inv = inventory;
   if (appFilter !== ALL_APPS && !inv.mcpServers.some((s) => s.client === appFilter)) appFilter = ALL_APPS;
   const mcp = inv.mcpServers.filter(inScope).filter((s) => appFilter === ALL_APPS || s.client === appFilter);
-  const agents = inv.agents.filter(inScope);
   const skills = inv.skills.filter(inScope);
   const scanned = plural("inventory.projectsScanned", inv.projects);
+  const agentsCost30 = agentSpend.reduce((sum, s) => sum + s.cost, 0);
   el.innerHTML = `
     <div class="inv-toolbar">
       <label class="inv-filter">${esc(T("scope.label"))}
         <select id="inv-scope">${scopeOptions(inv)}</select>
       </label>
       <span class="lg-toolbar">
+        <button class="inv-rescan" id="agents-open-btn" title="${esc(T("agents.tip"))}">${esc(T("agents.button"))}</button>
         <button class="inv-rescan" id="audit-open-btn" title="${esc(T("audit.tip"))}">${esc(T("audit.button"))}</button>
         <button class="inv-rescan" id="inv-rescan" title="${esc(T("rescan.tip"))}">${esc(T("rescan.button"))}</button>
       </span>
     </div>
     <p class="inv-note">${esc(T("note", { scanned }))}</p>
+    ${renderAgentsDoor(inv, runningAgents.length, agentsCost30)}
     ${renderOpportunities(inv.opportunities)}
     ${renderChanges(setupChanges, setupChangesError)}
     ${renderRunning()}
     ${renderSignIns()}
     ${renderTools(inv)}
     ${renderMcp(mcp)}
-    ${renderSetup(inv, agents, skills, agentSpend)}`;
+    ${renderSetup(inv, skills)}`;
 }
 
 /// Cheap next to a full scan, so it refreshes on its own whenever the view is

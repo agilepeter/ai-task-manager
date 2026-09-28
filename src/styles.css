@@ -321,6 +321,19 @@ body.settings-open #settings {
   letter-spacing: -0.01em;
 }
 
+/* #agents is the one panel-head title that is a real heading (<h2>, for the
+   focus target on open and a real landmark for screen readers) rather than
+   a plain <span> like every other panel's -- an h2 carries browser default
+   margin and a larger font-size that a bare span never did, which pushed
+   the header bar's rendered height past the fixed panels' shared 56px
+   top padding and clipped the Agents view's own first line underneath it.
+   Reset both back to what the span-based panel-heads already render. */
+#agents .panel-title {
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+
 .acc-group {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -3340,12 +3353,12 @@ body.wide #drawer .panel-head {
    rail's width, so Done and the first column stay readable and clickable.
    In wide mode the narrow panels shrink by the same amount so they never
    cross into the detail column, which the rail does not reach. */
-body:has(#side-zone:hover) :is(#settings, #drawer, #detail, #audit, #about),
-body:has(.sidebar:focus-within) :is(#settings, #drawer, #detail, #audit, #about) {
+body:has(#side-zone:hover) :is(#settings, #drawer, #detail, #audit, #about, #agents),
+body:has(.sidebar:focus-within) :is(#settings, #drawer, #detail, #audit, #about, #agents) {
   left: 42px;
 }
-body:has(#side-zone:hover) :is(#settings, #drawer, #detail, #audit, #about) .panel-head.glass-bar,
-body:has(.sidebar:focus-within) :is(#settings, #drawer, #detail, #audit, #about) .panel-head.glass-bar {
+body:has(#side-zone:hover) :is(#settings, #drawer, #detail, #audit, #about, #agents) .panel-head.glass-bar,
+body:has(.sidebar:focus-within) :is(#settings, #drawer, #detail, #audit, #about, #agents) .panel-head.glass-bar {
   left: 42px;
 }
 body.wide:has(#side-zone:hover) #detail,
@@ -3354,10 +3367,10 @@ body.wide:has(#side-zone:hover) #detail .panel-head,
 body.wide:has(.sidebar:focus-within) #detail .panel-head {
   left: 380px;
 }
-body.wide:has(#side-zone:hover) :is(#settings, #drawer, #audit, #about),
-body.wide:has(.sidebar:focus-within) :is(#settings, #drawer, #audit, #about),
-body.wide:has(#side-zone:hover) :is(#settings, #drawer, #audit, #about) .panel-head,
-body.wide:has(.sidebar:focus-within) :is(#settings, #drawer, #audit, #about) .panel-head {
+body.wide:has(#side-zone:hover) :is(#settings, #drawer, #audit, #about, #agents),
+body.wide:has(.sidebar:focus-within) :is(#settings, #drawer, #audit, #about, #agents),
+body.wide:has(#side-zone:hover) :is(#settings, #drawer, #audit, #about, #agents) .panel-head,
+body.wide:has(.sidebar:focus-within) :is(#settings, #drawer, #audit, #about, #agents) .panel-head {
   width: 338px;
 }
 /* Back on the left, Wide on the right: the title needs no optical offset. */
@@ -3914,6 +3927,51 @@ body.wide:not(.audit-open) #audit {
   box-shadow: inset 0 0 0 1px var(--viz-1);
 }
 
+/* ------------------------------------------------------------------- agents */
+/* Same slide-in shape as #audit above, own z-index so the two never fight
+   for stacking (only one panel is ever open at a time, but each still gets
+   its own layer). */
+#agents {
+  position: fixed;
+  inset: 0;
+  z-index: 54;
+  background: var(--background);
+  padding: 56px 14px 48px;
+  overflow-y: auto;
+  transform: translateX(103%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  scrollbar-width: none;
+}
+#agents::-webkit-scrollbar {
+  display: none;
+}
+body.agents-open #agents {
+  transform: none;
+}
+body.reduce-anim #agents {
+  transition: none;
+}
+body.wide #agents {
+  right: auto;
+  width: 380px;
+}
+body.wide #agents .panel-head {
+  right: auto;
+  width: 380px;
+}
+body.wide:not(.agents-open) #agents {
+  transform: translateX(-103%);
+}
+/* The headline sentence -- "4 agents, 2 running, $312 in the last 30 days" --
+   reads at plain dt-caption size and weight but is the one line every open
+   of this view leads with, so it gets slightly more presence than the
+   caption-muted notes it otherwise shares a class with. */
+.ag-summary {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
 /* -------------------------------------------------------------------- about */
 #about {
   position: fixed;
@@ -4100,12 +4158,12 @@ body.reduce-anim .ab-dance .ab-bot-body {
 
 /* Last on purpose: the panels above each set their own transform transition,
    and the rail push (left / width) must ride along with it everywhere. */
-#settings, #drawer, #detail, #audit, #about, .panel-head.glass-bar {
+#settings, #drawer, #detail, #audit, #about, #agents, .panel-head.glass-bar {
   transition-property: transform, left, width;
   transition-duration: 0.28s, 0.24s, 0.24s;
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
-body.reduce-anim :is(#settings, #drawer, #detail, #audit, #about, .panel-head.glass-bar) {
+body.reduce-anim :is(#settings, #drawer, #detail, #audit, #about, #agents, .panel-head.glass-bar) {
   transition: none;
 }
 body.wide #detail {

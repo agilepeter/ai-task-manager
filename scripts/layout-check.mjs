@@ -32,7 +32,8 @@
 // net::ERR_CONNECTION_REFUSED trace.
 //
 // Env overrides for faster iteration while chasing a single fix (the default
-// with no env vars is the full 63-cell matrix the gates expect):
+// with no env vars is the full 72-cell matrix the gates expect -- nine
+// locales times eight views, the Agents view included):
 //   ONLY_LOCALES=de,ru node scripts/layout-check.mjs
 //   ONLY_VIEWS=settings,audit node scripts/layout-check.mjs
 //
@@ -43,7 +44,7 @@
 // Deterministic and offline: the demo's mock backend (src/demo/mock.ts) is
 // the only data source, no real network calls happen once dist-demo is
 // built, and nothing here touches cargo. Not a `*.test.mjs`, so `npm test`
-// does not run it -- a 9-locale x 7-view WebKit sweep with screenshots does
+// does not run it -- a 9-locale x 8-view WebKit sweep with screenshots does
 // not belong on the hot path of every `npm test`.
 
 import { mkdirSync, readFileSync, existsSync } from 'fs';
@@ -97,16 +98,17 @@ if (ALL_LOCALES.length === 0) throw new Error('parsed zero locales out of src/i1
 // whose scrollHeight determines how tall the viewport must grow to render
 // the view without any internal scrolling, so one screenshot shows the
 // whole thing (see tallEnoughFor()).
-// Both `#settings`/`#audit`/`#detail`/`#about` (full-window slide-in panels)
-// and `#providers`/`#inventory`/`#ledger` (the three tab bodies) are their
-// own `overflow-y: auto` scrollers -- confirmed by reading src/styles.css,
-// not assumed.
+// Both `#settings`/`#audit`/`#agents`/`#detail`/`#about` (full-window
+// slide-in panels) and `#providers`/`#inventory`/`#ledger` (the three tab
+// bodies) are their own `overflow-y: auto` scrollers -- confirmed by
+// reading src/styles.css, not assumed.
 const VIEWS = [
   { name: 'usage', scroller: '#providers' },
   { name: 'settings', scroller: '#settings' },
   { name: 'detail', scroller: '#detail' },
   { name: 'inventory', scroller: '#inventory' },
   { name: 'audit', scroller: '#audit' },
+  { name: 'agents', scroller: '#agents' },
   { name: 'about', scroller: '#about' },
   { name: 'subscriptions', scroller: '#ledger' },
 ];
@@ -149,21 +151,21 @@ function check(label, cond) {
   return cond;
 }
 
-// Every one of Settings/Detail/Audit/About's root elements is `position:
-// fixed; inset: 0` and stays fully laid out (real scrollWidth/clientWidth,
-// non-empty getClientRects()) even while "closed" -- closed just means
-// `transform: translateX(103%)`, which moves it, it does not unrender it.
-// Two consequences a scan across the whole document would get wrong: (1) a
-// genuine bug inside a currently-closed panel would get attributed to
-// whatever view happens to be active when the scan runs, and (2) a panel
-// that was rendered under an earlier locale and never reopened since (so
-// never re-rendered by rerender()) keeps that STALE locale's text, which
-// would then get scanned as if it belonged to the current locale. Both are
-// real failure modes seen while developing this script (a French "Detail"
-// render leaking into a later German "Settings" cell's offender list).
-// Scoping the scan to the current view's own root, plus whatever sits
-// outside all seven roots (the tab strip, sidebar, footer -- always live),
-// avoids both.
+// Every one of Settings/Detail/Audit/Agents/About's root elements is
+// `position: fixed; inset: 0` and stays fully laid out (real
+// scrollWidth/clientWidth, non-empty getClientRects()) even while "closed"
+// -- closed just means `transform: translateX(103%)`, which moves it, it
+// does not unrender it. Two consequences a scan across the whole document
+// would get wrong: (1) a genuine bug inside a currently-closed panel would
+// get attributed to whatever view happens to be active when the scan runs,
+// and (2) a panel that was rendered under an earlier locale and never
+// reopened since (so never re-rendered by rerender()) keeps that STALE
+// locale's text, which would then get scanned as if it belonged to the
+// current locale. Both are real failure modes seen while developing this
+// script (a French "Detail" render leaking into a later German "Settings"
+// cell's offender list). Scoping the scan to the current view's own root,
+// plus whatever sits outside all eight roots (the tab strip, sidebar,
+// footer -- always live), avoids both.
 const VIEW_ROOTS = VIEWS.map((v) => v.scroller);
 
 /** Full page.evaluate for one cell: overflow scan + the doc-width assertion.
@@ -278,13 +280,14 @@ async function expandAllAccordions(page) {
 const PANEL_CLOSE = {
   'detail-open': '#detail-close',
   'audit-open': '#audit-close',
+  'agents-open': '#agents-close',
   'about-open': '#about-close',
   'settings-open': '#settings-close',
 };
 
 async function gotoUsageTab(page) {
-  // Detail/Audit/Settings/About cover #view-tabs while open at this width,
-  // so whichever panel is actually open has to close first.
+  // Detail/Audit/Agents/Settings/About cover #view-tabs while open at this
+  // width, so whichever panel is actually open has to close first.
   for (const [bodyClass, closeBtn] of Object.entries(PANEL_CLOSE)) {
     const open = await page.evaluate((c) => document.body.classList.contains(c), bodyClass);
     if (open) {
@@ -317,14 +320,16 @@ async function runCell(page, view, locale) {
       await page.locator('[data-view="inventory"]').click();
       await page.waitForTimeout(800); // Inventory's async load + render
       // Setup ships collapsed (its id is absent from openSections in
-      // src/inventory.ts), so without opening it here the agent rows this
-      // sweep exists to check -- Built-in agents included -- never render
-      // into the DOM at all. Checking aria-expanded first, same reasoning
-      // as openSettings() above, matters here for a different reason than
-      // there: openSections is a module-level Set that outlives every
-      // locale switch in this run (the page is never reloaded), so a
-      // second, unconditional click on the same button would re-close it
-      // on the very next locale's inventory cell instead of opening it.
+      // src/inventory.ts), so without opening it here its Skills and
+      // Guardrails rows never render into the DOM at all -- agent rows used
+      // to be the reason this mattered most (Built-in agents included), but
+      // they moved out to their own Agents view (below), swept separately.
+      // Checking aria-expanded first, same reasoning as openSettings()
+      // above, matters here for a different reason than there: openSections
+      // is a module-level Set that outlives every locale switch in this run
+      // (the page is never reloaded), so a second, unconditional click on
+      // the same button would re-close it on the very next locale's
+      // inventory cell instead of opening it.
       if ((await page.locator('[data-toggle="setup"]').getAttribute('aria-expanded')) !== 'true') {
         await page.locator('[data-toggle="setup"]').click();
       }
@@ -342,6 +347,18 @@ async function runCell(page, view, locale) {
       await page.locator('#audit-open-btn').click();
       await page.waitForSelector('#audit-body .au-head', { timeout: 5000 });
       await page.waitForTimeout(500); // safety margin after the score/sections paint
+      break;
+    case 'agents':
+      // Opened from Inventory's own door row, same as the Audit case above
+      // opens from its toolbar button -- both live in #inventory, so
+      // Inventory has to be showing first. Every section here starts
+      // expanded (unlike Inventory's own accordions), so nothing needs a
+      // toggle click before it renders.
+      await page.locator('[data-view="inventory"]').click();
+      await page.waitForTimeout(500); // Inventory rendered, so #agents-door-btn exists to click
+      await page.locator('#agents-door-btn').click();
+      await page.waitForSelector('#agents-heading', { timeout: 5000 });
+      await page.waitForTimeout(800); // the view's own get_inventory/get_running_agents/get_agent_spend/get_audit calls to settle
       break;
     case 'about':
       await page.locator('#side-zone').hover();
@@ -438,7 +455,7 @@ async function main() {
     await browser.close();
   }
 
-  console.log('\n=== 63-cell matrix (view x locale) ===');
+  console.log(`\n=== ${VIEWS_TO_RUN.length * LOCALES.length}-cell matrix (view x locale) ===`);
   const header = ['view'.padEnd(14), ...LOCALES.map((l) => l.padEnd(6))].join(' ');
   console.log(header);
   for (const view of VIEWS_TO_RUN) {
