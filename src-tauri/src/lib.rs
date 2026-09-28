@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, audit, clients, coaching, diagnose, digest, drift, effort, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, procs, providers, spend, trust};
+pub(crate) use aitm_core::{alerts, audit, changes, clients, coaching, diagnose, digest, drift, effort, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, procs, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -172,6 +172,38 @@ async fn get_inventory() -> Result<inventory::Inventory, String> {
     tauri::async_runtime::spawn_blocking(|| enriched_inventory().0)
     .await
     .map_err(|e| format!("inventory scan: {e}"))
+}
+
+/// The dated history behind the Inventory tab's Changes section: what
+/// changed in the setup's own shape since about a week ago.
+/// `src/inventory.ts`'s `load()` fires this and `get_inventory` back to
+/// back on every Inventory open, and `get_inventory` (through
+/// `enriched_inventory`) has already run `inventory::scan()` and
+/// `changes::changes_at` itself to compute the "setup-changed" and
+/// "guardrail-removed" findings -- so running either again here would be a
+/// second full config-file scan for numbers this process already has sitting
+/// in memory a few milliseconds earlier. This reads `SETUP_CHANGES_CACHE`
+/// (the same shape and the same reasoning as `AGENT_SPEND_CACHE` below) and
+/// only falls back to a fresh scan when nothing recent is cached -- a caller
+/// of this command alone, such as a test, still gets a real answer. The
+/// snapshot history on disk is written only by the background refresh loop;
+/// this command, cached or not, only ever reads it.
+#[tauri::command]
+async fn get_setup_changes() -> Result<changes::SetupChanges, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        if let Ok(slot) = SETUP_CHANGES_CACHE.lock() {
+            if let Some((captured, sc)) = slot.as_ref() {
+                if cache_is_fresh(*captured, AGENT_SPEND_CACHE_TTL, std::time::Instant::now()) {
+                    return sc.clone();
+                }
+            }
+        }
+        let inv = inventory::scan();
+        let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+        changes::changes_at(&providers::config_dir(), &inv, &today)
+    })
+    .await
+    .map_err(|e| format!("setup changes: {e}"))
 }
 
 /// Renders a core `Msg` error in the resolved locale before it crosses the
@@ -401,14 +433,14 @@ async fn get_burn_profile(provider_id: String) -> Result<Vec<history::BurnProfil
         .map_err(|e| format!("burn profile: {e}"))
 }
 
-/// How long `get_agent_spend` may answer straight from the rows
-/// `enriched_inventory` just computed, instead of re-running
-/// `spend::agent_spend(30)` over the same session logs. `load()` on the
-/// frontend (`src/inventory.ts`) fires `get_inventory` and `get_agent_spend`
-/// back to back on every Inventory open, so without this the same 30-day
-/// scan ran twice a few milliseconds apart for no reason. Ten seconds is
-/// generous slack for that pairing while still noticing a spend change from
-/// any other caller within one tab session.
+/// How long `get_agent_spend` and `get_setup_changes` may each answer
+/// straight from what `enriched_inventory` just computed, instead of
+/// re-running their own scan over the same files. `load()` on the frontend
+/// (`src/inventory.ts`) fires `get_inventory` alongside both of these back to
+/// back on every Inventory open, so without this the same 30-day spend scan
+/// and the same setup-history comparison each ran twice a few milliseconds
+/// apart for no reason. Ten seconds is generous slack for that pairing while
+/// still noticing a change from any other caller within one tab session.
 const AGENT_SPEND_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The most recent rows `enriched_inventory` computed, and when. Read by
@@ -417,6 +449,14 @@ const AGENT_SPEND_CACHE_TTL: std::time::Duration = std::time::Duration::from_sec
 /// by `get_agent_spend` itself, so a caller of `get_agent_spend` alone
 /// (a test, say) always sees a real scan rather than seeding the cache.
 static AGENT_SPEND_CACHE: Mutex<Option<(std::time::Instant, Vec<spend::AgentSpend>)>> = Mutex::new(None);
+
+/// The most recent `SetupChanges` `enriched_inventory` computed, and when.
+/// Same shape and the same reason as `AGENT_SPEND_CACHE` just above: read by
+/// `get_setup_changes` so the tab's own `get_inventory` and `get_setup_changes`
+/// calls do not each pay for an `inventory::scan()` plus a `changes::changes_at`
+/// a few milliseconds apart; written only here, never by `get_setup_changes`
+/// itself, so a caller of that command alone always sees a real comparison.
+static SETUP_CHANGES_CACHE: Mutex<Option<(std::time::Instant, changes::SetupChanges)>> = Mutex::new(None);
 
 /// Whether a rows snapshot captured at `captured` is still within `ttl` of
 /// `now`. Takes both instants as plain values, rather than reading the
@@ -448,6 +488,15 @@ fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     let any_subagent_runs = !agent_spend.is_empty();
     let used_agents: HashSet<String> = agent_spend.into_iter().map(|a| a.name).collect();
     inv.opportunities.extend(inventory::agent_usage_opportunities(&inv.agents, &used_agents, any_subagent_runs));
+    let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+    let setup_changes = changes::changes_at(&providers::config_dir(), &inv, &today);
+    // Cached the same way `agent_spend` is just above, for the same reason:
+    // `get_setup_changes` reads this instead of scanning and diffing again a
+    // few milliseconds after this function already did both.
+    if let Ok(mut slot) = SETUP_CHANGES_CACHE.lock() {
+        *slot = Some((std::time::Instant::now(), setup_changes.clone()));
+    }
+    inv.opportunities.extend(changes::opportunities(&setup_changes));
     // Gaps first, then things to learn, each in the order found.
     inv.opportunities.sort_by_key(|o| o.kind != "tighten");
     (inv, spend)
@@ -2021,6 +2070,29 @@ fn spawn_background_refresh(app: &tauri::AppHandle) {
             let last_spend = LAST_SPEND_SCAN_MS.load(std::sync::atomic::Ordering::Relaxed);
             if refresh_due(last_spend, now, BACKGROUND_SPEND_EVERY_MIN) {
                 let _ = fetch_spend(handle.clone()).await;
+                // One inventory-shape snapshot per local day, for the setup
+                // history behind the Inventory tab's Changes section.
+                // record_at() itself keeps this to one entry a day no matter
+                // how often this loop happens to land here, so there is no
+                // need to track "already did this today" separately. A
+                // failure here used to vanish silently -- both the join
+                // result and record_at's own Result were discarded -- so a
+                // machine that could never write its snapshot file would
+                // just show an empty Changes section forever with nothing in
+                // any log to explain why. Only the error's own text is
+                // logged, never a path beyond the store's bare file name:
+                // the full path sits under this user's home directory.
+                match tauri::async_runtime::spawn_blocking(|| {
+                    let inv = inventory::scan();
+                    let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+                    changes::record_at(&providers::config_dir(), changes::snapshot_of(&inv, &today))
+                })
+                .await
+                {
+                    Ok(Err(e)) => eprintln!("[aitm] setup snapshot: could not write inventory_snapshots.json: {e}"),
+                    Err(e) => eprintln!("[aitm] setup snapshot: task did not complete: {e}"),
+                    Ok(Ok(())) => {}
+                }
             }
         }
     });
@@ -2903,7 +2975,14 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
             let usage30: std::collections::HashMap<String, f64> =
                 result.iter().map(|p| (p.id.clone(), p.last30.cost)).collect();
             let ledger_view = ledger::view(&ledger::load_from(&ledger::path()), today, &usage30);
-            if let Some(d) = digest::build(&result, &ledger_view) {
+            // A fresh scan rather than the cached inventory `enriched_inventory`
+            // carries: the digest fires at most once a week, so the extra scan
+            // costs nothing next to how rarely this branch runs.
+            let setup_changes =
+                changes::changes_at(&providers::config_dir(), &inventory::scan(), &today.format("%Y-%m-%d").to_string());
+            if let Some(d) =
+                digest::build(&result, &ledger_view, setup_changes.changes.len(), setup_changes.since.as_deref())
+            {
                 let body = d.body.iter().map(|m| i18n::t(&cfg, m)).collect::<Vec<_>>().join(" ");
                 let _ = app.notification().builder().title(i18n::t(&cfg, &d.title)).body(body).show();
             }
@@ -3727,6 +3806,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             fetch_usage,
             get_inventory,
+            get_setup_changes,
             get_running,
             get_running_agents,
             end_task,

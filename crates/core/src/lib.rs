@@ -4,6 +4,7 @@
 
 pub mod alerts;
 pub mod audit;
+pub mod changes;
 pub mod clients;
 pub mod coaching;
 pub mod diagnose;

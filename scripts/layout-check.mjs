@@ -328,6 +328,13 @@ async function runCell(page, view, locale) {
       if ((await page.locator('[data-toggle="setup"]').getAttribute('aria-expanded')) !== 'true') {
         await page.locator('[data-toggle="setup"]').click();
       }
+      // Changes ships collapsed too (same openSections set), and its rows
+      // are painted text pulled through tm() at whatever width the active
+      // locale needs -- exactly the kind of row this sweep exists to catch
+      // overflowing.
+      if ((await page.locator('[data-toggle="changes"]').getAttribute('aria-expanded')) !== 'true') {
+        await page.locator('[data-toggle="changes"]').click();
+      }
       break;
     case 'audit':
       await page.locator('[data-view="inventory"]').click();

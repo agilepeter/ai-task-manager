@@ -305,6 +305,11 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
         ));
         setup.extend(only_if_present(inv, "mcp-memory"));
     }
+    // Neither has a meaningful "pass" state -- a setup either changed since
+    // the last check or it did not, and there is no "nothing changed, well
+    // done" row worth adding to every audit run before any history exists.
+    setup.extend(only_if_present(inv, "guardrail-removed"));
+    setup.extend(only_if_present(inv, "setup-changed"));
 
     let p = &inv.permissions;
     // Two proper variants, not one title with a titleUnset sibling: every
@@ -619,6 +624,33 @@ mod tests {
 
     fn run_one(inv: &Inventory) -> AuditReport {
         run(&Inputs { inventory: inv, ledger: &ledger(&[], &[]), spend30: 0.0, client_rules: 0, work_areas: 0 }, 1)
+    }
+
+    /// `guardrail-removed` is the one finding built from history rather than
+    /// from the present state of the machine, so whether the rule that
+    /// disappeared was meant to disappear cannot be judged from a diff. It
+    /// must show up as "worth a look" (consider), never as a scored gap, so
+    /// its presence or absence must never move `passed`, `attention` or the
+    /// score -- unlike a genuine "tighten" finding, which would.
+    #[test]
+    fn a_removed_guardrail_never_moves_the_score() {
+        let plain = Inventory::default();
+        let with_finding = Inventory {
+            opportunities: vec![Opportunity::test_only(
+                "guardrail-removed",
+                "learn",
+                "1 guardrail was removed from your setup",
+                "d",
+            )],
+            ..Inventory::default()
+        };
+        let a = run_one(&plain);
+        let b = run_one(&with_finding);
+        assert_eq!(a.score, b.score);
+        assert_eq!(a.passed, b.passed);
+        assert_eq!(a.attention, b.attention);
+        let c = statuses(&b).into_iter().find(|(id, _)| id == "guardrail-removed").expect("check present");
+        assert_eq!(c.1, "consider");
     }
 
     #[test]

@@ -3489,5 +3489,128 @@
     ]
    ]
   }
- ]
+ ],
+ "setupChanges": {
+  "since": "2026-09-18",
+  "changes": [
+   {
+    "kind": "added",
+    "what": "server",
+    "name": "figma",
+    "msg": {
+     "key": "changes.server.added",
+     "vars": {
+      "name": "figma"
+     },
+     "count": null
+    },
+    "text": "figma appeared"
+   },
+   {
+    "kind": "changed",
+    "what": "server",
+    "name": "postgres",
+    "msg": {
+     "key": "changes.server.changed",
+     "vars": {
+      "name": "postgres"
+     },
+     "count": null
+    },
+    "text": "postgres changed"
+   },
+   {
+    "kind": "added",
+    "what": "agent",
+    "name": "release-notes",
+    "msg": {
+     "key": "changes.agent.added",
+     "vars": {
+      "name": "release-notes"
+     },
+     "count": null
+    },
+    "text": "release-notes appeared as an agent"
+   },
+   {
+    "kind": "added",
+    "what": "skill",
+    "name": "release-notes",
+    "msg": {
+     "key": "changes.skill.added",
+     "vars": {
+      "name": "release-notes"
+     },
+     "count": null
+    },
+    "text": "release-notes appeared as a skill"
+   },
+   {
+    "kind": "removed",
+    "what": "hook",
+    "name": "SessionEnd",
+    "msg": {
+     "key": "changes.hook.fewer",
+     "vars": {
+      "event": "SessionEnd"
+     },
+     "count": null
+    },
+    "text": "The SessionEnd hook has fewer entries"
+   },
+   {
+    "kind": "removed",
+    "what": "hook",
+    "name": "PreToolUse",
+    "msg": {
+     "key": "changes.hook.removed",
+     "vars": {
+      "event": "PreToolUse"
+     },
+     "count": null
+    },
+    "text": "The PreToolUse hook disappeared"
+   },
+   {
+    "kind": "removed",
+    "what": "deny",
+    "name": "",
+    "msg": {
+     "key": "changes.deny.count",
+     "vars": {
+      "new": "3",
+      "old": "5"
+     },
+     "count": null
+    },
+    "text": "Deny rules went from 5 to 3"
+   },
+   {
+    "kind": "added",
+    "what": "allow",
+    "name": "",
+    "msg": {
+     "key": "changes.allow.count",
+     "vars": {
+      "new": "2",
+      "old": "1"
+     },
+     "count": null
+    },
+    "text": "Allow rules went from 1 to 2"
+   },
+   {
+    "kind": "removed",
+    "what": "shell",
+    "name": "",
+    "msg": {
+     "key": "changes.shell.removed",
+     "vars": {},
+     "count": null
+    },
+    "text": "No deny rule limits the shell any more"
+   }
+  ],
+  "daysOfHistory": 7
+ }
 }
