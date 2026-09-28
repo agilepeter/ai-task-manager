@@ -16,6 +16,10 @@ dest="$site/task-manager/demo"
 cd "$here"
 npm run build:demo
 [ -f dist-demo/demo.html ] || { echo "npm run build:demo produced no dist-demo/demo.html" >&2; exit 1; }
+# Nothing on the site is removed until the build is known to hold what
+# replaces it: a build that left no bundle would otherwise empty the demo.
+ls dist-demo/assets/demo-*.js >/dev/null 2>&1 || { echo "npm run build:demo produced no dist-demo/assets/demo-*.js" >&2; exit 1; }
+ls dist-demo/assets/demo-*.css >/dev/null 2>&1 || { echo "npm run build:demo produced no dist-demo/assets/demo-*.css" >&2; exit 1; }
 # Replace only what a build produces: the page and its hashed bundles. Anything
 # else that ever lands in the site folder is not ours to delete.
 mkdir -p "$dest/assets"
