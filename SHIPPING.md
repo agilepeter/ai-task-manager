@@ -46,6 +46,15 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
   product page's Version cell and its two download links are not written by
   `scripts/sync-demo-to-site.sh` and were brought to 0.1.3 by hand.
 
+- **v0.1.4 was published on 2026-09-28** from tag `v0.1.4` (commit b1145b7, run 36493227524)
+  by the `publish` job, after CI passed on the same commit. Checked afterwards: the three
+  installers and the update feed answer, the feed names version 0.1.4 with all seven platform
+  entries signed, and the product page, its demo and its changelog page show 0.1.4. This was
+  the first release where `scripts/sync-demo-to-site.sh` wrote every place the page states a
+  version. The page's screenshots were retaken with `scripts/make-product-shots.mjs` and
+  converted with `cwebp -q 82 -m 6`; that step is by hand and belongs to any release that
+  changes what a screen looks like.
+
 ## Not yet on, and why
 
 1. **Update checks are opt-in and off by default.** A Settings toggle (`updateChecks`) turns them
