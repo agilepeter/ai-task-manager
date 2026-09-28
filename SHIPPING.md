@@ -92,8 +92,11 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
    `staasfund/task-manager/demo/` and bump the page's iframe `?v=`; bring the AI Task
    Manager rows in the site's `llms.txt` and `llms-full.txt` current by hand. Skipping
    this step after 0.1.0 left the site showing a stale demo build. The same script
-   also regenerates the changelog page and refreshes the product page's what's-new
-   strip and Version-cell link for the tagged release.
+   also regenerates the changelog page and keeps every version-specific spot on the
+   product page current for the tagged release: the what's-new strip, the Version
+   cell's own number and its "See what changed" link, the "Version X.Y.Z is on
+   GitHub Releases for" sentence, the two direct download links, and the JSON-LD
+   softwareVersion. `scripts/changelog-page.py --check` is the drift gate for all of it.
 
 ## Still upstream's
 

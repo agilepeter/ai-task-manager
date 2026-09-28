@@ -14,17 +14,24 @@ the head.
 
     python3 scripts/changelog-page.py <path-to-task-manager/index.html>
         Writes <site-root>/task-manager/changelog/index.html, then keeps
-        two spots on the product page current for the newest release: the
-        "what's new" strip under the facts grid, and the "See what
-        changed" link inside the Version cell. Each spot's marker-comment
-        pair is added once, the first time it is missing; the content
-        between a pair is rewritten on every run, so both always name
-        today's version even though the markers themselves never move.
+        six spots on the product page current for the newest release: the
+        "what's new" strip under the facts grid, the "See what changed"
+        link inside the Version cell, the Version cell's own number, the
+        "Version X.Y.Z is on GitHub Releases for" sentence, the direct
+        .dmg/.exe/.msi download links themselves, and the JSON-LD
+        SoftwareApplication block's softwareVersion. The first two use a
+        marker-comment pair, added once the first time it is missing, with
+        the content between a pair rewritten on every run. The other four
+        need no marker: each is a bare version number or a versioned URL
+        found by its own fixed structural anchor (see
+        sync_release_version()), and is refused rather than guessed at if
+        that anchor is missing, duplicated, or -- for the download links --
+        internally inconsistent or disagreeing with each other.
 
     python3 scripts/changelog-page.py --check <path-to-task-manager/index.html>
         The drift gate: renders to memory and exits 1 if the changelog
-        page, the what's-new strip or the Version-cell link on disk would
-        come out any different today.
+        page or any of the six spots on disk would come out any different
+        today.
 
     python3 scripts/changelog-page.py --selftest
         Exercises a fixture changelog and a fixture product page against a
@@ -34,6 +41,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -512,6 +520,111 @@ def splice(html_text: str, start: str, end: str, inner: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Four more spots that restate the release version in plain text or in a
+# URL, rather than through the marker/splice machinery above: none of them
+# holds generated content of varying shape, so each is found by its own
+# fixed structural anchor -- a tag pair or a URL shape that appears
+# nowhere else on the page -- and simply has its version number swapped in.
+# 0.1.3 shipped with two of these updated by hand and the site's JSON-LD
+# left stating 0.1.2, exactly the drift this exists to close.
+# ---------------------------------------------------------------------------
+
+_VERSION_CELL_RE = re.compile(r"(<dt>Version</dt><dd>)(\d+\.\d+\.\d+)")
+_DOWNLOAD_INTRO_RE = re.compile(r"(<p>Version )(\d+\.\d+\.\d+)( is on GitHub Releases for)")
+_JSON_LD_VERSION_RE = re.compile(r'("softwareVersion":\s*")(\d+\.\d+\.\d+)(")')
+_DOWNLOAD_LINK_RE = re.compile(
+    re.escape(REPO_URL) + r"/releases/download/v(\d+\.\d+\.\d+)/AI\.Task\.Manager_(\d+\.\d+\.\d+)_"
+    r"([A-Za-z0-9_.-]+\.(?:dmg|exe|msi))"
+)
+
+
+def _rewrite_one(html_text: str, pattern: re.Pattern, group: int, new_value: str, what: str) -> str:
+    """Finds `pattern` exactly once and replaces capture group `group`
+    with new_value; `what` names the spot for the refusal message. Zero
+    matches and two-or-more matches are refused alike -- a page this
+    generator cannot read unambiguously is not one it silently guesses
+    at -- and a match already holding new_value is returned untouched, so
+    an already-current page comes back byte for byte."""
+    matches = list(pattern.finditer(html_text))
+    if len(matches) != 1:
+        raise ValueError(f"{what} is missing or appears {len(matches)} times on the product page (expected exactly 1)")
+    start, end = matches[0].span(group)
+    if html_text[start:end] == new_value:
+        return html_text
+    return html_text[:start] + new_value + html_text[end:]
+
+
+def _rewrite_download_links(html_text: str, new_version: str) -> str:
+    """The two (or more) direct .dmg/.exe/.msi links under 'Download it, or
+    make it yours.'. Every match's own path version and filename version
+    must agree with each other, and every match on the page must agree
+    with every other one -- a page with, say, one link already bumped and
+    one still on the old version is not safe to finish silently, so that
+    is refused as mixed rather than guessed at. An empty page-wide match
+    is refused too: a download section that lost its links entirely is
+    not something to render as if nothing were wrong."""
+    matches = list(_DOWNLOAD_LINK_RE.finditer(html_text))
+    if not matches:
+        raise ValueError("no direct download links (releases/download/vX.Y.Z/...) found on the product page")
+    versions = set()
+    for m in matches:
+        path_ver, file_ver = m.group(1), m.group(2)
+        if path_ver != file_ver:
+            raise ValueError(
+                f"a download link's URL version v{path_ver} does not match its own filename version {file_ver}: {m.group(0)!r}"
+            )
+        versions.add(path_ver)
+    if len(versions) > 1:
+        raise ValueError(
+            "download links disagree on version, mixed versions on the page: "
+            + ", ".join(f"v{v}" for v in sorted(versions))
+        )
+    current = next(iter(versions))
+    if current == new_version:
+        return html_text
+
+    def _bump(m: re.Match) -> str:
+        return f"{REPO_URL}/releases/download/v{new_version}/AI.Task.Manager_{new_version}_{m.group(3)}"
+
+    return _DOWNLOAD_LINK_RE.sub(_bump, html_text)
+
+
+def sync_release_version(html_text: str, target_version: str) -> str:
+    """Brings four more spots that each restate the current release
+    version to target_version -- the newest dated heading in
+    CHANGELOG.md, the same version render_whats_new() and
+    render_version_link() above already use -- so the product page can
+    never state a version the changelog does not agree with:
+
+      1. the Information section's Version cell (the bare number, not the
+         "See what changed" link already owned by the markers above),
+      2. the "Version X.Y.Z is on GitHub Releases for" sentence that
+         introduces the two installer links,
+      3. those direct download links themselves, and
+      4. the JSON-LD SoftwareApplication block's softwareVersion.
+
+    Its sibling downloadUrl is a version-less "releases/latest" URL and is
+    left alone on purpose -- there is nothing in it to go stale. Each spot
+    is refused, rather than guessed at, when it is missing, duplicated, or
+    (for the download links) internally inconsistent or disagreeing with
+    each other; refusing raises ValueError naming the spot and leaves
+    html_text -- and by extension any file the caller has not yet written
+    -- untouched. A page whose four spots already state target_version
+    comes back byte for byte."""
+    html_text = _rewrite_one(html_text, _VERSION_CELL_RE, 2, target_version, "the Information section's Version cell")
+    html_text = _rewrite_one(
+        html_text, _DOWNLOAD_INTRO_RE, 2, target_version,
+        'the "Version X.Y.Z is on GitHub Releases for" sentence',
+    )
+    html_text = _rewrite_download_links(html_text, target_version)
+    html_text = _rewrite_one(
+        html_text, _JSON_LD_VERSION_RE, 2, target_version,
+        "the JSON-LD SoftwareApplication block's softwareVersion",
+    )
+    return html_text
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -552,7 +665,29 @@ def _changelog_target(site_root: pathlib.Path) -> pathlib.Path:
 
 
 def _check(releases: list[Release], product_page_html: str, site_root: pathlib.Path) -> int:
-    rendered = render_page(releases, product_page_html)
+    # The expected product page is computed with the exact same calls
+    # main() writes with below -- never a second, hand-rolled copy of the
+    # marker, splice or release-version format to keep in sync by hand. A
+    # page that is already current comes back byte-identical to itself, so
+    # idempotence IS the check; a missing, duplicated or reversed marker
+    # pair, or any sync_release_version() refusal, is reported the same
+    # way any other staleness is. The changelog page is then rendered from
+    # this same expected page, not the raw one on disk, so its own JSON-LD
+    # softwareVersion is checked against the corrected version too --
+    # exactly the field that stayed wrong through 0.1.3 because nothing
+    # checked it against the changelog's own idea of the newest release.
+    try:
+        latest = releases[0]
+        expected = ensure_whats_new_markers(product_page_html)
+        expected = ensure_whats_new_link_markers(expected)
+        expected = splice(expected, MARK_START, MARK_END, "\n" + render_whats_new(latest) + "\n")
+        expected = splice(expected, LINK_MARK_START, LINK_MARK_END, render_version_link(latest))
+        expected = sync_release_version(expected, latest.version)
+    except ValueError as e:
+        print(f"stale: {e}", file=sys.stderr)
+        return 1
+
+    rendered = render_page(releases, expected)
     target = _changelog_target(site_root)
     if not target.exists():
         print(f"stale: {target} does not exist; run changelog-page.py to generate it", file=sys.stderr)
@@ -561,26 +696,35 @@ def _check(releases: list[Release], product_page_html: str, site_root: pathlib.P
         print(f"stale: {target} does not match what CHANGELOG.md renders today", file=sys.stderr)
         return 1
 
-    # The expected product page is computed with the exact same calls
-    # main() writes with below -- never a second, hand-rolled copy of the
-    # marker or splice format to keep in sync by hand. A page that is
-    # already current comes back byte-identical to itself, so idempotence
-    # IS the check; a missing, duplicated or reversed marker pair raises
-    # inside ensure_*/splice and is reported the same way any other
-    # staleness is.
-    try:
-        latest = releases[0]
-        expected = ensure_whats_new_markers(product_page_html)
-        expected = ensure_whats_new_link_markers(expected)
-        expected = splice(expected, MARK_START, MARK_END, "\n" + render_whats_new(latest) + "\n")
-        expected = splice(expected, LINK_MARK_START, LINK_MARK_END, render_version_link(latest))
-    except ValueError as e:
-        print(f"stale: {e}", file=sys.stderr)
-        return 1
     if expected != product_page_html:
-        print("stale: the product page's whats-new strip or Version-cell link does not match what belongs there today", file=sys.stderr)
+        print(
+            "stale: the product page's whats-new strip, Version-cell link, or release-version spots "
+            "do not match what belongs there today",
+            file=sys.stderr,
+        )
         return 1
     return 0
+
+
+def _read_utf8(path: pathlib.Path) -> str:
+    """Reads path as strict UTF-8, raising ValueError (the same exception
+    every other refusal in this file raises) with a message naming the
+    file, rather than letting a UnicodeDecodeError escape as a traceback."""
+    try:
+        return path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise ValueError(f"{path} is not valid UTF-8: {e}") from e
+
+
+def _atomic_write(path: pathlib.Path, content: str) -> None:
+    """Writes content to a temp file beside path, then renames it over
+    path, so a write that is interrupted partway (a full disk, a killed
+    process) never leaves the real file half-written. The temp file lives
+    in the same directory so the rename is guaranteed to stay on one
+    filesystem."""
+    tmp = path.with_name(f".{path.name}.tmp{os.getpid()}")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(path)
 
 
 def main(argv: list[str]) -> int:
@@ -599,28 +743,42 @@ def main(argv: list[str]) -> int:
     site_root = pathlib.Path(site_root_arg).resolve() if site_root_arg else product_page_path.parent.parent
 
     try:
-        releases = parse_changelog(changelog_path.read_text())
+        changelog_text = _read_utf8(changelog_path)
+        releases = parse_changelog(changelog_text)
+        product_page_html = _read_utf8(product_page_path)
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
-    product_page_html = product_page_path.read_text()
 
     if check:
         return _check(releases, product_page_html, site_root)
 
+    # Everything is computed in memory, and can still refuse here, before
+    # either file on disk is touched -- a refusal from any step, marker
+    # splicing or the release-version sync alike, writes nothing at all.
+    latest = releases[0]
+    try:
+        updated = ensure_whats_new_markers(product_page_html)
+        updated = ensure_whats_new_link_markers(updated)
+        updated = splice(updated, MARK_START, MARK_END, "\n" + render_whats_new(latest) + "\n")
+        updated = splice(updated, LINK_MARK_START, LINK_MARK_END, render_version_link(latest))
+        updated = sync_release_version(updated, latest.version)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    # The changelog page is rendered from the corrected page (updated),
+    # not the raw one just read, so its own JSON-LD softwareVersion is
+    # never a stale copy of whatever the product page said before this run.
+    rendered_changelog = render_page(releases, updated)
+
     target = _changelog_target(site_root)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(render_page(releases, product_page_html))
+    _atomic_write(target, rendered_changelog)
     print(f"wrote {target}")
 
-    latest = releases[0]
-    updated = ensure_whats_new_markers(product_page_html)
-    updated = ensure_whats_new_link_markers(updated)
-    updated = splice(updated, MARK_START, MARK_END, "\n" + render_whats_new(latest) + "\n")
-    updated = splice(updated, LINK_MARK_START, LINK_MARK_END, render_version_link(latest))
     if updated != product_page_html:
-        product_page_path.write_text(updated)
-        print(f"wrote {product_page_path} (refreshed the whats-new strip and the Version-cell link)")
+        _atomic_write(product_page_path, updated)
+        print(f"wrote {product_page_path} (refreshed the whats-new strip, the Version-cell link, and the release-version spots)")
     return 0
 
 
@@ -696,6 +854,13 @@ FIXTURE_PRODUCT_PAGE = """<!DOCTYPE html>
     <dl class="tm-info">
       <div><dt>Version</dt><dd>0.1.2<small>Sept 2026. Installers unsigned.</small></dd></div>
     </dl>
+    <section class="tm-sec">
+      <div class="tm-wrap tm-close">
+        <div>
+          <p>Version 0.1.2 is on GitHub Releases for <a href="https://github.com/agilepeter/ai-task-manager/releases/download/v0.1.2/AI.Task.Manager_0.1.2_universal.dmg" rel="noopener">macOS</a> and <a href="https://github.com/agilepeter/ai-task-manager/releases/download/v0.1.2/AI.Task.Manager_0.1.2_x64-setup.exe" rel="noopener">Windows</a>.</p>
+        </div>
+      </div>
+    </section>
   </main>
   <footer class="workshop-footer">
     <a href="../library/">Library</a>
@@ -957,13 +1122,15 @@ def selftest() -> int:
 
     def _freshly_spliced(product_page_html: str, latest: Release) -> str:
         """The page exactly as a real run would leave it: both marker
-        pairs present and both holding today's content. Building it this
-        one way -- by calling the very functions --check itself calls --
-        means a fixture claiming to be "fresh" can never quietly drift
-        from what --check considers fresh."""
+        pairs present and both holding today's content, and the four
+        release-version spots synced too. Building it this one way -- by
+        calling the very functions --check itself calls -- means a
+        fixture claiming to be "fresh" can never quietly drift from what
+        --check considers fresh."""
         page = ensure_whats_new_link_markers(ensure_whats_new_markers(product_page_html))
         page = splice(page, MARK_START, MARK_END, "\n" + render_whats_new(latest) + "\n")
-        return splice(page, LINK_MARK_START, LINK_MARK_END, render_version_link(latest))
+        page = splice(page, LINK_MARK_START, LINK_MARK_END, render_version_link(latest))
+        return sync_release_version(page, latest.version)
 
     fresh_page = _freshly_spliced(FIXTURE_PRODUCT_PAGE, releases[0])
 
@@ -1089,6 +1256,134 @@ def selftest() -> int:
 
     result = _check_against(fresh_page)
     check(result.returncode == 0, f"--check must pass once both marker pairs hold today's real content: {result.stderr!r}")
+
+    # sync_release_version(): the four more spots that need no marker
+    # comment. fresh_page already has all four stating "0.1.2", the same
+    # version FIXTURE_CHANGELOG's newest heading names, so syncing it
+    # again must be a true no-op.
+    already_current = sync_release_version(fresh_page, "0.1.2")
+    check(already_current == fresh_page,
+          "a page whose four release-version spots already state the target version must come back byte for byte")
+
+    def _rolled_back(page: str) -> str:
+        """page with only the four spots sync_release_version owns set
+        back to 0.1.1; everything else (the whats-new strip and the
+        Version-cell link, both already correctly naming 0.1.2 as the
+        newest release) is left exactly as fresh_page has it."""
+        for old, new in (
+            ("<dt>Version</dt><dd>0.1.2", "<dt>Version</dt><dd>0.1.1"),
+            ("<p>Version 0.1.2 is on GitHub Releases for", "<p>Version 0.1.1 is on GitHub Releases for"),
+            ("v0.1.2/AI.Task.Manager_0.1.2_universal.dmg", "v0.1.1/AI.Task.Manager_0.1.1_universal.dmg"),
+            ("v0.1.2/AI.Task.Manager_0.1.2_x64-setup.exe", "v0.1.1/AI.Task.Manager_0.1.1_x64-setup.exe"),
+            ('"softwareVersion": "0.1.2"', '"softwareVersion": "0.1.1"'),
+        ):
+            page = page.replace(old, new, 1)
+        return page
+
+    bumped = sync_release_version(_rolled_back(fresh_page), "0.1.2")
+    check('<dt>Version</dt><dd>0.1.2<small>' in bumped, "sync_release_version must bump the Version cell's own number")
+    check('<p>Version 0.1.2 is on GitHub Releases for' in bumped,
+          "sync_release_version must bump the download-intro sentence")
+    check("v0.1.2/AI.Task.Manager_0.1.2_universal.dmg" in bumped and "v0.1.2/AI.Task.Manager_0.1.2_x64-setup.exe" in bumped,
+          "sync_release_version must bump both download links, path and filename alike")
+    check('"softwareVersion": "0.1.2"' in bumped, "sync_release_version must bump the JSON-LD softwareVersion")
+    check("0.1.1" not in bumped, "no trace of the old version may remain once every spot is bumped")
+
+    def _mutated(what: str) -> str:
+        return {
+            "no version cell": fresh_page.replace("<dt>Version</dt><dd>0.1.2", "<dt>Ver</dt><dd>0.1.2", 1),
+            "version cell twice": fresh_page.replace("</body>", "<dt>Version</dt><dd>0.1.2</dd></body>", 1),
+            "no download links": _DOWNLOAD_LINK_RE.sub("removed", fresh_page),
+            "a link's own path/filename disagree": fresh_page.replace(
+                "v0.1.2/AI.Task.Manager_0.1.2_universal.dmg", "v0.1.9/AI.Task.Manager_0.1.2_universal.dmg", 1),
+            "links disagree with each other": fresh_page.replace(
+                "v0.1.2/AI.Task.Manager_0.1.2_universal.dmg", "v0.1.1/AI.Task.Manager_0.1.1_universal.dmg", 1),
+            "no download-intro sentence": fresh_page.replace("is on GitHub Releases for", "is available for", 1),
+            "download-intro sentence twice": fresh_page.replace(
+                "<p>Version 0.1.2 is on GitHub Releases for",
+                "<p>Version 0.1.2 is on GitHub Releases for</p><p>Version 0.1.2 is on GitHub Releases for", 1),
+            "no JSON-LD softwareVersion": fresh_page.replace('"softwareVersion": "0.1.2",', "", 1),
+            "JSON-LD softwareVersion twice": fresh_page.replace(
+                '"softwareVersion": "0.1.2",', '"softwareVersion": "0.1.2", "softwareVersion": "0.1.2",', 1),
+        }[what]
+
+    for what, needle in (
+        ("no version cell", "Version cell"),
+        ("version cell twice", "Version cell"),
+        ("no download links", "no direct download links"),
+        ("a link's own path/filename disagree", "does not match its own filename version"),
+        ("links disagree with each other", "mixed versions"),
+        ("no download-intro sentence", "GitHub Releases for"),
+        ("download-intro sentence twice", "GitHub Releases for"),
+        ("no JSON-LD softwareVersion", "softwareVersion"),
+        ("JSON-LD softwareVersion twice", "softwareVersion"),
+    ):
+        try:
+            sync_release_version(_mutated(what), "0.1.2")
+            failures.append(f"sync_release_version must refuse when {what}")
+        except ValueError as e:
+            check(needle in str(e), f"the refusal for {what!r} must name what it could not find, got: {e}")
+
+    # End to end through the real CLI, from an older stated version: the
+    # scenario this generator exists for. The whats-new strip and Version
+    # link are already correct in fresh_page (both point at 0.1.2, the
+    # newest release); only the four new spots are rolled back to 0.1.1,
+    # as if a hand edit for a previous release had never caught up.
+    older_page = _rolled_back(fresh_page)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = pathlib.Path(tmp)
+        product_page_path = tmp_path / "task-manager" / "index.html"
+        product_page_path.parent.mkdir(parents=True)
+        product_page_path.write_text(older_page)
+        changelog_path = tmp_path / "CHANGELOG.md"
+        changelog_path.write_text(FIXTURE_CHANGELOG)
+
+        write_argv = [sys.executable, str(SCRIPT_PATH), str(product_page_path),
+                      "--changelog", str(changelog_path), "--site-root", str(tmp_path)]
+        result = subprocess.run(write_argv, capture_output=True, text=True)
+        check(result.returncode == 0, f"bumping an older page through the real CLI must exit 0: {result.stderr}")
+
+        written = product_page_path.read_text()
+        check('<dt>Version</dt><dd>0.1.2<small>' in written, "the CLI must bump the Version cell for real")
+        check('<p>Version 0.1.2 is on GitHub Releases for' in written, "the CLI must bump the download-intro sentence for real")
+        check("v0.1.2/AI.Task.Manager_0.1.2_universal.dmg" in written and "v0.1.2/AI.Task.Manager_0.1.2_x64-setup.exe" in written,
+              "the CLI must bump both download links for real")
+        check('"softwareVersion": "0.1.2"' in written, "the CLI must bump the JSON-LD softwareVersion for real")
+        check("0.1.1" not in written, "no trace of 0.1.1 may remain in the written product page")
+
+        changelog_out = tmp_path / "task-manager" / "changelog" / "index.html"
+        check('"softwareVersion": "0.1.2"' in changelog_out.read_text(),
+              "the changelog page's own JSON-LD must be rendered from the CORRECTED product page, "
+              "not carry forward the stale 0.1.1 that was on disk before this run")
+
+        # A second run against the now-current file changes nothing.
+        rerun = subprocess.run(write_argv, capture_output=True, text=True)
+        check(rerun.returncode == 0, "a second run against an already-current page must still exit 0")
+        check(product_page_path.read_text() == written, "a second run against an already-current page must change nothing")
+
+        # No stray temp file from the atomic write survives a normal run.
+        leftovers = [p.name for p in product_page_path.parent.iterdir() if ".tmp" in p.name]
+        check(leftovers == [], f"the atomic write must not leave a temp file behind: {leftovers}")
+
+    # A product page that is not valid UTF-8 is refused before anything is
+    # written, the same as any other refusal.
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = pathlib.Path(tmp)
+        product_page_path = tmp_path / "task-manager" / "index.html"
+        product_page_path.parent.mkdir(parents=True)
+        product_page_path.write_bytes(b"<!DOCTYPE html>\n<html>\xff\xfe broken</html>\n")
+        changelog_path = tmp_path / "CHANGELOG.md"
+        changelog_path.write_text(FIXTURE_CHANGELOG)
+
+        argv = [sys.executable, str(SCRIPT_PATH), str(product_page_path),
+                "--changelog", str(changelog_path), "--site-root", str(tmp_path)]
+        result = subprocess.run(argv, capture_output=True, text=True)
+        check(result.returncode == 1, f"a non-UTF-8 product page must exit 1, got {result.returncode}")
+        check("UTF-8" in result.stderr, f"the refusal must say the page is not valid UTF-8: {result.stderr!r}")
+        check(len(result.stderr.strip().splitlines()) == 1, f"the failure must be one stderr line: {result.stderr!r}")
+        check(not (tmp_path / "task-manager" / "changelog" / "index.html").exists(),
+              "a non-UTF-8 product page must write nothing")
 
     if failures:
         for f in failures:

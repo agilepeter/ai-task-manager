@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Rebuild the browser demo and copy it into the staas.fund product page.
 # Writes the demo to <site>/task-manager/demo/, regenerates
-# <site>/task-manager/changelog/ from CHANGELOG.md, and refreshes the product
-# page's two marked spots for the newest release: the what's-new strip under
-# the facts grid, and the Version cell's "See what changed" link. It never
-# commits or pushes: a push to that repo is a deploy, and that stays a human
-# decision.
+# <site>/task-manager/changelog/ from CHANGELOG.md, and keeps the product
+# page's version-specific spots current for the newest release: the
+# what's-new strip under the facts grid, the Version cell's "See what
+# changed" link and its own version number, the "Version X.Y.Z is on
+# GitHub Releases for" sentence, the two direct download links, and the
+# JSON-LD SoftwareApplication block's softwareVersion. It never commits or
+# pushes: a push to that repo is a deploy, and that stays a human decision.
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 site="${1:-$here/../staasfund}"
