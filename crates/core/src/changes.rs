@@ -14,10 +14,12 @@ use crate::inventory::{Inventory, Opportunity};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Snapshots older than this, measured from the one just recorded, are
-/// dropped on the next write. Local disk only; nothing this old is worth
-/// keeping around forever.
+/// A snapshot older than this, measured from today, is too old to be what
+/// "since" means, and is never the one today is compared with.
 pub const KEEP_DAYS: i64 = 35;
+/// How many snapshots the file holds: the last ones written, one a day, a
+/// few more than `KEEP_DAYS` of them.
+pub const KEEP_SNAPSHOTS: usize = 40;
 /// How far back "about a week ago" reaches when picking which stored
 /// snapshot to compare today against.
 pub const COMPARE_DAYS: i64 = 7;
@@ -280,18 +282,19 @@ pub fn diff(old: &Snapshot, new: &Snapshot) -> Vec<Change> {
 }
 
 /// Adds today's snapshot, replacing anything already on file for the same
-/// day -- so a refresh loop that happens to record twice in one day never
-/// grows the file -- then drops anything older than `KEEP_DAYS`. The rule is
-/// judged against the NEWEST date now on file, never against the one just
-/// recorded: a machine's clock can step backward (a bad NTP sync, a manual
-/// change, daylight-saving weirdness), and recording an older day after
-/// newer ones already exist must never treat those newer, already-stored
-/// snapshots as "impossibly far in the future" and drop them. Measuring
-/// against the newest on file instead means every snapshot's age is
-/// necessarily zero or positive, so nothing already on disk is ever removed
-/// for merely being newer than the one just written. Written with the same
-/// owner-only atomic swap every other local settings file in this app uses,
-/// so a crash mid-write can never leave a half-written history behind.
+/// day -- so a refresh loop that records twice in one day never grows the
+/// file -- and keeps the last `KEEP_SNAPSHOTS` written.
+///
+/// Nothing is ever dropped for its DATE. A date is only as good as the
+/// clock that wrote it, and a clock can be wrong in both directions: one
+/// that steps back would make newer snapshots look impossible, and one that
+/// jumps ahead for a day would make every real snapshot look ancient. No
+/// comparison of dates can tell a wrong clock from a machine that was left
+/// off for a month. So the file is kept by the order things were written
+/// in, which no clock can change, and a snapshot with a date that makes no
+/// sense today simply goes unused by `changes_at` until it is pushed out.
+/// Written with the same owner-only atomic swap every other local settings
+/// file in this app uses, so a crash mid-write never leaves half a history.
 pub fn record_at(dir: &Path, snap: Snapshot) -> std::io::Result<()> {
     let path = store_path(dir);
     let mut store: Store = std::fs::read_to_string(&path)
@@ -300,9 +303,8 @@ pub fn record_at(dir: &Path, snap: Snapshot) -> std::io::Result<()> {
         .unwrap_or_default();
     store.snapshots.retain(|s| s.taken != snap.taken);
     store.snapshots.push(snap);
-    let newest = store.snapshots.iter().map(|s| s.taken.as_str()).max().unwrap_or("").to_string();
-    store.snapshots.retain(|s| days_between(&s.taken, &newest).is_some_and(|d| (0..=KEEP_DAYS).contains(&d)));
-    store.snapshots.sort_by(|a, b| a.taken.cmp(&b.taken));
+    let extra = store.snapshots.len().saturating_sub(KEEP_SNAPSHOTS);
+    store.snapshots.drain(..extra);
     store.version = STORE_VERSION;
     let body = serde_json::to_string_pretty(&store).map_err(std::io::Error::other)?;
     std::fs::create_dir_all(dir)?;
@@ -317,7 +319,11 @@ pub fn load_from(dir: &Path) -> Vec<Snapshot> {
     std::fs::read_to_string(store_path(dir))
         .ok()
         .and_then(|raw| serde_json::from_str::<Store>(&raw).ok())
-        .map(|s| s.snapshots)
+        .map(|s| {
+            let mut snapshots = s.snapshots;
+            snapshots.sort_by(|a, b| a.taken.cmp(&b.taken));
+            snapshots
+        })
         .unwrap_or_default()
 }
 
@@ -332,7 +338,13 @@ pub fn load_from(dir: &Path) -> Vec<Snapshot> {
 pub fn changes_at(dir: &Path, inv: &Inventory, today: &str) -> SetupChanges {
     let new_snap = snapshot_of(inv, today);
     let history = load_from(dir);
-    let mut candidates: Vec<&Snapshot> = history.iter().filter(|s| s.taken.as_str() != today).collect();
+    // Only a snapshot from before today and inside the window can be what today is
+    // compared with: one dated today is today, one dated later came from a wrong clock,
+    // and one older than the window is too old to be what "since" means.
+    let mut candidates: Vec<&Snapshot> = history
+        .iter()
+        .filter(|s| days_between(&s.taken, today).is_some_and(|d| (1..=KEEP_DAYS).contains(&d)))
+        .collect();
     if candidates.is_empty() {
         return SetupChanges { since: None, changes: Vec::new(), days_of_history: 0 };
     }
@@ -343,9 +355,7 @@ pub fn changes_at(dir: &Path, inv: &Inventory, today: &str) -> SetupChanges {
         .find(|s| days_between(&s.taken, today).is_some_and(|d| d >= COMPARE_DAYS))
         .copied()
         .unwrap_or(candidates[0]);
-    // A snapshot dated after today, from a clock that was wrong when it was taken, is no
-    // history at all rather than a negative amount of it.
-    let days = days_between(&old.taken, today).unwrap_or(0).max(0);
+    let days = days_between(&old.taken, today).unwrap_or(0);
     SetupChanges { since: Some(old.taken.clone()), changes: diff(old, &new_snap), days_of_history: days }
 }
 
@@ -582,11 +592,40 @@ mod tests {
     #[test]
     fn old_snapshots_are_pruned() {
         let dir = tmp_dir("prune");
-        record_at(&dir, empty_snapshot("2026-01-01")).unwrap();
-        record_at(&dir, empty_snapshot("2026-09-20")).unwrap();
+        for day in 1..=(KEEP_SNAPSHOTS + 5) {
+            let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap() + chrono::Duration::days(day as i64);
+            record_at(&dir, empty_snapshot(&date.format("%Y-%m-%d").to_string())).unwrap();
+        }
         let stored = load_from(&dir);
-        assert_eq!(stored.len(), 1, "a snapshot far past KEEP_DAYS is dropped once a newer one is recorded");
-        assert_eq!(stored[0].taken, "2026-09-20");
+        assert_eq!(stored.len(), KEEP_SNAPSHOTS, "the file holds the last ones written and no more");
+        assert_eq!(stored[0].taken, "2026-01-07", "the five written first are the ones let go");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_clock_that_jumped_ahead_once_loses_no_history() {
+        let dir = tmp_dir("clock-ahead");
+        record_at(&dir, Snapshot { deny: 9, ..empty_snapshot("2026-09-20") }).unwrap();
+        record_at(&dir, empty_snapshot("2026-09-27")).unwrap();
+        record_at(&dir, empty_snapshot("2030-01-01")).unwrap(); // the clock was wrong for a day
+        record_at(&dir, empty_snapshot("2026-09-28")).unwrap();
+        let stored = load_from(&dir);
+        let dates: Vec<&str> = stored.iter().map(|s| s.taken.as_str()).collect();
+        assert_eq!(dates, vec!["2026-09-20", "2026-09-27", "2026-09-28", "2030-01-01"]);
+        let inv = Inventory { permissions: Permissions { deny: 3, ..Permissions::default() }, ..Inventory::default() };
+        let sc = changes_at(&dir, &inv, "2026-09-28");
+        assert_eq!(sc.since.as_deref(), Some("2026-09-20"), "the day from the future is never the one compared with");
+        assert_eq!(sc.days_of_history, 8);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_snapshot_older_than_the_window_is_not_compared_with() {
+        let dir = tmp_dir("stale");
+        record_at(&dir, Snapshot { deny: 9, ..empty_snapshot("2026-01-01") }).unwrap();
+        let sc = changes_at(&dir, &Inventory::default(), "2026-09-20");
+        assert_eq!(sc.since, None, "eight months ago is not what 'since' should mean");
+        assert!(sc.changes.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -631,7 +670,9 @@ mod tests {
         let dir = tmp_dir("future");
         record_at(&dir, Snapshot { deny: 5, ..empty_snapshot("2027-01-01") }).unwrap();
         let sc = changes_at(&dir, &Inventory::default(), "2026-09-27");
+        assert_eq!(sc.since, None);
         assert_eq!(sc.days_of_history, 0);
+        assert!(sc.changes.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

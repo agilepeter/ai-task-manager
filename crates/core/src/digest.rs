@@ -107,6 +107,9 @@ pub fn build(spend: &[ProviderSpend], ledger: &LedgerView, changes_this_week: us
     let before: f64 = spend.iter().map(|p| prior7(&p.daily_cost)).sum();
     let renewing: Vec<&crate::ledger::ItemView> =
         ledger.items.iter().filter(|i| i.days_left.is_some_and(|d| (0..=7).contains(&d))).collect();
+    // A count of changes with no day to measure them from is a line that cannot be written,
+    // so it is no reason to send a digest with nothing in it.
+    let changes_this_week = if changes_since.is_some() { changes_this_week } else { 0 };
     if week < 0.005 && renewing.is_empty() && changes_this_week == 0 {
         return None;
     }
@@ -322,5 +325,12 @@ mod tests {
             en_body(&with_changes.body),
             "$70 of AI usage in 7 days, about the same as the week before. 1 thing changed in your setup since 2026-09-14."
         );
+    }
+
+    #[test]
+    fn changes_with_no_day_to_count_from_send_nothing() {
+        let quiet = provider(&[0.0; 14], &[]);
+        let got = build(&[quiet], &ledger(None, "2026-09-21"), 3, None);
+        assert!(got.is_none(), "never a notification with a title and no body");
     }
 }
