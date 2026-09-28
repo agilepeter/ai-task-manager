@@ -169,6 +169,14 @@ const SERIES_VARS = ["--viz-1", "--viz-2", "--viz-3", "--viz-4"];
 
 let source: DetailSource | null = null;
 let openId: string | null = null;
+/** The element clicked to open this page -- a card's name, or its "Details"
+ *  button (src/inventory.ts... no, this file's own dt-mini-open) -- restored
+ *  on close if it is still in the document. Same WebKit-click reasoning as
+ *  every other panel's own `opener` (see src/agents.ts): a click never
+ *  focuses the element it hit, so the click handler hands it in explicitly.
+ *  Null for the one path with no real click at all: setWide()'s own
+ *  synthetic first-card open when entering wide mode. */
+let opener: HTMLElement | null = null;
 let hours = 24 * 7;
 let metricFilter = "__all__";
 let windowKey: WindowKey = "last30";
@@ -183,6 +191,13 @@ let clientView: ClientView | null = null;
 /** Rules being edited; null while the saved ones are shown. */
 let draftRules: ClientRule[] | null = null;
 let clientNote = "";
+/** Where the rules-editor click handler (below) should send focus once the
+ *  render() it shares with several other branches has actually redrawn the
+ *  editor -- "first"/"last" while entering edit mode or adding a row (a new
+ *  input just appeared with nothing in it), "edit-button" while leaving it
+ *  (#dt-rule-edit only exists in the non-editing markup this render() is
+ *  about to draw). Read once, right after that render(), then cleared. */
+let ruleFocusAfter: "first" | "last" | "edit-button" | null = null;
 /** Every session of the last 30 days, for Group by → Session; null until loaded. */
 let sessionsAll: SessionSpend[] | null = null;
 let sessionNote = "";
@@ -1165,18 +1180,38 @@ function markSelected(): void {
   });
 }
 
-function open(id: string): void {
+/// Same decision src/agents.ts's closeFocusTarget() makes, kept as this
+/// view's own copy -- the convention every view here follows (see
+/// audit.ts's own comment on why).
+export function closeFocusTarget(
+  opener: HTMLElement | null,
+  openerStillInDocument: boolean,
+  fallback: HTMLElement | null,
+): HTMLElement | null {
+  if (opener && openerStillInDocument) return opener;
+  return fallback;
+}
+
+function open(id: string, opener_: HTMLElement | null = null): void {
   if (openId !== id) {
     drill = null;
     sessionsAll = null;
     sessionNote = "";
   }
   openId = id;
+  opener = opener_;
   if (historyFor !== id) history = [];
   document.body.classList.add("detail-open");
+  document.querySelector("#detail")?.removeAttribute("inert");
   markSelected();
   render();
   void loadHistory();
+  // The title lives in the static panel head (index.html), not in anything
+  // render() paints, so it is already there to receive focus -- same as
+  // src/agents.ts's own #agents-heading. Its text is set by render() just
+  // above, so the screen reader announces the tool's actual name, not an
+  // empty heading.
+  document.querySelector<HTMLElement>("#detail-title")?.focus();
 }
 
 function close(): void {
@@ -1184,6 +1219,14 @@ function close(): void {
   if (wide) return;
   openId = null;
   document.body.classList.remove("detail-open");
+  document.querySelector("#detail")?.setAttribute("inert", "");
+  // No single fixed fallback: dozens of cards can open this page, so a
+  // detached opener (the card was reordered out, or Customize hid it while
+  // this page was open) falls back to nowhere rather than guessing which
+  // other card is "right".
+  const stillThere = opener != null && document.contains(opener);
+  closeFocusTarget(opener, stillThere, null)?.focus();
+  opener = null;
 }
 
 /// Grows or shrinks the one window. The native resize comes first so the
@@ -1246,12 +1289,12 @@ export function setupDetail(src: DetailSource): void {
   document.querySelector("#providers")?.addEventListener("click", (e) => {
     const more = (e.target as HTMLElement).closest<HTMLElement>("[data-detail]");
     if (more?.dataset.detail) {
-      open(more.dataset.detail);
+      open(more.dataset.detail, more);
       return;
     }
     const name = (e.target as HTMLElement).closest<HTMLElement>(".provider-name");
     const card = name?.closest<HTMLElement>("[data-provider]");
-    if (card?.dataset.provider) open(card.dataset.provider);
+    if (card?.dataset.provider) open(card.dataset.provider, card);
   });
   document.querySelector("#detail-close")?.addEventListener("click", close);
   document.querySelector("#detail-wide")?.addEventListener("click", () => void setWide(!wide, true));
@@ -1322,18 +1365,25 @@ export function setupDetail(src: DetailSource): void {
     } else if (target.closest("#dt-rule-edit")) {
       draftRules = clientView?.rules.length ? clientView.rules.map((r) => ({ ...r })) : [{ client: "", patterns: [] }];
       clientNote = "";
+      ruleFocusAfter = "first";
     } else if (target.closest("#dt-rule-add")) {
       draftRules = [...readDraft(root), { client: "", patterns: [] }];
+      ruleFocusAfter = "last";
     } else if (target.closest("#dt-rule-cancel")) {
       draftRules = null;
       clientNote = "";
+      ruleFocusAfter = "edit-button";
     } else if (target.closest("#dt-rule-save")) {
       const rules = readDraft(root);
       void invoke("save_clients", { rules }).then(
         () => {
           draftRules = null;
           clientNote = "";
-          return loadClients();
+          // loadClients() calls render() itself once the fresh rollup lands;
+          // #dt-rule-edit only exists in that redrawn, non-editing markup,
+          // so the focus-restore has to wait for it rather than running
+          // against the editing form's own about-to-be-replaced DOM.
+          return loadClients().then(() => document.querySelector<HTMLElement>("#dt-rule-edit")?.focus());
         },
         (err) => {
           draftRules = rules; // keep what was typed
@@ -1361,6 +1411,14 @@ export function setupDetail(src: DetailSource): void {
       return;
     }
     render();
+    if (ruleFocusAfter === "first") {
+      document.querySelector<HTMLElement>('[data-rule-client="0"]')?.focus();
+    } else if (ruleFocusAfter === "last") {
+      document.querySelector<HTMLElement>(`[data-rule-client="${(draftRules?.length ?? 1) - 1}"]`)?.focus();
+    } else if (ruleFocusAfter === "edit-button") {
+      document.querySelector<HTMLElement>("#dt-rule-edit")?.focus();
+    }
+    ruleFocusAfter = null;
   });
   document.querySelector("#detail-body")?.addEventListener("keydown", (e) => {
     const key = (e as KeyboardEvent).key;

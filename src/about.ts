@@ -12,6 +12,12 @@ const T = (k: string, v?: Record<string, string | number>) => t(`about.${k}`, v)
 let pokes = 0;
 /** The version render() last drew, so rerender() can redraw with it. */
 let lastVersion = "";
+/** The button that opened this panel (#about-btn in the auto-hiding rail, or
+ *  #build-info in the footer -- see CLAUDE.md's About section), restored on
+ *  close. Same reasoning as src/agents.ts's own `opener`: WebKit does not
+ *  focus a button on a mouse click, so the click handler has to hand this in
+ *  explicitly rather than close() reading `document.activeElement` back. */
+let opener: HTMLElement | null = null;
 
 /// The bubble text for a given poke count, cycling through 8 lines. Each case
 /// is a literal T("egg....") call, not a computed key, so i18n.test.mjs's
@@ -117,15 +123,46 @@ export function rerender(): void {
   if (document.body.classList.contains("about-open")) render(lastVersion);
 }
 
+/// Same decision src/agents.ts's closeFocusTarget() makes, kept as this
+/// view's own copy -- the convention every view here follows (see
+/// audit.ts's own comment on why: testable with plain placeholder objects,
+/// no real DOM required, and independent views don't share this).
+export function closeFocusTarget(
+  opener: HTMLElement | null,
+  openerStillInDocument: boolean,
+  fallback: HTMLElement | null,
+): HTMLElement | null {
+  if (opener && openerStillInDocument) return opener;
+  return fallback;
+}
+
+function close(): void {
+  document.body.classList.remove("about-open");
+  // Off screen again -- inert takes this whole panel (and everything in it)
+  // out of the Tab order while it is closed, same as every other slide-in
+  // panel; see index.html's own comment on why a closed panel otherwise stays
+  // reachable (it is moved by `transform`, never unrendered).
+  document.querySelector("#about")?.setAttribute("inert", "");
+  const fallback = document.querySelector<HTMLElement>("#about-btn");
+  const stillThere = opener != null && document.contains(opener);
+  closeFocusTarget(opener, stillThere, fallback)?.focus();
+  opener = null;
+}
+
 export function setupAbout(): void {
-  const open = () => {
+  const open = (opener_: HTMLElement | null) => {
+    opener = opener_;
     document.body.classList.add("about-open");
+    document.querySelector("#about")?.removeAttribute("inert");
     render("");
     void getVersion().then((v) => render(v), () => render(""));
+    // The heading lives in the static panel head (index.html), not in
+    // anything render() paints, so it is already there to receive focus --
+    // same as src/agents.ts's own #agents-heading.
+    document.querySelector<HTMLElement>("#about-heading")?.focus();
   };
-  const close = () => document.body.classList.remove("about-open");
-  document.querySelector("#about-btn")?.addEventListener("click", open);
-  document.querySelector("#build-info")?.addEventListener("click", open);
+  document.querySelector("#about-btn")?.addEventListener("click", (e) => open(e.currentTarget as HTMLElement));
+  document.querySelector("#build-info")?.addEventListener("click", (e) => open(e.currentTarget as HTMLElement));
   document.querySelector("#about-close")?.addEventListener("click", close);
   document.querySelector("#about-body")?.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;

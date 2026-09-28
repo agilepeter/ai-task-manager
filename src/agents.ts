@@ -401,6 +401,7 @@ function loadData(): void {
 
 function close(): void {
   document.body.classList.remove("agents-open");
+  document.querySelector("#agents")?.setAttribute("inert", "");
   const fallback = document.querySelector<HTMLElement>("#agents-open-btn");
   const stillThere = opener != null && document.contains(opener);
   closeFocusTarget(opener, stillThere, fallback)?.focus();
@@ -425,6 +426,7 @@ function close(): void {
 export function openAgents(opener_: HTMLElement | null = null): void {
   opener = opener_;
   document.body.classList.add("agents-open");
+  document.querySelector("#agents")?.removeAttribute("inert");
   loadError = "";
   render();
   loadData();

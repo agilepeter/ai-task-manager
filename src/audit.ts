@@ -204,6 +204,7 @@ export function closeFocusTarget(
 
 function close(): void {
   document.body.classList.remove("audit-open");
+  document.querySelector("#audit")?.setAttribute("inert", "");
   const fallback = document.querySelector<HTMLElement>("#audit-open-btn");
   const stillThere = opener != null && document.contains(opener);
   closeFocusTarget(opener, stillThere, fallback)?.focus();
@@ -227,8 +228,14 @@ function close(): void {
 export function openAudit(opener_: HTMLElement | null = null): void {
   opener = opener_;
   document.body.classList.add("audit-open");
+  document.querySelector("#audit")?.removeAttribute("inert");
   note = "";
   render();
+  // The heading lives in the static panel head (index.html), so it is
+  // already there to receive focus -- same as src/agents.ts's own
+  // #agents-heading. This panel used to restore focus on close without ever
+  // having moved it in on open.
+  document.querySelector<HTMLElement>("#audit-heading")?.focus();
   loading = true;
   void invoke<AuditReport>("get_audit").then(
     (r) => { report = r; lastLoadedAt = Date.now(); loading = false; lastFailed = false; render(); },

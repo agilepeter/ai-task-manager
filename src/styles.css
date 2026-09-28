@@ -330,14 +330,16 @@ body.settings-open #settings {
   letter-spacing: -0.01em;
 }
 
-/* #agents is the one panel-head title that is a real heading (<h2>, for the
-   focus target on open and a real landmark for screen readers) rather than
-   a plain <span> like every other panel's -- an h2 carries browser default
-   margin and a larger font-size that a bare span never did, which pushed
-   the header bar's rendered height past the fixed panels' shared 56px
-   top padding and clipped the Agents view's own first line underneath it.
-   Reset both back to what the span-based panel-heads already render. */
-#agents .panel-title {
+/* Every panel-head title is now a real heading (<h2>, for the focus target
+   on open and a real landmark for screen readers -- originally just #agents;
+   About/Audit/Settings/Detail followed once every panel needed the same
+   focus-on-open behaviour) rather than a plain <span> -- an h2 carries
+   browser default margin and a larger font-size that a bare span never did,
+   which pushed the header bar's rendered height past the fixed panels'
+   shared 56px top padding and clipped the Agents view's own first line
+   underneath it. Reset both back to what the span-based panel-heads used to
+   render, for all of them. */
+:is(#agents, #audit, #about, #settings, #detail) .panel-title {
   margin: 0;
   font-size: inherit;
   line-height: inherit;

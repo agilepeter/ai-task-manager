@@ -52,6 +52,31 @@ let editing: Subscription | null = null;
 let formError = "";
 let confirmDelete = "";
 let exportNote = "";
+/** The control that opened the form (#lg-add, an [data-edit] row's own Edit
+ *  button, or an [data-suggest] chip), restored on Cancel or a successful
+ *  Save. Re-found by selector after the list redraws rather than compared
+ *  against a stored element reference -- same reasoning as
+ *  src/detail.ts's rules-editor and src/inventory.ts's pin preview: the old
+ *  button node does not survive the redraw either way. */
+let editOpener: { kind: "add" } | { kind: "edit"; id: string } | { kind: "suggest"; id: string } | null = null;
+
+function editOpenerSelector(o: NonNullable<typeof editOpener>): string {
+  if (o.kind === "add") return "#lg-add";
+  if (o.kind === "edit") return `[data-edit="${CSS.escape(o.id)}"]`;
+  return `[data-suggest="${CSS.escape(o.id)}"]`;
+}
+
+/** Restores focus to whatever opened the form, once it has actually closed
+ *  (editing back to null) -- called after every render() that might have
+ *  just done that, a no-op otherwise. Falls back to #lg-add when the
+ *  original opener's row is gone (e.g. the suggestion it came from is no
+ *  longer unmatched), and to nowhere when even that is absent. */
+function restoreEditFocus(): void {
+  if (editing || !editOpener) return;
+  const sel = editOpenerSelector(editOpener);
+  (document.querySelector<HTMLElement>(sel) ?? document.querySelector<HTMLElement>("#lg-add"))?.focus();
+  editOpener = null;
+}
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -250,6 +275,7 @@ async function save(): Promise<void> {
     editing = null;
     formError = "";
     await load();
+    restoreEditFocus();
   } catch (err) {
     // Keep what was typed: a refused save must not empty the form.
     editing = subscription;
@@ -310,6 +336,7 @@ export function setupLedger(src: LedgerSource): void {
     exportNote = "";
     if (target.closest("#lg-add")) {
       editing = blank();
+      editOpener = { kind: "add" };
     } else if (target.closest("#lg-cancel")) {
       editing = null;
     } else if (suggestId) {
@@ -317,6 +344,7 @@ export function setupLedger(src: LedgerSource): void {
       // very next line declares its own `tool` const, which this would shadow too.
       const tool = source?.tools().find((entry) => entry.id === suggestId);
       editing = { ...blank(), name: tool ? `${tool.name}${tool.plan ? ` ${cap(tool.plan)}` : ""}` : "", provider: suggestId };
+      editOpener = { kind: "suggest", id: suggestId };
     } else if (editId) {
       const item = ledger?.items.find((i) => i.id === editId);
       if (item) {
@@ -324,6 +352,7 @@ export function setupLedger(src: LedgerSource): void {
           id: item.id, name: item.name, price: item.price, cycle: item.cycle,
           renewsOn: item.renewsOn, provider: item.provider, notes: item.notes,
         };
+        editOpener = { kind: "edit", id: editId };
       }
     } else if (deleteId) {
       if (confirmDelete !== deleteId) {
@@ -340,5 +369,6 @@ export function setupLedger(src: LedgerSource): void {
     formError = "";
     confirmDelete = "";
     render();
+    restoreEditFocus();
   });
 }

@@ -244,6 +244,12 @@ let host: InventoryHost | null = null;
 let trust: TrustView | null = null;
 /** The pin being previewed, keyed by "client/name", and what happened to it. */
 let pin: { key: string; plan: PinPlan | null; note: string; done: boolean } | null = null;
+/** The pin key whose own Pin button opened the preview above, restored on
+ *  Cancel -- re-found by selector after the row re-renders (the button
+ *  itself is a fresh DOM node every render(), same reasoning as
+ *  src/detail.ts's rules-editor focus restore), never a stale element
+ *  reference the way a fixed-position panel's own opener is. */
+let pinOpenerKey: string | null = null;
 // Exported so a test can open a section that starts collapsed (`section()`
 // omits a closed section's body entirely) without driving a click through the
 // DOM -- `renderChanges()`'s own test does this for "changes", which is not
@@ -383,12 +389,16 @@ function pinKey(s: McpServer): string {
 
 function pinPanel(s: McpServer): string {
   if (pin?.key !== pinKey(s)) return "";
-  if (pin.done) return `<div class="inv-pin"><p class="inv-pin-ok">${esc(pin.note)}</p></div>`;
-  if (!pin.plan) return `<div class="inv-pin"><p class="dt-caption">${esc(pin.note || T("pin.workingOut"))}</p></div>`;
+  // id + tabindex="-1" on all three states: the Pin button that opened this
+  // (below) is about to be removed from the DOM the moment this row
+  // re-renders, so focus moves into this region itself -- there is no
+  // heading and, in the "working it out" state, no control at all yet.
+  if (pin.done) return `<div class="inv-pin" id="inv-pin-panel" tabindex="-1"><p class="inv-pin-ok">${esc(pin.note)}</p></div>`;
+  if (!pin.plan) return `<div class="inv-pin" id="inv-pin-panel" tabindex="-1"><p class="dt-caption">${esc(pin.note || T("pin.workingOut"))}</p></div>`;
   const p = pin.plan;
   // occurrences is always >= 1 here: rewrite() in crates/core/src/pin.rs errors before
   // returning a plan for a spec with 0 matches, and plan() propagates that with `?`.
-  return `<div class="inv-pin">
+  return `<div class="inv-pin" id="inv-pin-panel" tabindex="-1">
       <p class="dt-caption">${esc(plural("inventory.pin.inFile", p.occurrences, { file: p.file }))}</p>
       <pre class="inv-diff"><span class="inv-del">- "${esc(p.from)}"</span>\n<span class="inv-add">+ "${esc(p.to)}"</span></pre>
       <p class="dt-caption">${esc(T("pin.explain", { version: p.installedVersion }))}</p>
@@ -1182,7 +1192,12 @@ export function setupViews(h: InventoryHost): void {
       if (!server) return;
       const key = pinKey(server);
       pin = { key, plan: null, note: "", done: false };
+      pinOpenerKey = key;
       render();
+      // The Pin button this click hit is gone the instant render() redraws
+      // this row (see pinPanel()'s own comment) -- focus the panel region
+      // itself, the same way a heading-less panel elsewhere in this app does.
+      document.querySelector<HTMLElement>("#inv-pin-panel")?.focus();
       void invoke<PinPlan>("pin_preview", { name: server.name, client: server.client }).then(
         (plan) => { if (pin?.key === key) { pin.plan = plan; render(); } },
         (err) => { if (pin?.key === key) { pin.note = String(err); render(); } },
@@ -1192,6 +1207,12 @@ export function setupViews(h: InventoryHost): void {
     if (target.closest("[data-pin-cancel]")) {
       pin = null;
       render();
+      // Cancel puts the Pin button back -- a fresh node, re-found by the same
+      // key, never the stale element that opened this (see pinOpenerKey's
+      // own comment). Absent (the server list changed underneath, or this
+      // was somehow reached with no recorded opener) falls back to nowhere.
+      if (pinOpenerKey) document.querySelector<HTMLElement>(`[data-pin="${CSS.escape(pinOpenerKey)}"]`)?.focus();
+      pinOpenerKey = null;
       return;
     }
     if (target.closest("[data-pin-apply]") && pin?.plan) {

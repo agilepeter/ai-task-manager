@@ -62,7 +62,10 @@ async function buildAuditModule() {
 // per selector (so a write in one call and a read in a later one see the same
 // object), a real toggleable body classList (isOpen() reads "audit-open" back
 // off it), and the handful of members audit.ts's code actually calls on an
-// element (`.innerHTML`, `.focus()`, `.addEventListener()`).
+// element (`.innerHTML`, `.focus()`, `.addEventListener()`, and, since
+// openAudit()/close() now toggle the panel's `inert` attribute alongside the
+// body class -- see src/audit.ts's own comment -- `.setAttribute()` /
+// `.removeAttribute()` as no-ops too).
 function makeFakeDocument() {
   const bodyClasses = new Set();
   const elements = new Map();
@@ -72,6 +75,8 @@ function makeFakeDocument() {
         innerHTML: "",
         focus() {},
         addEventListener() {},
+        setAttribute() {},
+        removeAttribute() {},
         classList: { contains: () => false, add() {}, remove() {} },
       });
     }

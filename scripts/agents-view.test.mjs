@@ -122,8 +122,11 @@ async function buildAgentsModule() {
 // back in a later one sees the same object) rather than a fresh, disconnected
 // one every time. Every fake element carries the handful of members this
 // module's code actually touches on one: `.innerHTML`, `.focus()`,
-// `.classList` and `.addEventListener()` -- new members are added here only
-// when some code path is actually found to need them, never speculatively.
+// `.classList`, `.addEventListener()`, and `.setAttribute()`/
+// `.removeAttribute()` as no-ops (openAgents()/close() toggle the panel's
+// `inert` attribute alongside the body class -- see src/agents.ts's own
+// comment) -- new members are added here only when some code path is
+// actually found to need them, never speculatively.
 function makeFakeDocument() {
   const bodyClasses = new Set();
   const elements = new Map();
@@ -133,6 +136,8 @@ function makeFakeDocument() {
         innerHTML: "",
         focus() {},
         addEventListener() {},
+        setAttribute() {},
+        removeAttribute() {},
         classList: { contains: () => false, add() {}, remove() {} },
       });
     }

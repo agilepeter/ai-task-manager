@@ -108,31 +108,31 @@
     </main>
 
     <!-- Customize: full-window panel sliding in from the left. -->
-    <aside id="drawer" aria-label="Customize" data-i18n-aria="sidebar.customize">
+    <aside id="drawer" aria-label="Customize" data-i18n-aria="sidebar.customize" inert>
       <div id="drawer-body"></div>
     </aside>
 
     <!-- About: the maker, where to learn more, and the projects this stands on. -->
-    <aside id="about" aria-label="About" data-i18n-aria="about.panel.title">
+    <aside id="about" aria-label="About" data-i18n-aria="about.panel.title" inert>
       <div class="panel-head glass-bar">
         <button class="mini-btn" id="about-close" data-i18n="settings.done">&#8592; Done</button>
-        <span class="panel-title" data-i18n="about.panel.title">About</span>
+        <h2 class="panel-title" id="about-heading" tabindex="-1" data-i18n="about.panel.title">About</h2>
       </div>
       <div id="about-body"></div>
     </aside>
 
     <!-- Audit: a scored read of the whole setup. Opens itself on first run. -->
-    <aside id="audit" aria-label="Audit" data-i18n-aria="audit.panel.ariaLabel">
+    <aside id="audit" aria-label="Audit" data-i18n-aria="audit.panel.ariaLabel" inert>
       <div class="panel-head glass-bar">
         <button class="mini-btn" id="audit-close" data-i18n="settings.done">&#8592; Done</button>
-        <span class="panel-title" data-i18n="audit.panel.title">AI setup audit</span>
+        <h2 class="panel-title" id="audit-heading" tabindex="-1" data-i18n="audit.panel.title">AI setup audit</h2>
       </div>
       <div id="audit-body"></div>
     </aside>
 
     <!-- Agents: everything about agents gathered into one place. Opened from
          the Inventory toolbar or its own summary door row. -->
-    <aside id="agents" aria-label="Agents" data-i18n-aria="agents.panel.title">
+    <aside id="agents" aria-label="Agents" data-i18n-aria="agents.panel.title" inert>
       <div class="panel-head glass-bar">
         <button class="mini-btn" id="agents-close" data-i18n="settings.done">&#8592; Done</button>
         <h2 class="panel-title" id="agents-heading" tabindex="-1" data-i18n="agents.panel.title">Agents</h2>
@@ -141,20 +141,20 @@
     </aside>
 
     <!-- Detail: one tool in depth. Same slide-in pattern as Settings. -->
-    <aside id="detail" aria-label="Details" data-i18n-aria="detail.panel.label">
+    <aside id="detail" aria-label="Details" data-i18n-aria="detail.panel.label" inert>
       <div class="panel-head glass-bar">
         <button class="mini-btn" id="detail-close" data-i18n="detail.panel.back">&#8592; Back</button>
-        <span class="panel-title" id="detail-title"></span>
+        <h2 class="panel-title" id="detail-title" tabindex="-1"></h2>
         <button class="mini-btn" id="detail-wide" aria-pressed="false" title="Show the list and this page side by side" data-i18n="detail.panel.wide" data-i18n-title="detail.panel.wideTip">Wide</button>
       </div>
       <div id="detail-body"></div>
     </aside>
 
     <!-- Settings: full-window panel sliding in from the right. -->
-    <aside id="settings" aria-label="Settings" data-i18n-aria="settings.title">
+    <aside id="settings" aria-label="Settings" data-i18n-aria="settings.title" inert>
       <div class="panel-head glass-bar">
         <button class="mini-btn" id="settings-close" data-i18n="settings.done">&#8592; Done</button>
-        <span class="panel-title" data-i18n="settings.title">Settings</span>
+        <h2 class="panel-title" id="settings-heading" tabindex="-1" data-i18n="settings.title">Settings</h2>
       </div>
 
       <div class="acc-group open">

@@ -1874,6 +1874,12 @@ function appConfirm(opts: {
   danger?: boolean;
 }): Promise<boolean> {
   return new Promise((resolve) => {
+    // Whoever had focus when this opened -- a real button for a keyboard
+    // activation (Enter/Space on a focused button fires "click" the same as
+    // a mouse click), <body> for a WebKit mouse click (which never focuses
+    // the button it clicked). Restoring to <body> is a no-op, not a
+    // regression: this dialog never used to restore focus anywhere at all.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overlay = document.createElement("div");
     overlay.id = "confirm-overlay";
     overlay.innerHTML = `
@@ -1889,6 +1895,7 @@ function appConfirm(opts: {
       dismissConfirm = null;
       document.removeEventListener("keydown", onKey, true);
       overlay.remove();
+      if (opener && opener !== document.body && document.contains(opener)) opener.focus();
       resolve(ok);
     };
     dismissConfirm = () => done(false);
@@ -2342,16 +2349,79 @@ function renderDrawerBody(): void {
   if (body) body.innerHTML = renderCustomize();
 }
 
+/// Same decision src/agents.ts's closeFocusTarget() makes. Every OTHER view
+/// in this app keeps its own tiny private copy of this (see audit.ts's own
+/// comment: independent views never share it), but Settings and Customize
+/// are not independent views -- they are two panels of this one file, main.ts
+/// -- so they share this single copy instead of two more private ones inside
+/// the same module.
+function panelCloseFocusTarget(
+  opener: HTMLElement | null,
+  openerStillInDocument: boolean,
+  fallback: HTMLElement | null,
+): HTMLElement | null {
+  if (opener && openerStillInDocument) return opener;
+  return fallback;
+}
+
+/** The button that opened Customize (#customize-btn, or null for the one
+ *  indirect path -- the welcome card's "Customize" button, which dismisses
+ *  the welcome card in the same click and so is already gone from the
+ *  document by the time this panel closes; falling back to #customize-btn
+ *  there is the right answer, not a bug). Restored on close. */
+let drawerOpener: HTMLElement | null = null;
+
 /// Customize lives in a drawer that slides in from the left edge.
-function setDrawer(open: boolean): void {
+function setDrawer(open: boolean, opener: HTMLElement | null = null): void {
+  const wasOpen = customizeOpen;
   customizeOpen = open;
+  const drawerEl = document.querySelector("#drawer");
   if (open) {
+    drawerEl?.removeAttribute("inert");
+    drawerOpener = opener;
     renderDrawerBody();
     // Local JSON list — cheap, and required if Customize opens before Settings.
     for (const manager of siteKeyManagers) void manager.load();
   }
   document.body.classList.toggle("drawer-open", open);
   document.querySelector("#customize-btn")?.classList.toggle("active", open);
+  if (open) {
+    // The Done button is the drawer's own first control -- renderCustomize()
+    // has no heading of its own (see its own comment), so this is the "first
+    // control" branch of the same on-open rule every other panel follows.
+    document.querySelector<HTMLElement>("[data-customize-close]")?.focus();
+  } else if (wasOpen) {
+    drawerEl?.setAttribute("inert", "");
+    const fallback = document.querySelector<HTMLElement>("#customize-btn");
+    const stillThere = drawerOpener != null && document.contains(drawerOpener);
+    panelCloseFocusTarget(drawerOpener, stillThere, fallback)?.focus();
+    drawerOpener = null;
+  }
+}
+
+/** The button that opened Settings (#settings-btn), restored on close --
+ *  shares panelCloseFocusTarget() above with setDrawer(), for the same
+ *  reason: this is one file, not two independent views. */
+let settingsOpener: HTMLElement | null = null;
+
+/// Settings lives in a full-window panel sliding in from the right.
+function setSettings(open: boolean, opener: HTMLElement | null = null): void {
+  const wasOpen = document.body.classList.contains("settings-open");
+  document.body.classList.toggle("settings-open", open);
+  document.querySelector("#settings-btn")?.classList.toggle("active", open);
+  const settingsEl = document.querySelector("#settings");
+  if (open) {
+    settingsEl?.removeAttribute("inert");
+    settingsOpener = opener;
+    for (const manager of siteKeyManagers) void manager.load();
+    document.querySelector<HTMLElement>("#settings-heading")?.focus();
+  } else if (wasOpen) {
+    settingsEl?.setAttribute("inert", "");
+    const fallback = document.querySelector<HTMLElement>("#settings-btn");
+    const stillThere = settingsOpener != null && document.contains(settingsOpener);
+    panelCloseFocusTarget(settingsOpener, stillThere, fallback)?.focus();
+    settingsOpener = null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -4688,8 +4758,7 @@ async function resetAllSettings(): Promise<void> {
   applyAppearance();
   applyGlass();
   applyReduceMotion();
-  document.body.classList.remove("settings-open");
-  document.querySelector("#settings-btn")?.classList.remove("active");
+  setSettings(false);
   void forceUsageRefreshAttempt(false).then(requestTraySync);
 }
 
@@ -4818,14 +4887,9 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   document.querySelector("#refresh")!.addEventListener("click", () => void refresh(true));
 
-  const setSettings = (open: boolean) => {
-    document.body.classList.toggle("settings-open", open);
-    document.querySelector("#settings-btn")?.classList.toggle("active", open);
-    if (open) for (const manager of siteKeyManagers) void manager.load();
-  };
-  document.querySelector("#settings-btn")!.addEventListener("click", () => {
+  document.querySelector("#settings-btn")!.addEventListener("click", (e) => {
     setDrawer(false);
-    setSettings(!document.body.classList.contains("settings-open"));
+    setSettings(!document.body.classList.contains("settings-open"), e.currentTarget as HTMLElement);
   });
   document.querySelector("#settings-close")!.addEventListener("click", () => setSettings(false));
   document.querySelector("#api-keys-reveal")?.addEventListener("click", () => {
@@ -4838,9 +4902,9 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll<HTMLElement>(".acc-head").forEach((head) => {
     head.addEventListener("click", () => head.parentElement!.classList.toggle("open"));
   });
-  document.querySelector("#customize-btn")!.addEventListener("click", () => {
+  document.querySelector("#customize-btn")!.addEventListener("click", (e) => {
     setSettings(false);
-    setDrawer(!customizeOpen);
+    setDrawer(!customizeOpen, e.currentTarget as HTMLElement);
   });
   const drawerBody = document.querySelector<HTMLElement>("#drawer-body")!;
   drawerBody.addEventListener("click", (e) => {
