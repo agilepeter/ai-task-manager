@@ -6,7 +6,7 @@ numbering at 0.1.0, so the numbers here do not continue upstream's. Pane's own
 release history is kept verbatim in
 [docs/upstream-changelog.md](docs/upstream-changelog.md).
 
-## 0.1.3 — 2026-09-27
+## 0.1.3 — 2026-09-28
 
 ### Added
 
@@ -15,7 +15,8 @@ release history is kept verbatim in
   transport, package and whether it is pinned; the names of your agents and
   skills; each hook event and how many hooks fire on it; and how many allow
   and deny rules there are, plus whether a deny rule covers the shell --
-  never a value from env, args, headers or a URL, and never a path. The file
+  never a value from env or headers, never a URL and never a path, and from
+  args only a package name that has the plain shape of one. The file
   holds the last 40 snapshots written, and nothing is ever dropped for its
   own date, so a clock that runs backward or jumps ahead for a day cannot
   erase history. A new Changes section shows what moved since the newest
@@ -30,7 +31,12 @@ release history is kept verbatim in
   configured, how many tool calls it answered and the total size, in bytes,
   of what came back over the last 30 days, shown as a fact on the server's
   own row. A new "learn" finding, `mcp-context-heavy`, flags a server with
-  at least 20 calls and at least 2 MB of results in that window. Claude Code
+  at least 20 calls and at least 2 MB of results in that window. The size
+  is bytes as the session log holds them, not tokens, and it is a total
+  over the 30 days, not the size of any one result. To take it, the scanner
+  opens one kind of line it used to skip: the one that answers a call to an
+  MCP server, from which it keeps a number and nothing else
+  ([docs/privacy.md](docs/privacy.md) says exactly what). Claude Code
   only. A server whose name holds a double underscore gets no figure,
   because its calls cannot be told apart from a shorter server name followed
   by a tool part; the same goes for two configured servers whose names

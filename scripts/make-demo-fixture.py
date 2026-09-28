@@ -104,7 +104,7 @@ write(home / "Library/Application Support/AITaskManager/clients.json", json.dump
 # state to diff the config above against, instead of a fixture with an empty
 # Changes section. The story: since this snapshot, the figma MCP server was
 # added, postgres lost its version pin, release-notes appeared as both an
-# agent and a skill, a deny rule and an allow rule each moved by one, a
+# agent and a skill, two deny rules went and an allow rule was added, a
 # PreToolUse hook disappeared, SessionEnd lost one of its two hooks, and the
 # deny list stopped covering the shell -- a mix of ordinary changes and
 # guardrail losses, so both findings this feature adds have something real

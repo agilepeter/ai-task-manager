@@ -37,7 +37,7 @@ account and no admin rights. Everything below is written for both paths.
 
 | | State today |
 |---|---|
-| Downloadable release | [v0.1.3](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.3), 2026-09-27 (earlier: v0.1.2 on 2026-09-26, v0.1.1 on 2026-09-25, v0.1.0 on 2026-09-24), built and published by `release.yml` from the tagged commit. |
+| Downloadable release | [v0.1.3](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.3), 2026-09-28 (earlier: v0.1.2 on 2026-09-26, v0.1.1 on 2026-09-25, v0.1.0 on 2026-09-24), built and published by `release.yml` from the tagged commit. |
 | macOS signing | None yet. Open it once, then allow it under System Settings > Privacy & Security > Open Anyway (macOS 14 or earlier: right-click the app > Open). Or `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`. |
 | Windows signing | None yet. SmartScreen warns: More info, then Run anyway. |
 | Auto-update | **Opt-in, off by default.** See [Updates](#updates). |
@@ -296,9 +296,10 @@ went to, the same matching the Clients tab uses -- only when one client is a
 true majority, never a mere plurality. For Claude Code, a server's row also
 carries its own thirty-day context cost: how many tool calls it answered and
 how many bytes of result came back, with an opportunity when a server has
-answered at least 20 calls and sent back at least 2 MB in that window --
-every result goes straight back into the conversation, so a heavy one can
-burn through your context window fast. A **Changes** section keeps a dated
+answered at least 20 calls and sent back at least 2 MB in that window.
+Every result goes back into the conversation as context, so a large total
+is worth a look; it is bytes over thirty days, not tokens and not the size
+of any one result. A **Changes** section keeps a dated
 history of the setup's own shape -- servers, agents, skills, hook events, and
 how many allow and deny rules there are -- once a local day, and shows what
 moved since the newest snapshot that is at least a week old (or the oldest
@@ -384,10 +385,10 @@ including every network call the app can make and the greps that prove it, is
   cache, replaces one JSON string byte for byte, re-parses to prove nothing
   else moved, refuses if the file changed since the preview, and leaves a
   backup beside it.
-- **MCP context cost reads a result's length, never its content.** The
-  scanner now also opens a line holding a tool's result, and only while one
-  of your open MCP calls is still waiting for it, to take that one number.
-  The result's content, the tool's input, the tool's name and your prompt
+- **MCP context cost keeps a result's size, never its content.** The
+  scanner now also opens the line that answers a call to an MCP server, the
+  one carrying that call's id, to take that one number; the result of any
+  other tool stays closed. The result's content, the tool's input, the tool's name and your prompt
   are never stored, logged or returned; the scan cache keeps only a
   server's name, a day, a count of calls and a number of bytes. None of it
   is sent anywhere or reaches the seat report.
@@ -395,7 +396,8 @@ including every network call the app can make and the greps that prove it, is
   transports, packages and pin state; agent and skill names; hook event
   counts; allow/deny counts and shell coverage -- lives in
   `inventory_snapshots.json` in the app's own config folder, never a value
-  from env, args, headers, a URL or a path. It is read only to show what
+  from env or headers, a URL or a path, and from args only a package name
+  that has the plain shape of one. It is read only to show what
   changed in Inventory, and it is never sent anywhere or part of the seat
   report.
 - **Prompts and conversation titles are never read.** Claude Code stores titles

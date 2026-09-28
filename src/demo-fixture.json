@@ -259,7 +259,7 @@
     "id": "mcp-context-heavy",
     "kind": "learn",
     "title": "1 MCP server is heavy on context",
-    "detail": "context7 (2.4 MB) sent back that much tool-result data in the last 30 days, measured for Claude Code only. Every result goes straight back into the conversation, so it can burn through your context window fast; a narrower query or the server's own summarized mode, if it offers one, brings that down.",
+    "detail": "context7 (2.4 MB) sent back that much tool-result data in the last 30 days, measured for Claude Code only. Every result goes back into the conversation as context, so a large total is worth a look. It is bytes over 30 days, not tokens and not the size of any one result. A narrower query, or the server's own summarized mode if it offers one, brings it down.",
     "titleMsg": {
      "key": "finding.mcp-context-heavy.title",
      "vars": {},
@@ -3074,7 +3074,7 @@
       "id": "mcp-context-heavy",
       "status": "consider",
       "title": "1 MCP server is heavy on context",
-      "detail": "context7 (2.4 MB) sent back that much tool-result data in the last 30 days, measured for Claude Code only. Every result goes straight back into the conversation, so it can burn through your context window fast; a narrower query or the server's own summarized mode, if it offers one, brings that down.",
+      "detail": "context7 (2.4 MB) sent back that much tool-result data in the last 30 days, measured for Claude Code only. Every result goes back into the conversation as context, so a large total is worth a look. It is bytes over 30 days, not tokens and not the size of any one result. A narrower query, or the server's own summarized mode if it offers one, brings it down.",
       "titleMsg": {
        "key": "finding.mcp-context-heavy.title",
        "vars": {},
@@ -3184,6 +3184,38 @@
        "key": "check.mcp-running-unconfigured.pass.detail",
        "vars": {},
        "count": null
+      }
+     },
+     {
+      "id": "guardrail-removed",
+      "status": "consider",
+      "title": "4 guardrails were removed from your setup",
+      "detail": "4 things that used to limit what runs on this machine -- deny rules, hooks, shell coverage -- are gone since the last check. Worth knowing whether that was on purpose.",
+      "titleMsg": {
+       "key": "finding.guardrail-removed.title",
+       "vars": {},
+       "count": 4
+      },
+      "detailMsg": {
+       "key": "finding.guardrail-removed.detail",
+       "vars": {},
+       "count": 4
+      }
+     },
+     {
+      "id": "setup-changed",
+      "status": "consider",
+      "title": "5 other things changed in your setup",
+      "detail": "5 servers, agents, skills or permissions changed since the last check. See Changes in the Inventory tab for what.",
+      "titleMsg": {
+       "key": "finding.setup-changed.title",
+       "vars": {},
+       "count": 5
+      },
+      "detailMsg": {
+       "key": "finding.setup-changed.detail",
+       "vars": {},
+       "count": 5
       }
      }
     ]

@@ -2052,13 +2052,20 @@ fn claude_mcp_result(st: &mut ClaudeFileState, line: &str, data: &mut FileData) 
     }
 }
 
+/// Whether the raw line holds `id` as a whole JSON string.
+fn names_id(line: &str, id: &str) -> bool {
+    line.match_indices(id).any(|(at, _)| line[..at].ends_with('"') && line[at + id.len()..].starts_with('"'))
+}
+
 fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
     if !line.contains("\"type\":\"assistant\"") {
-        // A tool_result lives on a "user" line, never an assistant one. Only
-        // bother parsing one when a call is actually waiting on a result --
-        // most user lines carry a human prompt, not a tool_result block, and
-        // the substring check keeps those cheap.
-        if !st.pending_mcp.is_empty() && line.contains("tool_result") {
+        // A tool_result lives on a "user" line, never an assistant one. The
+        // only such line ever opened is one that carries the id of an MCP
+        // call still waiting for its result: a prompt, or the result of a
+        // shell command or a file read, names no such id and stays closed,
+        // whatever else is waiting. An id is matched whole, quotes included,
+        // so one id that begins another cannot open a line for it.
+        if line.contains("tool_result") && st.pending_mcp.iter().any(|(id, _)| names_id(line, id)) {
             claude_mcp_result(st, line, data);
         }
         return;
@@ -7226,6 +7233,24 @@ mod tests {
         claude_line(&mut st, &result, &mut data);
         assert!(data.mcp.is_empty(), "nothing was pending, so nothing should be booked");
         assert!(st.pending_mcp.is_empty());
+    }
+
+    #[test]
+    fn another_tools_result_is_never_opened_while_an_mcp_call_waits() {
+        let call = mcp_tool_use_line("2026-07-10T10:00:00Z", "msg_1", "req_1", "toolu_1", "mcp__acme__search");
+        // The result of some other tool, whose id begins the same way.
+        let other = mcp_tool_result_line("2026-07-10T10:00:01Z", "toolu_12", json!("PLANTED-OUTPUT-OF-A-SHELL-COMMAND"));
+        let mine = mcp_tool_result_line("2026-07-10T10:00:02Z", "toolu_1", json!("0123456789"));
+        let mut st = ClaudeFileState::default();
+        let mut data = FileData::default();
+        claude_line(&mut st, &call, &mut data);
+        MCP_RESULT_PARSE_COUNT.with(|c| c.set(0));
+        claude_line(&mut st, &other, &mut data);
+        assert_eq!(MCP_RESULT_PARSE_COUNT.with(|c| c.get()), 0, "a line that names no waiting call stays closed");
+        assert_eq!(st.pending_mcp.len(), 1);
+        claude_line(&mut st, &mine, &mut data);
+        assert_eq!(MCP_RESULT_PARSE_COUNT.with(|c| c.get()), 1, "the line that answers the call is the one opened");
+        assert_eq!(data.mcp.values().map(|(_, bytes)| *bytes).sum::<u64>(), 10);
     }
 
     #[test]

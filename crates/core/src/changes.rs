@@ -97,7 +97,20 @@ pub struct SetupChanges {
 #[cfg(test)]
 pub(crate) const FINDING_IDS: &[&str] = &["guardrail-removed", "setup-changed"];
 
+/// The shape of the history file. A file that states a HIGHER number was
+/// written by a newer copy of the app, in a shape this one does not know:
+/// it is neither read (its fields may mean something else) nor written over
+/// (the history in it belongs to the copy that can read it).
 const STORE_VERSION: u32 = 1;
+
+/// What the file says its version is, when it says one at all.
+fn stated_version(raw: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(raw).ok()?.get("version")?.as_u64()
+}
+
+fn from_a_newer_app(raw: &str) -> bool {
+    stated_version(raw).is_some_and(|v| v > u64::from(STORE_VERSION))
+}
 
 #[derive(Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -297,10 +310,11 @@ pub fn diff(old: &Snapshot, new: &Snapshot) -> Vec<Change> {
 /// file in this app uses, so a crash mid-write never leaves half a history.
 pub fn record_at(dir: &Path, snap: Snapshot) -> std::io::Result<()> {
     let path = store_path(dir);
-    let mut store: Store = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default();
+    let raw = std::fs::read_to_string(&path).ok();
+    if raw.as_deref().is_some_and(from_a_newer_app) {
+        return Err(std::io::Error::other("the setup history was written by a newer version of the app and is left as it is"));
+    }
+    let mut store: Store = raw.and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default();
     store.snapshots.retain(|s| s.taken != snap.taken);
     store.snapshots.push(snap);
     let extra = store.snapshots.len().saturating_sub(KEEP_SNAPSHOTS);
@@ -312,12 +326,13 @@ pub fn record_at(dir: &Path, snap: Snapshot) -> std::io::Result<()> {
 }
 
 /// Every snapshot on file, oldest first. A missing or unreadable file (a
-/// fresh install, or one hand-edited into garbage) reads as no history at
-/// all, never as an error -- there is nothing here worth failing a scan
+/// fresh install, or one hand-edited into garbage), or one a newer version
+/// of the app wrote, reads as no history at all, never as an error -- there is nothing here worth failing a scan
 /// over.
 pub fn load_from(dir: &Path) -> Vec<Snapshot> {
     std::fs::read_to_string(store_path(dir))
         .ok()
+        .filter(|raw| !from_a_newer_app(raw))
         .and_then(|raw| serde_json::from_str::<Store>(&raw).ok())
         .map(|s| {
             let mut snapshots = s.snapshots;
@@ -588,6 +603,43 @@ mod tests {
         let dates: Vec<&str> = stored.iter().map(|s| s.taken.as_str()).collect();
         assert_eq!(dates, vec!["2026-09-20", "2026-09-25", "2026-09-26"], "a clock stepping back must not lose history: {dates:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A history file as this version writes it, one snapshot in it, stating
+    /// `version` (or none).
+    fn history_stating(version: Option<u32>) -> String {
+        let store = Store { version: STORE_VERSION, snapshots: vec![empty_snapshot("2026-09-20")] };
+        let mut body = serde_json::to_value(&store).unwrap();
+        match version {
+            Some(v) => body["version"] = serde_json::json!(v),
+            None => drop(body.as_object_mut().unwrap().remove("version")),
+        }
+        body.to_string()
+    }
+
+    #[test]
+    fn a_history_from_a_newer_app_is_not_read_and_not_written_over() {
+        let dir = tmp_dir("newer");
+        // Every field this version knows, so it would parse: only the number
+        // says the shape is one this version does not know.
+        let theirs = history_stating(Some(STORE_VERSION + 1));
+        std::fs::write(store_path(&dir), &theirs).unwrap();
+        assert!(load_from(&dir).is_empty(), "a newer shape is not guessed at");
+        assert!(record_at(&dir, empty_snapshot("2026-09-27")).is_err(), "and its history is not replaced");
+        assert_eq!(std::fs::read_to_string(store_path(&dir)).unwrap(), theirs, "the file is left byte for byte");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_history_with_no_version_or_this_one_is_read() {
+        for version in [None, Some(STORE_VERSION)] {
+            let dir = tmp_dir("same");
+            std::fs::write(store_path(&dir), history_stating(version)).unwrap();
+            assert_eq!(load_from(&dir).len(), 1, "{version:?}");
+            record_at(&dir, empty_snapshot("2026-09-27")).unwrap();
+            assert_eq!(load_from(&dir).len(), 2, "{version:?}");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     #[test]

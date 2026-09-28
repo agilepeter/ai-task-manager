@@ -356,7 +356,9 @@ mod tests {
                 env_count: 2,
                 pin_to: None,
                 source_file: Some("/Users/dana/work/acme-portal/.mcp.json".into()),
-                usage: None,
+                // Numbers no other field in these fixtures has, so finding
+                // either in a report means this field crossed over.
+                usage: Some(crate::mcp_usage::McpUsage { calls: 7_301_993, result_bytes: 8_804_177_231 }),
             }],
             tools: vec![AiTool { name: "Claude Code".into(), kind: "app".into(), mcp_servers: 1 }],
             hooks: vec![HookEvent { event: "SessionEnd".into(), count: 2 }],
@@ -400,6 +402,16 @@ mod tests {
             }],
         }];
         (inv, spend)
+    }
+
+    #[test]
+    fn never_carries_what_an_mcp_server_was_used_for() {
+        let (inv, spend) = inputs();
+        assert!(serde_json::to_string(&inv).unwrap().contains("7301993"), "the figure has to be in what goes in, or this proves nothing");
+        let wire = serde_json::to_string(&build("seat-abcdefgh", "Dana's MacBook", 1, &inv, &spend)).unwrap();
+        for figure in ["7301993", "8804177231", "usage", "resultBytes"] {
+            assert!(!wire.contains(figure), "{figure} leaked into {wire}");
+        }
     }
 
     #[test]

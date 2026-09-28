@@ -876,6 +876,9 @@ mod tests {
         // test backs (scripts/make-demo-fixture.py) scores it the same way.
         crate::mcp_usage::attach(&mut inv.mcp_servers, &crate::spend::mcp_usage_30d());
         inv.opportunities.extend(crate::mcp_usage::opportunities(&inv.mcp_servers));
+        // And the same setup-changes step, read from the history on file.
+        let today = crate::spend::today_naive_date().format("%Y-%m-%d").to_string();
+        inv.opportunities.extend(crate::changes::opportunities(&crate::changes::changes_at(&crate::providers::config_dir(), &inv, &today)));
         let l = view(&crate::ledger::load_from(&crate::ledger::path()), crate::spend::today_naive_date(), &HashMap::new());
         let areas: std::collections::HashSet<&str> = spend.iter().flat_map(|p| p.projects.iter())
             .flat_map(|pr| pr.areas.iter()).map(|a| crate::spend::area_top(&a.area)).filter(|a| !a.starts_with('(')).collect();

@@ -77,25 +77,34 @@ directory with upstream Pane would let the two apps overwrite each other.
   your machine; only the public price tables are downloaded. Claude Code keeps
   conversation titles derived from your prompts in those same logs, and the
   scanner skips them on purpose.
-- **The scan now also opens a line that carries a tool's result, and only
-  while a call to an MCP server is still waiting for it.** Until 0.1.3 the
-  scanner skipped every line of a session log that was not an assistant
-  line. From 0.1.3 it makes one exception: a line holding a `tool_result`,
-  read only for as long as one of your open MCP calls has not yet been
-  answered. All it takes from that line is the length of the result. The
-  result's content, the tool's input, the tool's name and your prompt are
-  never stored, logged or returned. The scan cache keeps only a server's
-  name, a day, a count of calls and a number of bytes -- nothing else about
-  an MCP call reaches disk. This never leaves your machine and is never part
-  of the seat report.
+- **The scan now also opens the line that answers a call to an MCP server,
+  and no other line that holds a tool's result.** Until 0.1.3 the scanner
+  skipped every line of a session log that was not an assistant line. From
+  0.1.3 it makes one exception: a line holding a `tool_result` that carries
+  the id of an MCP call still waiting for its answer. The result of a shell
+  command or a file read carries no such id and stays closed, and so does
+  your prompt. All it takes from the line it opens is a size: for text, the
+  bytes of the text; for anything else, such as an image, the bytes of that
+  block as the log holds it. The line is parsed in memory to take that
+  number and then let go. The result's content, the tool's input, the
+  tool's name and your prompt are never stored, logged or returned. The scan
+  cache keeps only a server's name, a day, a count of calls and a number of
+  bytes -- nothing else about an MCP call reaches disk. This never leaves
+  your machine and is never part of the seat report.
 - **A daily snapshot of your setup's shape.** Once a local day, the app
   writes what your setup looks like -- for each MCP server its name, client,
   transport, package and whether it is pinned; the names of your agents and
   skills; which hook events exist and how many hooks are on each; how many
   allow and deny rules there are and whether a deny rule covers the shell --
   to `inventory_snapshots.json` in the app's own config folder. Never a
-  value from env, args, headers or a URL, and never a path. The file holds
-  the last 40 snapshots written. It is read only to show what changed in
+  value from env or headers, never a URL and never a path. One thing is
+  taken from args, the same one Inventory already shows: a package name,
+  and only when it has the plain shape of one (`name`, `@scope/name`, an
+  optional version), which a path, a URL or a token does not have. A scoped
+  name can carry your organization's name, and so can the name you gave a
+  server, an agent or a skill: names are what this file keeps. The file
+  holds the last 40 snapshots written, and a copy of it written by a newer
+  version of the app is left as it is, neither read nor replaced. It is read only to show what changed in
   Inventory's Changes section, is never sent anywhere, and is never part of
   the seat report.
 - **Folder and client names stay local.** Work areas are your directory names

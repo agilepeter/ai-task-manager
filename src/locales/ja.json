@@ -678,7 +678,7 @@
   "finding.mcp-remote.title.other": "リモート MCP サーバーが {count} 台",
   "finding.mcp-remote.detail.other": "{names} は他者のマシン上で動作しています。そこに送信した内容はこのコンピューターの外に出ます。クライアントの作業に使う前に、信頼度を確認する価値があります。",
   "finding.mcp-context-heavy.title.other": "コンテキスト負荷の高い MCP サーバーが {count} 台",
-  "finding.mcp-context-heavy.detail.other": "{names} は直近 30 日間でこれだけのツール結果データを返しました（Claude Code のみ計測）。結果はそのまま会話に戻されるため、コンテキストウィンドウを一気に消費する可能性があります。より絞り込んだクエリや、対応していればサーバー自身の要約モードを使うと軽減できます。",
+  "finding.mcp-context-heavy.detail.other": "{names} は直近 30 日間でこれだけのツール結果データを返しました（Claude Code のみ計測）。結果はそのまま会話にコンテキストとして戻されるため、合計が大きい場合は確認する価値があります。これは30日間の合計バイト数であり、トークン数でも個々の結果のサイズでもありません。より絞り込んだクエリや、対応していればサーバー自身の要約モードを使うと、この値を減らせます。",
   "finding.perm-none.title": "権限ルールが設定されていません",
   "finding.perm-none.detail": "Claude Code は既定設定のまま動作しています。短い拒否リスト（認証情報、強制プッシュ、破壊的な削除など）は、最も手軽なガードレールです。",
   "finding.perm-deny-only.title": "拒否ルールが {count} 件、許可ルールなし",

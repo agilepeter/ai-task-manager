@@ -678,7 +678,7 @@
   "finding.mcp-remote.title.other": "{count} 个远程 MCP 服务器",
   "finding.mcp-remote.detail.other": "{names} 运行在别人的机器上：你发送的内容会离开这台电脑。在用它处理客户工作之前，值得先看看它的信任评分。",
   "finding.mcp-context-heavy.title.other": "{count} 个 MCP 服务器在上下文开销上偏高",
-  "finding.mcp-context-heavy.detail.other": "{names} 在最近 30 天内返回了这么多工具结果数据（仅统计 Claude Code）。每个结果都会原样送回对话中，可能很快耗尽你的上下文窗口；更精简的查询，或该服务器自带的摘要模式（如果有的话），可以降低这一开销。",
+  "finding.mcp-context-heavy.detail.other": "{names} 在最近 30 天内返回了这么多工具结果数据（仅统计 Claude Code）。每个结果都会作为上下文原样送回对话，所以总量偏高时值得留意。这是30天内累计的字节数，不是token数，也不是单条结果的大小。更精简的查询，或该服务器自带的摘要模式（如果有的话），可以降低这个数值。",
   "finding.perm-none.title": "未设置任何权限规则",
   "finding.perm-none.detail": "Claude Code 正在使用默认设置运行。一份简短的拒绝列表（密钥、强制推送、破坏性删除）是成本最低的护栏。",
   "finding.perm-deny-only.title": "{count} 条拒绝规则，没有允许规则",
