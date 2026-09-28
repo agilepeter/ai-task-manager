@@ -12,6 +12,7 @@
 use crate::i18n::{self, Msg};
 use crate::inventory::{Inventory, Opportunity};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::Path;
 
 /// A snapshot older than this, measured from today, is too old to be what
@@ -69,6 +70,15 @@ pub struct Change {
     /// The server, agent, skill or hook event's own name. Empty for the
     /// setup-wide deny/allow/shell rows, which name no single thing.
     pub name: String,
+    /// Whether this row is a guardrail weakening -- exactly the rows
+    /// `opportunities()` counts under "guardrail-removed" (`kind == "removed"`
+    /// and `what` one of "deny" | "shell" | "hook"), computed by the same
+    /// `is_guardrail_loss` both places call so the finding's count and the
+    /// UI's marked rows can never drift apart. Losing a version pin is
+    /// deliberately never `true` here: that weakening is already scored by
+    /// the audit's own `mcp-unpinned` finding, so counting it again here
+    /// under a different name would double-count it.
+    pub guardrail: bool,
     /// The key + vars the Changes section paints in the active locale.
     pub msg: Msg,
     /// English, produced by `render("en", &msg)` of the same Msg -- never a
@@ -191,17 +201,29 @@ pub fn snapshot_of(inv: &Inventory, today: &str) -> Snapshot {
     }
 }
 
+/// Whether a Change of this `kind`/`what` is a guardrail weakening. The one
+/// place this is decided, so `change()` (which stamps every `Change.guardrail`)
+/// and `opportunities()` (which counts them for the "guardrail-removed"
+/// finding) can never disagree about which rows those are.
+fn is_guardrail_loss(kind: &str, what: &str) -> bool {
+    kind == "removed" && matches!(what, "deny" | "shell" | "hook")
+}
+
 /// The one place a `Change` is built: `text` is always this Msg's English
 /// rendering, so it can never drift from what the popover shows in another
 /// locale.
 fn change(kind: &str, what: &str, name: &str, msg: Msg) -> Change {
-    Change { kind: kind.into(), what: what.into(), name: name.into(), text: i18n::render("en", &msg), msg }
+    Change { kind: kind.into(), what: what.into(), name: name.into(), guardrail: is_guardrail_loss(kind, what), text: i18n::render("en", &msg), msg }
 }
 
 fn server_key(s: &SnapServer) -> (&str, &str) {
     (s.name.as_str(), s.client.as_str())
 }
 
+/// A server that still exists can differ in up to three independent ways,
+/// each its own row so the Changes list (and the guardrail marker on it) can
+/// say exactly what changed rather than a single opaque "{name} changed" --
+/// in this fixed order: transport, package, then pin.
 fn diff_servers(old: &[SnapServer], new: &[SnapServer], out: &mut Vec<Change>) {
     for s in new {
         if !old.iter().any(|o| server_key(o) == server_key(s)) {
@@ -215,8 +237,23 @@ fn diff_servers(old: &[SnapServer], new: &[SnapServer], out: &mut Vec<Change>) {
     }
     for s in new {
         let Some(o) = old.iter().find(|o| server_key(o) == server_key(s)) else { continue };
-        if o.transport != s.transport || o.package != s.package || o.pinned != s.pinned {
-            out.push(change("changed", "server", &s.name, Msg::new("changes.server.changed").var("name", &s.name)));
+        if o.transport != s.transport {
+            out.push(change("changed", "server", &s.name, Msg::new("changes.server.transport").var("name", &s.name)));
+        }
+        if o.package != s.package {
+            out.push(change("changed", "server", &s.name, Msg::new("changes.server.package").var("name", &s.name)));
+        }
+        if o.pinned != s.pinned {
+            if s.pinned == Some(true) {
+                // Went to pinned from anything else (unpinned or no package to pin at all).
+                out.push(change("changed", "server", &s.name, Msg::new("changes.server.pinned").var("name", &s.name)));
+            } else if o.pinned == Some(true) {
+                // Was pinned, now is not (unpinned, or the package disappeared).
+                out.push(change("changed", "server", &s.name, Msg::new("changes.server.unpinned").var("name", &s.name)));
+            }
+            // Neither side is `Some(true)` (e.g. Some(false) <-> None): neither state is a
+            // pin, so nothing a user would call a change happened. Nothing is emitted --
+            // there is deliberately no "changes.server.pinUnknown" key.
         }
     }
 }
@@ -405,9 +442,20 @@ pub fn opportunities(c: &SetupChanges) -> Vec<Opportunity> {
     if c.changes.is_empty() {
         return Vec::new();
     }
+    // A server split across up to three rows (transport/package/pin) is still one thing
+    // that changed, so both findings below count DISTINCT (kind, what, name) things, never
+    // raw Change rows -- otherwise a single server touched three ways would read as three
+    // "things changed" and break the "{count} other things changed" promise
+    // finding.setup-changed's own text makes. `guardrail` rows never share a `(what, name)`
+    // with each other today (each hook event, and the deny/allow/shell rows, produce at
+    // most one row apiece), but de-duplicating them the same way costs nothing and keeps
+    // both counts honest under the same rule.
+    fn thing(ch: &Change) -> (&str, &str, &str) {
+        (ch.kind.as_str(), ch.what.as_str(), ch.name.as_str())
+    }
     let mut out = Vec::new();
-    let guardrail =
-        c.changes.iter().filter(|ch| ch.kind == "removed" && matches!(ch.what.as_str(), "deny" | "shell" | "hook")).count();
+    let guardrail: HashSet<_> = c.changes.iter().filter(|ch| ch.guardrail).map(thing).collect();
+    let guardrail = guardrail.len();
     if guardrail > 0 {
         // "learn", not "tighten": this is the one finding built from history
         // rather than from the present state of the machine, and a diff can
@@ -425,7 +473,8 @@ pub fn opportunities(c: &SetupChanges) -> Vec<Opportunity> {
             None,
         ));
     }
-    let other = c.changes.len() - guardrail;
+    let other: HashSet<_> = c.changes.iter().filter(|ch| !ch.guardrail).map(thing).collect();
+    let other = other.len();
     if other > 0 {
         out.push(Opportunity::from_msgs(
             "setup-changed",
@@ -460,6 +509,10 @@ mod tests {
         SnapServer { name: name.into(), client: "Claude Code".into(), transport: "stdio".into(), package: package.map(str::to_string), pinned }
     }
 
+    fn server_transport(name: &str, transport: &str, package: Option<&str>, pinned: Option<bool>) -> SnapServer {
+        SnapServer { name: name.into(), client: "Claude Code".into(), transport: transport.into(), package: package.map(str::to_string), pinned }
+    }
+
     fn tmp_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("aitm-changes-{tag}-{}", crate::providers::unique_stamp()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -490,14 +543,71 @@ mod tests {
     }
 
     #[test]
-    fn a_pin_lost_is_a_change() {
-        let old = Snapshot { servers: vec![server("docs", Some("docs-mcp@1"), Some(true))], ..empty_snapshot("2026-09-01") };
-        let new = Snapshot { servers: vec![server("docs", Some("docs-mcp"), Some(false))], ..empty_snapshot("2026-09-08") };
+    fn a_transport_change_is_its_own_row() {
+        let old = Snapshot { servers: vec![server_transport("docs", "stdio", Some("docs-mcp@1"), Some(true))], ..empty_snapshot("2026-09-01") };
+        let new = Snapshot { servers: vec![server_transport("docs", "http", Some("docs-mcp@1"), Some(true))], ..empty_snapshot("2026-09-08") };
         let found = diff(&old, &new);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, "changed");
         assert_eq!(found[0].what, "server");
         assert_eq!(found[0].name, "docs");
+        assert_eq!(found[0].msg.key, "changes.server.transport");
+        assert!(found[0].text.contains("docs"), "{}", found[0].text);
+        assert!(!found[0].text.contains("stdio") && !found[0].text.contains("http"), "the transport value itself must never reach the message: {}", found[0].text);
+        assert!(!found[0].guardrail, "a server change is never a guardrail loss");
+    }
+
+    #[test]
+    fn a_package_change_is_its_own_row() {
+        let old = Snapshot { servers: vec![server("docs", Some("docs-mcp@1"), Some(true))], ..empty_snapshot("2026-09-01") };
+        let new = Snapshot { servers: vec![server("docs", Some("other-mcp@1"), Some(true))], ..empty_snapshot("2026-09-08") };
+        let found = diff(&old, &new);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].kind, "changed");
+        assert_eq!(found[0].what, "server");
+        assert_eq!(found[0].name, "docs");
+        assert_eq!(found[0].msg.key, "changes.server.package");
+        assert!(!found[0].text.contains("docs-mcp") && !found[0].text.contains("other-mcp"), "the package name must never reach the message: {}", found[0].text);
+    }
+
+    #[test]
+    fn a_pin_gained_is_its_own_row() {
+        let old = Snapshot { servers: vec![server("docs", Some("docs-mcp"), Some(false))], ..empty_snapshot("2026-09-01") };
+        let new = Snapshot { servers: vec![server("docs", Some("docs-mcp@1"), Some(true))], ..empty_snapshot("2026-09-08") };
+        let found = diff(&old, &new);
+        assert_eq!(found.len(), 2, "package and pin both differ, so both get their own row");
+        assert!(found.iter().any(|c| c.msg.key == "changes.server.package"));
+        let pin_row = found.iter().find(|c| c.msg.key == "changes.server.pinned").expect("a pin gained row");
+        assert_eq!(pin_row.kind, "changed");
+        assert_eq!(pin_row.what, "server");
+        assert_eq!(pin_row.name, "docs");
+        assert!(!pin_row.guardrail);
+    }
+
+    #[test]
+    fn a_pin_lost_is_a_change() {
+        let old = Snapshot { servers: vec![server("docs", Some("docs-mcp@1"), Some(true))], ..empty_snapshot("2026-09-01") };
+        let new = Snapshot { servers: vec![server("docs", Some("docs-mcp@1"), Some(false))], ..empty_snapshot("2026-09-08") };
+        let found = diff(&old, &new);
+        assert_eq!(found.len(), 1, "only pinned differs here, so only one row");
+        assert_eq!(found[0].kind, "changed");
+        assert_eq!(found[0].what, "server");
+        assert_eq!(found[0].name, "docs");
+        assert_eq!(found[0].msg.key, "changes.server.unpinned");
+        assert!(
+            !found[0].guardrail,
+            "losing a pin is already scored by the audit's own mcp-unpinned finding; counting it again here under a different name would double-count it"
+        );
+    }
+
+    #[test]
+    fn a_pin_state_that_was_never_really_pinned_either_way_is_not_a_change() {
+        // Some(false) <-> None: neither side is a pin (an unpinned package vs. no package to
+        // have a version at all), so nothing a user would call a change happened -- and with
+        // the package itself unchanged, this diff has nothing else to report either.
+        let old = Snapshot { servers: vec![server("notes", Some("notes-mcp"), Some(false))], ..empty_snapshot("2026-09-01") };
+        let new = Snapshot { servers: vec![server("notes", Some("notes-mcp"), None)], ..empty_snapshot("2026-09-08") };
+        assert!(diff(&old, &new).is_empty(), "{:?}", diff(&old, &new));
     }
 
     #[test]
@@ -508,6 +618,7 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, "removed");
         assert_eq!(found[0].what, "deny");
+        assert!(found[0].guardrail, "the UI's amber marker and the finding's count read this same field");
         let sc = SetupChanges { since: Some(old.taken.clone()), changes: found, days_of_history: 7 };
         let opps = opportunities(&sc);
         assert_eq!(opps.len(), 1);
@@ -523,6 +634,7 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, "removed");
         assert_eq!(found[0].what, "hook");
+        assert!(found[0].guardrail);
         let sc = SetupChanges { since: Some(old.taken.clone()), changes: found, days_of_history: 7 };
         let opps = opportunities(&sc);
         assert_eq!(opps.len(), 1);
@@ -551,6 +663,23 @@ mod tests {
         assert_eq!(opps[0].id, "guardrail-removed", "the guardrail finding leads");
         assert_eq!(opps[0].kind, "learn");
         assert_eq!(opps[1].id, "setup-changed");
+    }
+
+    #[test]
+    fn a_server_changed_two_ways_is_one_other_thing_not_two() {
+        let old = Snapshot { servers: vec![server_transport("docs", "stdio", Some("docs-mcp@1"), Some(true))], ..empty_snapshot("2026-09-01") };
+        let new = Snapshot { servers: vec![server_transport("docs", "http", Some("other-mcp@2"), Some(true))], ..empty_snapshot("2026-09-08") };
+        let found = diff(&old, &new);
+        assert_eq!(found.len(), 2, "transport and package each get their own row");
+        assert!(!found.iter().any(|c| c.guardrail));
+        let sc = SetupChanges { since: Some(old.taken.clone()), changes: found, days_of_history: 7 };
+        let opps = opportunities(&sc);
+        assert_eq!(opps.len(), 1);
+        assert_eq!(opps[0].id, "setup-changed");
+        assert_eq!(
+            opps[0].title, "1 other thing changed in your setup",
+            "one server touched two ways is one thing, not two -- the finding's own text promises \"{{count}} other things changed\""
+        );
     }
 
     #[test]
@@ -840,6 +969,48 @@ mod tests {
         let wire = format!("{}{}", serde_json::to_string(&snap).unwrap(), serde_json::to_string(&found).unwrap());
         for secret in ["sk-live-SECRETENVVALUE", "ghp_SECRETARGTOKEN", "SECRETPATHKEY", "SECRETQUERYKEY", "hunter2", "SECRETHEADER"] {
             assert!(!wire.contains(secret), "{secret} leaked into {wire}");
+        }
+
+        // The "added" path above (diffed against an empty snapshot) never exercises
+        // diff_servers' "changed" branch at all. A real reconfiguration -- a bumped
+        // package version, a rotated token, a different transport -- is exactly the
+        // shape the transport/package/pin split was built for, so it needs its own
+        // planted "old" snapshot to diff against, with its OWN, different secrets.
+        let old_doc = serde_json::json!({
+            "mcpServers": {
+                "with-env": {
+                    "command": "/usr/local/bin/npx",
+                    "args": ["-y", "@scope/server-thing@1.0.0", "--token", "ghp_OLDARGTOKEN"],
+                    "env": { "API_KEY": "sk-live-OLDENVVALUE", "OTHER": "hunter1" }
+                },
+                "remote": {
+                    "type": "http",
+                    "url": "https://user:hunter1@mcp.example.com:8443/v1/OLDPATHKEY/mcp?key=OLDQUERYKEY",
+                    "headers": { "Authorization": "Bearer OLDHEADER" }
+                }
+            }
+        });
+        let old_servers = crate::inventory::mcp_from_claude_json(&old_doc);
+        let old_inv = Inventory { mcp_servers: old_servers, ..Inventory::default() };
+        let old_snap = snapshot_of(&old_inv, "2026-09-01");
+        let changed = diff(&old_snap, &snap);
+        // with-env's package went from @scope/server-thing@1.0.0 to @1.2.3: a real,
+        // reportable change (still pinned both times, so no pin row).
+        assert!(changed.iter().any(|c| c.msg.key == "changes.server.package" && c.name == "with-env"), "{changed:?}");
+        let changed_wire = format!("{}{}", serde_json::to_string(&old_snap).unwrap(), serde_json::to_string(&changed).unwrap());
+        for secret in [
+            "sk-live-SECRETENVVALUE", "ghp_SECRETARGTOKEN", "SECRETPATHKEY", "SECRETQUERYKEY", "hunter2", "SECRETHEADER",
+            "sk-live-OLDENVVALUE", "ghp_OLDARGTOKEN", "OLDPATHKEY", "OLDQUERYKEY", "hunter1", "OLDHEADER",
+        ] {
+            assert!(!changed_wire.contains(secret), "{secret} leaked into {changed_wire}");
+        }
+        // The package's own name and version are legitimate SnapServer fields (kept in the
+        // snapshot on disk, same as `package` already is elsewhere) -- what must never
+        // happen is either one reaching a Change's own message. Checked against the
+        // Change list alone, not the whole wire above, which legitimately carries them.
+        let changed_only = serde_json::to_string(&changed).unwrap();
+        for value in ["@scope/server-thing", "1.0.0", "1.2.3"] {
+            assert!(!changed_only.contains(value), "{value} leaked into a Change: {changed_only}");
         }
     }
 

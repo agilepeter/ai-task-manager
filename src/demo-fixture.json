@@ -3190,7 +3190,7 @@
       "id": "guardrail-removed",
       "status": "consider",
       "title": "4 guardrails were removed from your setup",
-      "detail": "4 things that used to limit what runs on this machine -- deny rules, hooks, shell coverage -- are gone since the last check. Worth knowing whether that was on purpose.",
+      "detail": "4 things that used to limit what runs on this machine (deny rules, hooks, shell coverage) are gone since the last check. Worth knowing whether that was on purpose.",
       "titleMsg": {
        "key": "finding.guardrail-removed.title",
        "vars": {},
@@ -3582,6 +3582,7 @@
     "kind": "added",
     "what": "server",
     "name": "figma",
+    "guardrail": false,
     "msg": {
      "key": "changes.server.added",
      "vars": {
@@ -3595,19 +3596,35 @@
     "kind": "changed",
     "what": "server",
     "name": "postgres",
+    "guardrail": false,
     "msg": {
-     "key": "changes.server.changed",
+     "key": "changes.server.package",
      "vars": {
       "name": "postgres"
      },
      "count": null
     },
-    "text": "postgres changed"
+    "text": "postgres runs a different package"
+   },
+   {
+    "kind": "changed",
+    "what": "server",
+    "name": "postgres",
+    "guardrail": false,
+    "msg": {
+     "key": "changes.server.unpinned",
+     "vars": {
+      "name": "postgres"
+     },
+     "count": null
+    },
+    "text": "postgres lost its version pin"
    },
    {
     "kind": "added",
     "what": "agent",
     "name": "release-notes",
+    "guardrail": false,
     "msg": {
      "key": "changes.agent.added",
      "vars": {
@@ -3621,6 +3638,7 @@
     "kind": "added",
     "what": "skill",
     "name": "release-notes",
+    "guardrail": false,
     "msg": {
      "key": "changes.skill.added",
      "vars": {
@@ -3634,6 +3652,7 @@
     "kind": "removed",
     "what": "hook",
     "name": "SessionEnd",
+    "guardrail": true,
     "msg": {
      "key": "changes.hook.fewer",
      "vars": {
@@ -3647,6 +3666,7 @@
     "kind": "removed",
     "what": "hook",
     "name": "PreToolUse",
+    "guardrail": true,
     "msg": {
      "key": "changes.hook.removed",
      "vars": {
@@ -3660,6 +3680,7 @@
     "kind": "removed",
     "what": "deny",
     "name": "",
+    "guardrail": true,
     "msg": {
      "key": "changes.deny.count",
      "vars": {
@@ -3674,6 +3695,7 @@
     "kind": "added",
     "what": "allow",
     "name": "",
+    "guardrail": false,
     "msg": {
      "key": "changes.allow.count",
      "vars": {
@@ -3688,6 +3710,7 @@
     "kind": "removed",
     "what": "shell",
     "name": "",
+    "guardrail": true,
     "msg": {
      "key": "changes.shell.removed",
      "vars": {},

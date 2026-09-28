@@ -303,9 +303,14 @@ of any one result. A **Changes** section keeps a dated
 history of the setup's own shape -- servers, agents, skills, hook events, and
 how many allow and deny rules there are -- once a local day, and shows what
 moved since the newest snapshot that is at least a week old (or the oldest
-one on file, saying honestly how far back that reaches), flagging it
-separately when what went missing was a guardrail: a deny rule, a hook or
-shell coverage. **Audit** scores the whole setup,
+one on file, saying honestly how far back that reaches). A server that
+changed says exactly what: its transport, its package, or its version pin,
+each its own line rather than one opaque "changed". Any row that weakens a
+guardrail -- a deny rule, a hook or shell coverage going away -- carries the
+same amber marker a "tighten" opportunity does, flagged separately from
+everything else that moved; losing a version pin is not one of these, since
+that is already scored on its own as an unpinned-package finding. **Audit**
+scores the whole setup,
 including three guardrail checks on agents (no tools allowlist, no shell in the
 deny list, no model pinned): every finding is computed from your machine,
 states its own numbers, and disappears when it no longer applies. Nothing is

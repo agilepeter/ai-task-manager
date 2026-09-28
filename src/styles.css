@@ -2994,6 +2994,28 @@ body.no-glass #star-box {
 .inv-opp-tighten .inv-dot {
   background: #eab308;
 }
+/* A Changes row's own marker: same flex slot whether or not it is a guardrail
+   weakening, so a marked row and a neutral row stay aligned -- only the guardrail
+   one gets `.inv-opp-tighten`, which paints the dot inside it amber via the rule
+   above; a neutral row keeps its `.inv-dot` invisible rather than blue, since this
+   is not an Opportunity list and an unmarked row must not look like a lesser one. */
+.inv-change-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+.inv-change-dot {
+  display: inline-flex;
+  flex: none;
+  padding-top: 4px;
+}
+.inv-change-dot:not(.inv-opp-tighten) .inv-dot {
+  visibility: hidden;
+}
+.inv-change-line .inv-name.inv-change {
+  flex: 1;
+  min-width: 0;
+}
 .inv-opp-detail {
   margin: 4px 0 7px 13px;
   font-size: 11.5px;

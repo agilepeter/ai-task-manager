@@ -174,6 +174,11 @@ interface Change {
   kind: "added" | "removed" | "changed";
   what: string;
   name: string;
+  /** Whether this row is a guardrail weakening -- exactly the rows
+   *  `opportunities()` on the Rust side counts under "guardrail-removed", so
+   *  the amber marker painted here can never disagree with that finding's
+   *  own count. */
+  guardrail: boolean;
   msg: Msg;
   text: string;
 }
@@ -208,7 +213,11 @@ let host: InventoryHost | null = null;
 let trust: TrustView | null = null;
 /** The pin being previewed, keyed by "client/name", and what happened to it. */
 let pin: { key: string; plan: PinPlan | null; note: string; done: boolean } | null = null;
-const openSections = new Set<string>(["opportunities", "running", "mcp"]);
+// Exported so a test can open a section that starts collapsed (`section()`
+// omits a closed section's body entirely) without driving a click through the
+// DOM -- `renderChanges()`'s own test does this for "changes", which is not
+// among the three open by default below.
+export const openSections = new Set<string>(["opportunities", "running", "mcp"]);
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -745,8 +754,11 @@ function renderSetup(inv: Inventory, agents: Definition[], skills: Definition[],
 /// What changed in the setup's own shape since about a week ago. Each row is
 /// painted from the Change's own Msg, exactly the way an Opportunity's title
 /// paints from titleMsg -- so a server, agent or skill name renders correctly
-/// in whatever locale is active, never a raw key.
-function renderChanges(): string {
+/// in whatever locale is active, never a raw key. Takes the data as
+/// parameters, like `renderMcp`/`renderOpportunities` beside it, rather than
+/// reading the module's own `setupChanges`/`setupChangesError` state
+/// directly, so it can be exercised in isolation the same way those two are.
+export function renderChanges(setupChanges: SetupChanges | null, setupChangesError: string): string {
   if (setupChangesError) {
     return section("changes", T("section.changes"), 0, "", T("empty.changesError", { error: setupChangesError }));
   }
@@ -754,11 +766,23 @@ function renderChanges(): string {
     return section("changes", T("section.changes"), 0, "", t("detail.loading"));
   }
   const c = setupChanges;
+  // A guardrail weakening gets the same amber dot `.inv-opp-tighten .inv-dot` already paints
+  // on a "tighten" Opportunity -- reused, not a second color invented for the same meaning.
+  // Every row gets the dot's flex slot either way (visible or not) so a guardrail row and a
+  // neutral row stay aligned; colour is never the only signal, so a marked row also carries
+  // a screen-reader label.
   const rows = c.changes
     .map(
       (ch) => `
       <div class="inv-row">
-        <div class="inv-row-main"><span class="inv-name inv-change">${esc(tm(ch.msg))}</span></div>
+        <div class="inv-row-main">
+          <div class="inv-change-line">
+            <span class="inv-change-dot${ch.guardrail ? " inv-opp-tighten" : ""}"${
+              ch.guardrail ? ` role="img" aria-label="${esc(t("changes.guardrailMark"))}"` : ' aria-hidden="true"'
+            }><span class="inv-dot"></span></span>
+            <span class="inv-name inv-change">${esc(tm(ch.msg))}</span>
+          </div>
+        </div>
       </div>`,
     )
     .join("");
@@ -818,7 +842,7 @@ function render(): void {
     </div>
     <p class="inv-note">${esc(T("note", { scanned }))}</p>
     ${renderOpportunities(inv.opportunities)}
-    ${renderChanges()}
+    ${renderChanges(setupChanges, setupChangesError)}
     ${renderRunning()}
     ${renderSignIns()}
     ${renderTools(inv)}
