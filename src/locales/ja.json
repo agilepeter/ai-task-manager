@@ -619,7 +619,7 @@
   "inventory.projectsScanned.other": "{n} 件のプロジェクトをスキャンしました。",
   "inventory.audit.button": "監査",
   "inventory.agents.button": "エージェント",
-  "inventory.agents.tip": "実行中のエージェント、自分のエージェント、組み込みエージェント、30日間のコストを1か所にまとめて表示します",
+  "inventory.agents.tip": "実行中のエージェント、自分のエージェント、組み込みエージェント、30 日間のコストを1か所にまとめて表示します",
   "inventory.audit.tip": "この構成全体をスコア化して確認できます。書き出しも可能です",
   "inventory.rescan.button": "再スキャン",
   "inventory.rescan.tip": "ローカル構成を再度読み取ります",
@@ -628,7 +628,7 @@
   "agents.section.running": "実行中",
   "agents.section.yours": "自分のエージェント",
   "agents.section.worthALook": "確認する価値あり",
-  "agents.empty.noSubagentRuns": "過去30日間、サブエージェントは実行されていません。カスタムまたは組み込みエージェントのコストは、次に実行されたときにここに表示されます。",
+  "agents.empty.noSubagentRuns": "過去 30 日間、サブエージェントは実行されていません。カスタムまたは組み込みエージェントのコストは、次に実行されたときにここに表示されます。",
   "agents.empty.nothingToFlag": "現在、エージェントについて指摘すべき点はありません。",
   "agents.guardrailFailing.other": "{count} 件のエージェントガードレールチェックに対応が必要です",
   "agents.openAudit": "監査を開く",
@@ -941,6 +941,6 @@
   "error.export.write": "{path} の書き込み：{error}",
   "agents.stat.yours": "自分のエージェント",
   "agents.stat.running": "実行中",
-  "agents.stat.spend": "サブエージェントの支出、30日間",
-  "inventory.agents.doorLine": "自分のエージェント：{yours} · 実行中：{running} · サブエージェントの支出、30日間：{spend}"
+  "agents.stat.spend": "サブエージェントの支出、30 日間",
+  "inventory.agents.doorLine": "自分のエージェント：{yours} · 実行中：{running} · サブエージェントの支出、30 日間：{spend}"
 }
