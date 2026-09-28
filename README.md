@@ -40,7 +40,7 @@ account and no admin rights. Everything below is written for both paths.
 
 | | State today |
 |---|---|
-| Downloadable release | [v0.1.3](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.3), 2026-09-28 (earlier: v0.1.2 on 2026-09-26, v0.1.1 on 2026-09-25, v0.1.0 on 2026-09-24), built and published by `release.yml` from the tagged commit. |
+| Downloadable release | [v0.1.4](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.4), 2026-09-28 (earlier: v0.1.3 on 2026-09-28, v0.1.2 on 2026-09-26, v0.1.1 on 2026-09-25, v0.1.0 on 2026-09-24), built and published by `release.yml` from the tagged commit. |
 | macOS signing | None yet. Open it once, then allow it under System Settings > Privacy & Security > Open Anyway (macOS 14 or earlier: right-click the app > Open). Or `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`. |
 | Windows signing | None yet. SmartScreen warns: More info, then Run anyway. |
 | Auto-update | **Opt-in, off by default.** See [Updates](#updates). |
@@ -168,7 +168,7 @@ files and `latest.json`, to a **draft** release. A final job then checks the dra
 signatures and dated changelog section, and publishes it only if every check
 passes; a failed check leaves the draft untouched. The first release was
 [v0.1.0](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.0); the latest is
-[v0.1.3](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.3).
+[v0.1.4](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.4).
 [v0.1.2](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.2) was the first one the
 workflow published by itself. The
 artifacts are not signed, so building from source above remains the better
@@ -281,22 +281,30 @@ from an anchor without drift, reminds you once before a renewal, and shows each
 subscription's 30-day API-equivalent value against its monthly cost. "Idle"
 requires measured low usage; a tool with no spend data says "no data".
 
-**Inventory** is the setup itself: MCP servers, agents, skills and guardrails
+**Inventory** is the setup itself: MCP servers, skills and guardrails
 across every MCP-capable app it knows (Claude Code, Claude Desktop, VS Code,
 Cursor, Windsurf, Gemini CLI, Codex). **Running now** reads the process table
 and shows which of those servers are actually running, grouped by runner, with
-their memory, and lets you end one; it also lists every running agent host
-(Claude Code, Codex, Gemini CLI, Cursor Agent, Aider, OpenCode, Goose, Copilot
-CLI) with its folder, client and live token pace -- ending one is deliberately
-not offered. That folder now resolves on Windows too, read one process at a
+their memory, and lets you end one.
+
+**Agents** is a view of its own, opened from the Agents button in Inventory
+or from the row at the top of it. It puts in one place what used to be spread
+over Inventory and the Audit: three figures (your agents, running now,
+subagent spend over thirty days), every running agent host (Claude Code,
+Codex, Gemini CLI, Cursor Agent, Aider, OpenCode, Goose, Copilot CLI) with
+its folder, client and live token pace, your own agents and Claude Code's
+built-in ones with thirty days of runs and cost, and the findings that are
+about agents. It shows and never acts: there is no button that starts, stops
+or edits an agent. The folder resolves on Windows too, read one process at a
 time through its own PEB the way a debugger reads it; live pace comes from
 each tool's own newest session file, so Codex and Gemini CLI show real
-numbers alongside Claude Code rather than just a folder and client. Inventory's
-agent rows carry thirty days of spend too, your own custom agents and Claude
-Code's built-ins alike, so one nobody has run shows up as an opportunity
-instead of going unnoticed, and each row names the client its spend mostly
-went to, the same matching the Clients tab uses -- only when one client is a
-true majority, never a mere plurality. For Claude Code, a server's row also
+numbers alongside Claude Code. An agent nobody has run shows up as an
+opportunity, and each row names the client its spend mostly went to, the
+same matching the Clients tab uses, only when one client is a true majority.
+Agents that run somewhere else, such as a scheduled job on a build server,
+leave nothing on this machine for the app to read and are not shown.
+
+For Claude Code, a server's row also
 carries its own thirty-day context cost: how many tool calls it answered and
 how many bytes of result came back, with an opportunity when a server has
 answered at least 20 calls and sent back at least 2 MB in that window.
@@ -379,7 +387,7 @@ including every network call the app can make and the greps that prove it, is
   never published to the local HTTP API by default; the extra feeds that would
   expose them are opt-in and loopback-only, with a DNS-rebinding host check so
   a web page cannot read them through your browser.
-- **Running now reads a live agent's working folder with `lsof` on macOS and
+- **The Agents view reads a live agent's working folder with `lsof` on macOS and
   through the process's own PEB on Windows.** Both are local reads; the
   folder never leaves the app, and the opt-in `/v1/agents` feed's own
   allowlist keeps it, the process id and the session id off the wire even

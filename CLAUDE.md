@@ -202,6 +202,11 @@ and computed Opportunities). Usage stays the default view.
   in the tab but scored nothing for a day because of this. `enriched_inventory()` in
   `src-tauri/src/lib.rs` is now the single place both the tab and the audit get their findings
   from, so the two lists cannot drift apart again.
+- **Agents** (`src/agents.ts`): a view opened from Inventory > Agents or the row at the top of
+  Inventory, built like the Audit. It holds the running agent hosts, custom and built-in agents
+  with their spend, and the findings about agents. Inventory no longer lists agents. It reads
+  nothing of its own and must never gain a control that acts on an agent. The finding and
+  check ids it filters on are held to the Rust lists by `scripts/agent-id-registries.test.mjs`.
 - **Audit** (`crates/core/src/audit.rs`, `src/audit.ts`): a scored, sectioned read of the whole
   setup; opens itself once on first run (`auditSeen`), then from Inventory > Audit; exports
   Markdown. It never judges anything a second time: each existing finding becomes a check,

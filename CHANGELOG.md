@@ -6,6 +6,46 @@ numbering at 0.1.0, so the numbers here do not continue upstream's. Pane's own
 release history is kept verbatim in
 [docs/upstream-changelog.md](docs/upstream-changelog.md).
 
+## 0.1.4 — 2026-09-28
+
+### Added
+
+- **An Agents view.** Opened from the Agents button in Inventory, or from the
+  row at the top of it. It gathers what was spread over six places: three
+  figures (your agents, running now, subagent spend over 30 days), the agent
+  hosts running now with folder, client and pace, your own agents and the
+  built-in ones with 30 days of runs and cost, and the findings about
+  agents. When an agent guardrail check in the Audit needs attention it says
+  how many and opens the Audit. It reads nothing new, and nothing in it
+  starts, stops or edits an agent.
+
+### Changed
+
+- **Inventory no longer lists agents.** Running now holds MCP servers only,
+  and the section that held agents, skills and guardrails holds skills and
+  guardrails. One row at the top of Inventory states the three figures and
+  opens the Agents view. Audit checks about agents open it too.
+- **Wording in eight languages.** Strings added in 0.1.3 named a guardrail,
+  a deny rule, an allow rule and a version pin with different words than the
+  rest of the same language's file. They now use each language's own. German
+  addresses the reader formally throughout, and Japanese names the tab and
+  its section in Japanese.
+
+### Fixed
+
+- **Closing the Audit left the keyboard focus nowhere.** Closing the Audit,
+  or the new Agents view, returns focus to the button that opened it.
+- **A link in this changelog to a file in the repository answered 404 on the
+  changelog page.** It points at the repository now.
+- **The product page stated an old version in two places** after a release:
+  the sentence above the download links and the page's structured data. The
+  script that refreshes the page after a release writes both now, along with
+  the version cell and the download links, and refuses to write anything when
+  the page is not in the shape it expects.
+- **The security policy said no release had been cut**, and the roadmap was
+  upstream's. Both describe this app now. Upstream's roadmap is kept in
+  [docs/upstream-roadmap.md](docs/upstream-roadmap.md).
+
 ## 0.1.3 — 2026-09-28
 
 ### Added

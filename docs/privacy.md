@@ -113,11 +113,14 @@ directory with upstream Pane would let the two apps overwrite each other.
 - **Folder and client names stay local.** Work areas are your directory names
   and clients are your customers' names. Neither is published anywhere by
   default.
-- **Running now reads each live agent's working folder with `lsof` on macOS
+- **The Agents view reads each live agent's working folder with `lsof` on macOS
   and through the process's own PEB on Windows.** Both are local reads:
   nothing leaves the machine. The folder is shown in the app only, and is
   never part of the seat report, and kept out of the `/v1/agents` feed below
   even while that feed is on.
+- **The Agents view, new in 0.1.4, reads nothing new.** It shows what
+  Inventory and the Audit already held, in one place. It writes no file and
+  makes no network call, and nothing in it starts, stops or edits an agent.
 
 ## What the app writes outside its own folder
 

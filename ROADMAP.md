@@ -11,9 +11,6 @@ reads prompt text.
 
 ## Next
 
-- **An Agents view.** Running agents, your own agents, built-in agents and
-  the findings about them in one place, opened from Inventory. It shows; it
-  never starts, stops or edits an agent.
 - **A runaway alert and a budget per agent.** A warning when one agent's pace
   would pass a figure you set, or when it has run past a duration you set.
   Off until you set a figure.
