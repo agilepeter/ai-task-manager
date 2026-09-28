@@ -149,20 +149,27 @@ function close(): void {
   opener = null;
 }
 
+/// Opens the panel -- `opener` is the button close() returns focus to when
+/// it is still in the document once the panel closes again (see
+/// closeFocusTarget() above and src/agents.ts's own openAgents() for why this
+/// has to be handed in explicitly rather than read back from
+/// document.activeElement). Exported so a test can drive it directly, the
+/// same way scripts/agents-view.test.mjs drives openAgents().
+export function openAbout(opener_: HTMLElement | null = null): void {
+  opener = opener_;
+  document.body.classList.add("about-open");
+  document.querySelector("#about")?.removeAttribute("inert");
+  render("");
+  void getVersion().then((v) => render(v), () => render(""));
+  // The heading lives in the static panel head (index.html), not in
+  // anything render() paints, so it is already there to receive focus --
+  // same as src/agents.ts's own #agents-heading.
+  document.querySelector<HTMLElement>("#about-heading")?.focus();
+}
+
 export function setupAbout(): void {
-  const open = (opener_: HTMLElement | null) => {
-    opener = opener_;
-    document.body.classList.add("about-open");
-    document.querySelector("#about")?.removeAttribute("inert");
-    render("");
-    void getVersion().then((v) => render(v), () => render(""));
-    // The heading lives in the static panel head (index.html), not in
-    // anything render() paints, so it is already there to receive focus --
-    // same as src/agents.ts's own #agents-heading.
-    document.querySelector<HTMLElement>("#about-heading")?.focus();
-  };
-  document.querySelector("#about-btn")?.addEventListener("click", (e) => open(e.currentTarget as HTMLElement));
-  document.querySelector("#build-info")?.addEventListener("click", (e) => open(e.currentTarget as HTMLElement));
+  document.querySelector("#about-btn")?.addEventListener("click", (e) => openAbout(e.currentTarget as HTMLElement));
+  document.querySelector("#build-info")?.addEventListener("click", (e) => openAbout(e.currentTarget as HTMLElement));
   document.querySelector("#about-close")?.addEventListener("click", close);
   document.querySelector("#about-body")?.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
