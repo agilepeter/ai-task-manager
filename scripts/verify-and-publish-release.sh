@@ -281,7 +281,7 @@ def declaw(text):
 
 install_block = f"""## Install
 
-**macOS, Intel and Apple Silicon (one universal build):** download `{dmg_name}`, open it and drag AI Task Manager to Applications. The app is not notarized yet, so the first launch needs a right-click on the app and Open, once; or run `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`.
+**macOS, Intel and Apple Silicon (one universal build):** download `{dmg_name}`, open it and drag AI Task Manager to Applications. The app is not notarized yet, so macOS blocks the first launch: open it once, then go to System Settings, Privacy & Security, scroll to Security and click Open Anyway (on macOS 14 or earlier, right-click the app and choose Open). Or run `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`.
 
 **Windows 10 and 11:** download `{exe_name}` (or `{msi_name}`). The installer is not signed yet, so SmartScreen will warn: More info, then Run anyway.
 

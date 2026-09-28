@@ -38,7 +38,7 @@ account and no admin rights. Everything below is written for both paths.
 | | State today |
 |---|---|
 | Downloadable release | [v0.1.2](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.2), 2026-09-26 (earlier: v0.1.1 on 2026-09-25, v0.1.0 on 2026-09-24), built and published by `release.yml` from the tagged commit. |
-| macOS signing | None yet. Right-click the app and choose Open once, or `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`. |
+| macOS signing | None yet. Open it once, then allow it under System Settings > Privacy & Security > Open Anyway (macOS 14 or earlier: right-click the app > Open). Or `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`. |
 | Windows signing | None yet. SmartScreen warns: More info, then Run anyway. |
 | Auto-update | **Opt-in, off by default.** See [Updates](#updates). |
 
@@ -83,14 +83,21 @@ switcher. Look for the small robot glyph near the clock and click it.
 
 Because the build is unsigned, double-clicking it will fail with *"Apple could
 not verify..."* or *"is damaged and can't be opened"*. Neither is true; both
-mean unsigned. Either:
+mean unsigned. On macOS 15 or later:
 
 1. Open the `.dmg` and drag the app to `/Applications`.
-2. **Right-click the app > Open**, then confirm. macOS remembers the choice, so
-   you only do this once.
+2. Double-click the app. macOS refuses to open it. Click **Done**.
+3. Open **System Settings > Privacy & Security**, scroll down to **Security**,
+   and click **Open Anyway** beside the line that names AI Task Manager. The
+   button is there for about an hour after step 2. Confirm with your password
+   or Touch ID.
 
-or, if the right-click route is blocked by your machine's policy, strip the
-quarantine flag yourself:
+macOS remembers the choice, so you only do this once. On macOS 14 or earlier
+steps 2 and 3 are one step: **right-click the app > Open**, then confirm.
+Right-click no longer works on macOS 15 and later.
+
+If you would rather use the terminal, if the message was the "damaged" one, or
+if your machine's policy hides the button, strip the quarantine flag yourself:
 
 ```sh
 xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"

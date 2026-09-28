@@ -56,7 +56,8 @@ jobs:
         run: echo "apple=$HAVE_APPLE" >> "$GITHUB_OUTPUT"
 
       # Without Apple secrets: an ad-hoc signature ("-"), the same thing a
-      # local `tauri build` produces. Gatekeeper still needs right-click > Open.
+      # local `tauri build` produces. Gatekeeper still blocks the first launch
+      # until the user allows it under Privacy & Security.
       - uses: tauri-apps/tauri-action@v0
         if: steps.signing.outputs.apple != 'true'
         env:

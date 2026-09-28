@@ -52,8 +52,9 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
    secrets — `APPLE_CERTIFICATE` (the `.p12`, base64), `APPLE_CERTIFICATE_PASSWORD`,
    `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password),
    `APPLE_TEAM_ID`. The release workflow already reads all six and signs and notarizes with no
-   edits. Until then a user right-clicks > Open once, or runs
-   `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`.
+   edits. Until then a user opens the app once, lets macOS block it, and allows it under
+   System Settings > Privacy & Security > Open Anyway (right-click > Open stopped working in
+   macOS 15), or runs `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`.
 3. **Windows SmartScreen** warns on unsigned installers. Needs a code-signing certificate (an OV
    certificate from a CA, or Azure Trusted Signing) and the matching `bundle.windows` settings in
    `tauri.conf.json`. Nothing is set up; nothing in the code blocks it.
