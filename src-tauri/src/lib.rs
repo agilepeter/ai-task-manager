@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, audit, clients, coaching, diagnose, digest, drift, effort, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, procs, providers, spend, trust};
+pub(crate) use aitm_core::{alerts, audit, changes, clients, coaching, diagnose, digest, drift, effort, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, procs, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -172,6 +172,24 @@ async fn get_inventory() -> Result<inventory::Inventory, String> {
     tauri::async_runtime::spawn_blocking(|| enriched_inventory().0)
     .await
     .map_err(|e| format!("inventory scan: {e}"))
+}
+
+/// The dated history behind the Inventory tab's Changes section: what
+/// changed in the setup's own shape since about a week ago. A plain
+/// `inventory::scan()` rather than `enriched_inventory()`'s fuller one --
+/// the comparison only ever looks at names, shapes and counts, never at a
+/// computed finding, so there is nothing here that needs the heavier scan.
+/// The snapshot history itself is written only by the background refresh
+/// loop; this command only ever reads it.
+#[tauri::command]
+async fn get_setup_changes() -> Result<changes::SetupChanges, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let inv = inventory::scan();
+        let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+        changes::changes_at(&providers::config_dir(), &inv, &today)
+    })
+    .await
+    .map_err(|e| format!("setup changes: {e}"))
 }
 
 /// Renders a core `Msg` error in the resolved locale before it crosses the
@@ -448,6 +466,9 @@ fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     let any_subagent_runs = !agent_spend.is_empty();
     let used_agents: HashSet<String> = agent_spend.into_iter().map(|a| a.name).collect();
     inv.opportunities.extend(inventory::agent_usage_opportunities(&inv.agents, &used_agents, any_subagent_runs));
+    let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+    let setup_changes = changes::changes_at(&providers::config_dir(), &inv, &today);
+    inv.opportunities.extend(changes::opportunities(&setup_changes));
     // Gaps first, then things to learn, each in the order found.
     inv.opportunities.sort_by_key(|o| o.kind != "tighten");
     (inv, spend)
@@ -2021,6 +2042,17 @@ fn spawn_background_refresh(app: &tauri::AppHandle) {
             let last_spend = LAST_SPEND_SCAN_MS.load(std::sync::atomic::Ordering::Relaxed);
             if refresh_due(last_spend, now, BACKGROUND_SPEND_EVERY_MIN) {
                 let _ = fetch_spend(handle.clone()).await;
+                // One inventory-shape snapshot per local day, for the setup
+                // history behind the Inventory tab's Changes section.
+                // record_at() itself keeps this to one entry a day no matter
+                // how often this loop happens to land here, so there is no
+                // need to track "already did this today" separately.
+                let _ = tauri::async_runtime::spawn_blocking(|| {
+                    let inv = inventory::scan();
+                    let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+                    changes::record_at(&providers::config_dir(), changes::snapshot_of(&inv, &today))
+                })
+                .await;
             }
         }
     });
@@ -2903,7 +2935,14 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
             let usage30: std::collections::HashMap<String, f64> =
                 result.iter().map(|p| (p.id.clone(), p.last30.cost)).collect();
             let ledger_view = ledger::view(&ledger::load_from(&ledger::path()), today, &usage30);
-            if let Some(d) = digest::build(&result, &ledger_view) {
+            // A fresh scan rather than the cached inventory `enriched_inventory`
+            // carries: the digest fires at most once a week, so the extra scan
+            // costs nothing next to how rarely this branch runs.
+            let changes_this_week =
+                changes::changes_at(&providers::config_dir(), &inventory::scan(), &today.format("%Y-%m-%d").to_string())
+                    .changes
+                    .len();
+            if let Some(d) = digest::build(&result, &ledger_view, changes_this_week) {
                 let body = d.body.iter().map(|m| i18n::t(&cfg, m)).collect::<Vec<_>>().join(" ");
                 let _ = app.notification().builder().title(i18n::t(&cfg, &d.title)).body(body).show();
             }
@@ -3727,6 +3766,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             fetch_usage,
             get_inventory,
+            get_setup_changes,
             get_running,
             get_running_agents,
             end_task,

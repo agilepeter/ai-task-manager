@@ -400,7 +400,10 @@ fn names(list: &[&McpServer]) -> String {
 }
 
 /// True when a package spec carries an explicit version (`pkg@1`, `@s/p@^2`).
-fn is_pinned(package: &str) -> bool {
+/// `pub(crate)` rather than private: `changes.rs` reads the same rule when it
+/// reduces a server to the shape a snapshot keeps, so a package's pinned
+/// state can never be judged two different ways in this codebase.
+pub(crate) fn is_pinned(package: &str) -> bool {
     package.trim_start_matches('@').contains('@')
         && !package.ends_with("@latest")
 }

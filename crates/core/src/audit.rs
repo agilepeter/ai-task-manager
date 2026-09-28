@@ -305,6 +305,11 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
         ));
         setup.extend(only_if_present(inv, "mcp-memory"));
     }
+    // Neither has a meaningful "pass" state -- a setup either changed since
+    // the last check or it did not, and there is no "nothing changed, well
+    // done" row worth adding to every audit run before any history exists.
+    setup.extend(only_if_present(inv, "guardrail-removed"));
+    setup.extend(only_if_present(inv, "setup-changed"));
 
     let p = &inv.permissions;
     // Two proper variants, not one title with a titleUnset sibling: every

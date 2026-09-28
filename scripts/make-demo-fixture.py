@@ -99,6 +99,36 @@ write(home / "Library/Application Support/AITaskManager/clients.json", json.dump
         {"client": "Northwind", "patterns": ["northwind-api"]},
     ],
 }))
+# A planted "one week ago" snapshot of the setup's own shape, so the real
+# changes::changes_at() comparison (live_setup_changes below) has an older
+# state to diff the config above against, instead of a fixture with an empty
+# Changes section. The story: since this snapshot, the figma MCP server was
+# added, postgres lost its version pin, release-notes appeared as both an
+# agent and a skill, a deny rule and an allow rule each moved by one, a
+# PreToolUse hook disappeared, SessionEnd lost one of its two hooks, and the
+# deny list stopped covering the shell -- a mix of ordinary changes and
+# guardrail losses, so both findings this feature adds have something real
+# to show. Dates are seven days before FIXTURE_NOW, matching COMPARE_DAYS in
+# crates/core/src/changes.rs.
+write(home / "Library/Application Support/AITaskManager/inventory_snapshots.json", json.dumps({
+    "version": 1,
+    "snapshots": [{
+        "taken": (FIXTURE_NOW - datetime.timedelta(days=7)).strftime("%Y-%m-%d"),
+        "servers": [
+            {"name": "context7", "client": "Claude Code", "transport": "stdio", "package": "@upstash/context7-mcp@1", "pinned": True},
+            {"name": "playwright", "client": "Claude Code", "transport": "stdio", "package": "@playwright/mcp@latest", "pinned": False},
+            {"name": "github", "client": "Claude Code", "transport": "http", "package": None, "pinned": None},
+            {"name": "postgres", "client": "Claude Code", "transport": "stdio", "package": "pg-readonly-mcp@1.3.0", "pinned": True},
+            {"name": "notes", "client": "Claude Desktop", "transport": "stdio", "package": "notes-mcp", "pinned": False},
+        ],
+        "agents": ["deploy-checker"],
+        "skills": ["deploy", "invoice"],
+        "hookEvents": [["PreToolUse", 1], ["SessionEnd", 2]],
+        "deny": 5,
+        "allow": 1,
+        "denyCoversShell": True,
+    }],
+}))
 
 # --- a month of session logs ------------------------------------------------
 project_dir = claude / "projects" / "".join(c if c.isalnum() else "-" for c in str(work))
@@ -334,6 +364,7 @@ fixture = {
     "sessions": live("spend::tests::live_sessions", '{"area"'),
     "audit": live("audit::tests::live_audit", '{"generatedAt"'),
     "agentSpend": live_fixture("spend::tests::live_agent_spend"),
+    "setupChanges": live("changes::tests::live_setup_changes", '{"since"'),
 }
 def round_floats(obj, ndigits=6):
     """The engine sums these by iterating a std HashMap, whose order is
@@ -362,6 +393,7 @@ assert os.path.expanduser("~") not in text, "the real home directory leaked into
 write(ROOT / "src" / "demo-fixture.json", json.dumps(round_floats(json.loads(text)), indent=1))
 shutil.rmtree(home, ignore_errors=True)
 f = json.loads(text)
-print("fixture written: %d MCP servers, %d tools, spend 30d $%.0f, %d areas, %d agent-spend rows, audit %s/100" % (
+print("fixture written: %d MCP servers, %d tools, spend 30d $%.0f, %d areas, %d agent-spend rows, "
+      "%d setup changes, audit %s/100" % (
     len(f["inventory"]["mcpServers"]), len(f["inventory"]["tools"]), f["spend"][0]["last30"]["cost"],
-    len(f["spend"][0]["projects"][0]["areas"]), len(f["agentSpend"]), f["audit"]["score"]))
+    len(f["spend"][0]["projects"][0]["areas"]), len(f["agentSpend"]), len(f["setupChanges"]["changes"]), f["audit"]["score"]))

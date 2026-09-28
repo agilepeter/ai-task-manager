@@ -162,6 +162,27 @@ export interface InventoryHost {
 type View = "usage" | "inventory" | "ledger";
 type KindFilter = "all" | "tighten" | "learn";
 
+/** One difference between today's setup and the snapshot it is compared
+ *  against. `name` is the server, agent, skill or hook event's own name --
+ *  empty for the setup-wide deny/allow/shell rows, which name no single
+ *  thing. Agent and skill names are user-chosen and never leave this
+ *  machine; this row is the one place they are shown, never in a finding. */
+interface Change {
+  kind: "added" | "removed" | "changed";
+  what: string;
+  name: string;
+  msg: Msg;
+  text: string;
+}
+
+interface SetupChanges {
+  /** The date being compared against. `null` means there is no earlier
+   *  snapshot at all yet -- history starts today, not an error. */
+  since: string | null;
+  changes: Change[];
+  daysOfHistory: number;
+}
+
 const ALL_SCOPES = "__all__";
 const USER_SCOPE = "__user__";
 
@@ -172,6 +193,8 @@ let runningError = "";
 let runningAgents: RunningAgent[] = [];
 let runningAgentsError = "";
 let agentSpend: AgentSpend[] = [];
+let setupChanges: SetupChanges | null = null;
+let setupChangesError = "";
 let signIns: Diagnosis[] = [];
 let ending = "";
 let scopeFilter = ALL_SCOPES;
@@ -706,6 +729,30 @@ function renderSetup(inv: Inventory, agents: Definition[], skills: Definition[],
   return section("setup", T("section.setup"), count, body, "", { keepBody: true });
 }
 
+/// What changed in the setup's own shape since about a week ago. Each row is
+/// painted from the Change's own Msg, exactly the way an Opportunity's title
+/// paints from titleMsg -- so a server, agent or skill name renders correctly
+/// in whatever locale is active, never a raw key.
+function renderChanges(): string {
+  if (setupChangesError) {
+    return section("changes", T("section.changes"), 0, "", T("empty.changesError", { error: setupChangesError }));
+  }
+  if (!setupChanges) {
+    return section("changes", T("section.changes"), 0, "", t("detail.loading"));
+  }
+  const c = setupChanges;
+  const rows = c.changes
+    .map(
+      (ch) => `
+      <div class="inv-row">
+        <div class="inv-row-main"><span class="inv-name">${esc(tm(ch.msg))}</span></div>
+      </div>`,
+    )
+    .join("");
+  const hint = c.since == null ? T("empty.changesFirstRun") : T("empty.changesNone", { since: c.since });
+  return section("changes", T("section.changes"), c.changes.length, rows, hint);
+}
+
 function scopeOptions(inv: Inventory): string {
   const projects = new Set<string>();
   for (const item of [...inv.mcpServers, ...inv.agents, ...inv.skills]) {
@@ -753,7 +800,8 @@ function render(): void {
     ${renderSignIns()}
     ${renderTools(inv)}
     ${renderMcp(mcp)}
-    ${renderSetup(inv, agents, skills, agentSpend)}`;
+    ${renderSetup(inv, agents, skills, agentSpend)}
+    ${renderChanges()}`;
 }
 
 /// Cheap next to a full scan, so it refreshes on its own whenever the view is
@@ -801,6 +849,20 @@ async function loadAgentSpend(): Promise<AgentSpend[]> {
   }
 }
 
+/// Same cadence as the other bonus views above -- no rescan, refreshed on
+/// every Inventory open -- but its own error rather than the tab's own
+/// loadError, since a setup-history read failing is not the same as the
+/// scan itself failing.
+async function loadSetupChanges(): Promise<void> {
+  try {
+    setupChanges = await invoke<SetupChanges>("get_setup_changes");
+    setupChangesError = "";
+  } catch (err) {
+    setupChanges = null;
+    setupChangesError = String(err);
+  }
+}
+
 async function load(): Promise<void> {
   try {
     inventory = await invoke<Inventory>("get_inventory");
@@ -823,6 +885,7 @@ async function load(): Promise<void> {
     agentSpend = rows;
     render();
   });
+  void loadSetupChanges().then(render);
 }
 
 function show(view: View): void {

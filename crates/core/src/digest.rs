@@ -33,6 +33,7 @@ pub(crate) const DIGEST_KEYS: &[&str] = &[
     "digest.renewal.tomorrow",
     "digest.renewal.inDays",
     "digest.renewal.many",
+    "digest.setupChanged",
 ];
 
 fn money(n: f64) -> String {
@@ -83,12 +84,19 @@ fn prior7(daily: &[f64]) -> f64 {
     daily.iter().rev().skip(7).take(7).sum::<f64>() + 0.0
 }
 
-pub fn build(spend: &[ProviderSpend], ledger: &LedgerView) -> Option<Digest> {
+/// `changes_this_week` is how many things the setup-history comparison
+/// found (`changes::SetupChanges::changes.len()`, computed by the caller,
+/// which already has the inventory scan this module has no business
+/// running itself). A week with nothing else to say but a changed setup
+/// still sends the digest -- the line below is not merely appended to an
+/// otherwise-empty message, it can be the entire reason this week's digest
+/// exists.
+pub fn build(spend: &[ProviderSpend], ledger: &LedgerView, changes_this_week: usize) -> Option<Digest> {
     let week: f64 = spend.iter().map(|p| last7(&p.daily_cost)).sum();
     let before: f64 = spend.iter().map(|p| prior7(&p.daily_cost)).sum();
     let renewing: Vec<&crate::ledger::ItemView> =
         ledger.items.iter().filter(|i| i.days_left.is_some_and(|d| (0..=7).contains(&d))).collect();
-    if week < 0.005 && renewing.is_empty() {
+    if week < 0.005 && renewing.is_empty() && changes_this_week == 0 {
         return None;
     }
 
@@ -153,6 +161,9 @@ pub fn build(spend: &[ProviderSpend], ledger: &LedgerView) -> Option<Digest> {
                 .var("money", money(many.iter().map(|i| i.subscription.price).sum()))
                 .count(many.len() as i64),
         ),
+    }
+    if changes_this_week > 0 {
+        body.push(Msg::new("digest.setupChanged").count(changes_this_week as i64));
     }
     Some(Digest { title: Msg::new("digest.title"), body })
 }
@@ -251,7 +262,7 @@ mod tests {
         let acme: Vec<f64> = vec![15.0; 7];
         let misc: Vec<f64> = vec![5.0; 7];
         let sp = provider(&tail, &[("acme/web", &acme), ("tools", &misc), ("(unsorted)", &[99.0; 7])]);
-        let got = build(&[sp], &ledger(Some("2026-09-24"), "2026-09-21")).unwrap();
+        let got = build(&[sp], &ledger(Some("2026-09-24"), "2026-09-21"), 0).unwrap();
         assert_eq!(crate::i18n::render("en", &got.title), "Your AI week");
         assert_eq!(
             en_body(&got.body),
@@ -262,11 +273,29 @@ mod tests {
     #[test]
     fn a_steady_week_says_so_and_an_empty_one_says_nothing() {
         let steady = provider(&[10.0; 14], &[]);
-        let body = en_body(&build(&[steady], &ledger(None, "2026-09-21")).unwrap().body);
+        let body = en_body(&build(&[steady], &ledger(None, "2026-09-21"), 0).unwrap().body);
         assert_eq!(body, "$70 of AI usage in 7 days, about the same as the week before.");
-        assert!(build(&[provider(&[], &[])], &ledger(None, "2026-09-21")).is_none());
+        assert!(build(&[provider(&[], &[])], &ledger(None, "2026-09-21"), 0).is_none());
         // Nothing spent, but a renewal is still worth the note.
-        let only_renewal = build(&[provider(&[], &[])], &ledger(Some("2026-09-21"), "2026-09-21")).unwrap();
+        let only_renewal = build(&[provider(&[], &[])], &ledger(Some("2026-09-21"), "2026-09-21"), 0).unwrap();
         assert_eq!(en_body(&only_renewal.body), "Claude Max renews today ($200).");
+    }
+
+    #[test]
+    fn a_changed_setup_gets_its_own_line_and_can_carry_the_digest_alone() {
+        let quiet = provider(&[0.0; 14], &[]);
+        // No spend and no renewal: on its own this week sends nothing at all
+        // (covered above). Three setup changes are reason enough by themselves.
+        let got = build(&[quiet.clone()], &ledger(None, "2026-09-21"), 3).unwrap();
+        assert_eq!(en_body(&got.body), "3 things changed in your setup this week.");
+        assert!(build(&[quiet], &ledger(None, "2026-09-21"), 0).is_none(), "still nothing to say with zero changes");
+
+        // A normal week with spend gains the line at the end, after everything else.
+        let steady = provider(&[10.0; 14], &[]);
+        let with_changes = build(&[steady], &ledger(None, "2026-09-21"), 1).unwrap();
+        assert_eq!(
+            en_body(&with_changes.body),
+            "$70 of AI usage in 7 days, about the same as the week before. 1 thing changed in your setup this week."
+        );
     }
 }
