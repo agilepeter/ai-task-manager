@@ -288,15 +288,15 @@ and shows which of those servers are actually running, grouped by runner, with
 their memory, and lets you end one.
 
 **Agents** is a view of its own, opened from the Agents button in Inventory
-or from the row at the top of it. It puts in one place what used to be spread
-over Inventory and the Audit: three figures (your agents, running now,
-subagent spend over thirty days), every running agent host (Claude Code,
-Codex, Gemini CLI, Cursor Agent, Aider, OpenCode, Goose, Copilot CLI) with
-its folder, client and live token pace, your own agents and Claude Code's
-built-in ones with thirty days of runs and cost, and the findings that are
-about agents. It shows and never acts: there is no button that starts, stops
-or edits an agent. The folder resolves on Windows too, read one process at a
-time through its own PEB the way a debugger reads it; live pace comes from
+or from the row at the top of it. It gathers what used to be spread over
+Inventory and the Audit: three figures at the top, every running agent host
+with its folder, client and live pace, your own agents and Claude Code's
+built-in ones with 30 days of runs and cost, and the findings about agents.
+The eight agent hosts it knows are Claude Code, Codex, Gemini CLI, Cursor
+Agent, Aider, OpenCode, Goose and GitHub Copilot CLI. It shows and never
+acts: there is no button that starts, stops or edits an agent. The folder
+resolves on Windows too, read one process at a time through its own PEB the
+way a debugger reads it; live pace comes from
 each tool's own newest session file, so Codex and Gemini CLI show real
 numbers alongside Claude Code. An agent nobody has run shows up as an
 opportunity, and each row names the client its spend mostly went to, the
