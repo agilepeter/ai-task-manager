@@ -115,6 +115,13 @@ await page.locator('button:has-text("Audit")').first().click();
 await page.waitForTimeout(1800);
 await shot('audit');
 
+// The Agents view opens from its own button in the Inventory toolbar.
+await boot();
+await tab('Inventory');
+await page.locator('#agents-open-btn').click();
+await page.waitForTimeout(1800);
+await shot('agents');
+
 await boot();
 await tab('Subscriptions');
 await shot('subscriptions');
