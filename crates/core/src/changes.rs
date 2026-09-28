@@ -191,13 +191,20 @@ fn diff_servers(old: &[SnapServer], new: &[SnapServer], out: &mut Vec<Change>) {
 /// serves both -- only the `what` tag and which two message keys apply
 /// differ between the two callers below.
 fn diff_names(old: &[String], new: &[String], what: &'static str, added_key: &'static str, removed_key: &'static str, out: &mut Vec<Change>) {
-    for name in new {
-        if !old.contains(name) {
+    // Counted, not just looked up: the same name can be defined in two projects, and a
+    // second definition appearing is a change even though the name was already known.
+    let times = |list: &[String], name: &String| list.iter().filter(|n| *n == name).count();
+    let mut seen: Vec<&String> = Vec::new();
+    for name in new.iter().chain(old.iter()) {
+        if seen.contains(&name) {
+            continue;
+        }
+        seen.push(name);
+        let (before, after) = (times(old, name), times(new, name));
+        for _ in before..after {
             out.push(change("added", what, name, Msg::new(added_key).var("name", name)));
         }
-    }
-    for name in old {
-        if !new.contains(name) {
+        for _ in after..before {
             out.push(change("removed", what, name, Msg::new(removed_key).var("name", name)));
         }
     }
@@ -330,7 +337,9 @@ pub fn changes_at(dir: &Path, inv: &Inventory, today: &str) -> SetupChanges {
         .find(|s| days_between(&s.taken, today).is_some_and(|d| d >= COMPARE_DAYS))
         .copied()
         .unwrap_or(candidates[0]);
-    let days = days_between(&old.taken, today).unwrap_or(0);
+    // A snapshot dated after today, from a clock that was wrong when it was taken, is no
+    // history at all rather than a negative amount of it.
+    let days = days_between(&old.taken, today).unwrap_or(0).max(0);
     SetupChanges { since: Some(old.taken.clone()), changes: diff(old, &new_snap), days_of_history: days }
 }
 
@@ -549,6 +558,37 @@ mod tests {
         assert_eq!(sc.since.as_deref(), Some("2026-09-18"), "the newest snapshot old enough to qualify, not the oldest on file");
         assert_eq!(sc.days_of_history, 7);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_snapshot_from_yesterday_does_not_stand_in_for_the_one_a_week_old() {
+        let dir = tmp_dir("recent-and-old");
+        record_at(&dir, Snapshot { deny: 9, ..empty_snapshot("2026-09-10") }).unwrap(); // 15 days before
+        record_at(&dir, Snapshot { deny: 3, ..empty_snapshot("2026-09-24") }).unwrap(); // yesterday
+        let inv = Inventory { permissions: Permissions { deny: 3, ..Permissions::default() }, ..Inventory::default() };
+        let sc = changes_at(&dir, &inv, "2026-09-25");
+        assert_eq!(sc.since.as_deref(), Some("2026-09-10"));
+        assert_eq!(sc.changes.len(), 1, "against yesterday nothing changed; against the week it did");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_snapshot_dated_after_today_is_no_history() {
+        let dir = tmp_dir("future");
+        record_at(&dir, Snapshot { deny: 5, ..empty_snapshot("2027-01-01") }).unwrap();
+        let sc = changes_at(&dir, &Inventory::default(), "2026-09-27");
+        assert_eq!(sc.days_of_history, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_second_definition_of_a_known_name_is_a_change() {
+        let old = Snapshot { agents: vec!["reviewer".into()], ..empty_snapshot("2026-09-01") };
+        let new = Snapshot { agents: vec!["reviewer".into(), "reviewer".into()], ..empty_snapshot("2026-09-08") };
+        let found = diff(&old, &new);
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].kind.as_str(), found[0].what.as_str()), ("added", "agent"));
+        assert_eq!(diff(&new, &old)[0].kind, "removed");
     }
 
     #[test]

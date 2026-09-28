@@ -648,7 +648,7 @@
   "finding.mcp-unpinned.title.other": "{count} 个 MCP 服务器在运行未固定版本的软件包",
   "finding.mcp-unpinned.detail.other": "{names} 每次启动都会拉取最新版本，一旦出现问题或被劫持的版本发布，就会立刻带着你工具的权限运行。至少固定到主版本号。",
   "finding.guardrail-removed.title.other": "设置中有 {count} 项防护措施被移除",
-  "finding.guardrail-removed.detail.other": "自上次检查以来，曾限制这台电脑上可运行内容的 {count} 项设置——拒绝规则、钩子、shell 限制——已经消失。值得确认这是否是有意为之。",
+  "finding.guardrail-removed.detail.other": "自上次检查以来，曾限制这台电脑上可运行内容的 {count} 项设置（拒绝规则、钩子、shell 限制）已经消失。值得确认这是否是有意为之。",
   "finding.setup-changed.title.other": "设置中还有 {count} 项发生了变化",
   "finding.setup-changed.detail.other": "自上次检查以来，有 {count} 个服务器、代理、技能或权限发生了变化。请查看“清单”标签页中的“变更”了解详情。",
   "digest.setupChanged.other": "本周你的设置中有 {count} 项发生了变化。",
