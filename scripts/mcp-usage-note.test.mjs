@@ -74,3 +74,14 @@ test("the coverage note appears once at least one server has a usage figure", as
   const html = renderMcp([server({ usage: { calls: 42, resultBytes: 3 * 1024 * 1024 } }), server({ name: "quiet" })]);
   assert.ok(html.includes("inv-mcp-usage-note"), "one server has a usage figure -- the note must render");
 });
+
+test("a usage figure whose bytes cannot be sized leaves the whole chip off the row", async () => {
+  // byteSize() (src/format.ts) returns "" for a count it cannot honestly
+  // size (not finite, or negative) -- renderMcp() must drop the fact
+  // entirely rather than splice that empty string into "N calls, {size} in
+  // 30 days".
+  const { renderMcp, setActiveLocale } = await loadInventoryModule();
+  setActiveLocale("en");
+  const html = renderMcp([server({ usage: { calls: 42, resultBytes: NaN } })]);
+  assert.ok(!html.includes("in 30 days"), "byteSize gives no figure -- the calls/bytes chip must not render at all");
+});

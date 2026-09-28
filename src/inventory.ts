@@ -332,10 +332,14 @@ export function renderMcp(list: McpServer[]): string {
   const rows = list
     .map((s) => {
       const what = s.package ?? s.target;
+      // byteSize() returns "" for a count it cannot honestly size (not
+      // finite, or negative) -- that is the signal to leave this whole chip
+      // off the row rather than splice a blank size into the sentence.
+      const usageSize = s.usage ? byteSize(s.usage.resultBytes) : "";
       const facts = [
         s.transport === "stdio" ? T("mcp.runsLocally") : T("mcp.remote", { transport: s.transport }),
         s.envCount > 0 ? plural("inventory.mcp.credentials", s.envCount) : "",
-        s.usage ? plural("inventory.mcp.usage30d", s.usage.calls, { size: byteSize(s.usage.resultBytes) }) : "",
+        s.usage && usageSize ? plural("inventory.mcp.usage30d", s.usage.calls, { size: usageSize }) : "",
       ].filter(Boolean);
       return `
         <div class="inv-row">

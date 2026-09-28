@@ -241,6 +241,9 @@ mod tests {
     fn normalized_collapses_underscores_for_a_claude_ai_connector() {
         assert_eq!(normalized("claude.ai Google Drive"), "claude_ai_Google_Drive");
         assert_eq!(normalized("claude.ai  A  B"), "claude_ai_A_B");
+        // The replacement pass turns the trailing "!" into an underscore right
+        // at the end of the string; trim_matches('_') is what cuts it back off.
+        assert_eq!(normalized("claude.ai Drive!"), "claude_ai_Drive");
     }
 
     #[test]
@@ -298,6 +301,23 @@ mod tests {
         let mut light = server("acme", "Claude Code");
         light.usage = Some(McpUsage { calls: MIN_CALLS * 2, result_bytes: HEAVY_RESULT_BYTES - 1 });
         assert!(opportunities(&[light]).is_empty(), "enough calls but too little data is still not a finding");
+    }
+
+    #[test]
+    fn the_thresholds_are_inclusive() {
+        let mut at_both_thresholds = server("acme", "Claude Code");
+        at_both_thresholds.usage = Some(McpUsage { calls: MIN_CALLS, result_bytes: HEAVY_RESULT_BYTES });
+        let found = opportunities(&[at_both_thresholds]);
+        assert_eq!(found.len(), 1, "exactly MIN_CALLS calls and exactly HEAVY_RESULT_BYTES bytes must already qualify");
+        assert!(found[0].detail.contains("acme"), "{}", found[0].detail);
+
+        let mut one_call_short = server("acme", "Claude Code");
+        one_call_short.usage = Some(McpUsage { calls: MIN_CALLS - 1, result_bytes: HEAVY_RESULT_BYTES * 4 });
+        assert!(opportunities(&[one_call_short]).is_empty(), "one call under MIN_CALLS, however heavy, must not qualify");
+
+        let mut one_byte_short = server("acme", "Claude Code");
+        one_byte_short.usage = Some(McpUsage { calls: MIN_CALLS * 4, result_bytes: HEAVY_RESULT_BYTES - 1 });
+        assert!(opportunities(&[one_byte_short]).is_empty(), "one byte under HEAVY_RESULT_BYTES, however called, must not qualify");
     }
 
     #[test]
