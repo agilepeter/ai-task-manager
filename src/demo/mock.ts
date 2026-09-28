@@ -12,6 +12,9 @@
 import fixture from "../demo-fixture.json";
 import { buildDuplicateProcessesRow, buildUsageRows } from "./synthetic";
 
+// Set by the build from package.json (vite.config.ts), never typed in here.
+declare const __APP_VERSION__: string;
+
 type Args = Record<string, any>;
 const HOUR = 3_600_000;
 const now = () => Date.now();
@@ -30,7 +33,7 @@ const config: Args = {
   spendTab: "today", spendMetric: "cost", showUsed: false, resetExact: false, timeFormat: "auto",
   layout: null, appearance: "dark", density: "compact", minimal: false, glassEffects: true, shortcut: "",
   locale: "en", showTotalSpend: true, reduceAnimations: false, welcomeDismissed: true,
-  lastSeenVersion: "0.1.0",
+  lastSeenVersion: __APP_VERSION__,
 };
 
 function metric(label: string, used: number, resetInHours: number, periodHours: number, detail: string | null = null) {
@@ -361,7 +364,7 @@ export function handle(cmd: string, args: Args = {}): unknown {
     case "get_autostart": return false;
     case "check_update": return null;
     case "system_ui_locale": return "en";
-    case "plugin:app|version": return "0.1.0";
+    case "plugin:app|version": return __APP_VERSION__;
     case "plugin:event|listen": return 0;
     case "plugin:event|unlisten": return null;
     default:

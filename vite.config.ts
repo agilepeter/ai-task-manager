@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { appVersion } from "./scripts/app-version.mjs";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -10,8 +11,10 @@ export default defineConfig(async ({ mode }) => ({
   ...(mode === "demo"
     ? { base: "./", build: { outDir: "dist-demo", target: "es2022", rollupOptions: { input: "demo.html" } } }
     : {}),
-  // Build stamp for the footer, e.g. "0707.1432" (MMDD.HHmm).
+  // Build stamp for the footer, e.g. "0707.1432" (MMDD.HHmm), and the version
+  // for the browser demo, which has no app behind it to ask.
   define: {
+    __APP_VERSION__: JSON.stringify(appVersion()),
     __BUILD_STAMP__: JSON.stringify(
       new Date()
         .toISOString()
