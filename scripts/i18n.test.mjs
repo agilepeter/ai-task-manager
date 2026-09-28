@@ -370,6 +370,26 @@ test("no value is empty or whitespace-only", () => {
   assert.deepEqual(violations, []);
 });
 
+// The Agents view (src/agents.ts) and its Inventory door row/keys are new
+// enough that every string under these three prefixes should read cleanly in
+// every locale -- unlike the older keys elsewhere in this file, many of
+// which use an em dash or arrow on purpose and are deliberately left alone.
+// Catches the ru.json regression fixed by hand in inventory.agents.tip
+// (an em dash where English just uses a comma) and guards the same mistake
+// in any locale, present or future.
+const NO_DASH_PREFIXES = ["agents.", "inventory.agents.", "changes."];
+const DASH_OR_ARROW = /—|–|→|←|⇒|⇐|➔|➜|▶|►| -- /;
+test("no em dash, en dash, arrow glyph or \" -- \" in any agents./inventory.agents./changes. string, in any locale", () => {
+  const violations = [];
+  for (const [locale, dict] of Object.entries(dicts)) {
+    for (const [key, value] of Object.entries(dict)) {
+      if (!NO_DASH_PREFIXES.some((p) => key.startsWith(p))) continue;
+      if (typeof value === "string" && DASH_OR_ARROW.test(value)) violations.push(`${locale}.${key}: ${JSON.stringify(value)}`);
+    }
+  }
+  assert.deepEqual(violations, [], `dash/arrow found: ${violations.join("; ")}`);
+});
+
 // The Agents view's stats row (src/agents.ts) shows "Your agents"/"Running
 // now" as bare labels beside a number; the door row's summary line
 // (src/inventory.ts's agentsDoorLine()) bakes the same two words into its own
