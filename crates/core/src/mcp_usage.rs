@@ -43,19 +43,24 @@ pub(crate) const FINDING_IDS: &[&str] = &["mcp-context-heavy"];
 /// corrupt or hostile and is refused rather than displayed.
 const MAX_SERVER_KEY: usize = 64;
 
-/// The server named inside an MCP tool's own name: Claude Code calls a tool
-/// `mcp__<server>__<tool>`, so `"mcp__a_b__tool"` names server `"a_b"`. The
-/// split is on the LAST `__` rather than the first: `normalized` below can
-/// turn several bad characters in a row into a run of underscores inside
-/// the server part itself, and only the last `__` is guaranteed to be the
-/// real separator Claude Code inserted. `None` for anything not shaped like
-/// an MCP tool call at all, for a name with no tool part, and for a server
+/// The server named inside an MCP tool's own name: Claude Code builds a
+/// tool's name as `"mcp__" + normalized(server) + "__" + tool`, and reads it
+/// back by splitting on the FIRST `__` after the `mcp__` prefix -- server is
+/// everything before it, tool is everything after (including any further
+/// `__` runs the tool name itself carries). `"mcp__my_server__get__thing"`
+/// is server `"my_server"`, tool `"get__thing"`; `"mcp__a__b__c"` is server
+/// `"a"`. The one case this cannot get right: a configured server whose own
+/// `normalized(name)` itself contains `__` reads identically to a shorter
+/// server name followed by a tool part, and nothing in the tool name says
+/// which one Claude Code meant -- `attach` below refuses a figure to any
+/// such server rather than guess. `None` for anything not shaped like an
+/// MCP tool call at all, for a name with no tool part, and for a server
 /// part that is empty, longer than `MAX_SERVER_KEY`, or holds a character
 /// `normalized` would never have produced -- a hostile or corrupted log
 /// line must not mint a server name this app goes on to display or persist.
 pub fn server_of(tool_name: &str) -> Option<String> {
     let rest = tool_name.strip_prefix("mcp__")?;
-    let (server, tool) = rest.rsplit_once("__")?;
+    let (server, tool) = rest.split_once("__")?;
     if server.is_empty() || tool.is_empty() || server.len() > MAX_SERVER_KEY {
         return None;
     }
@@ -68,22 +73,48 @@ pub fn server_of(tool_name: &str) -> Option<String> {
 /// The form Claude Code gives a configured server name inside a tool name:
 /// every character outside `[A-Za-z0-9_-]` becomes `_`. Lossy on purpose --
 /// this is only ever used to match a configured name against a log's own
-/// key, never to recover the original spelling from one.
+/// key, never to recover the original spelling from one. Claude Code's own
+/// connectors are named `"claude.ai <name>"` (Google Drive, Gmail, and so
+/// on) and get one further step: once a name that started with
+/// `"claude.ai "` has gone through the same character replacement, every
+/// run of consecutive `_` collapses to a single `_`, and any `_` that
+/// collapsing leaves at either end is trimmed off.
 pub fn normalized(config_name: &str) -> String {
-    config_name
+    let replaced: String = config_name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
-        .collect()
+        .collect();
+    if !config_name.starts_with("claude.ai ") {
+        return replaced;
+    }
+    let mut collapsed = String::with_capacity(replaced.len());
+    let mut prev_underscore = false;
+    for c in replaced.chars() {
+        if c == '_' {
+            if prev_underscore {
+                continue;
+            }
+            prev_underscore = true;
+        } else {
+            prev_underscore = false;
+        }
+        collapsed.push(c);
+    }
+    collapsed.trim_matches('_').to_string()
 }
 
 /// Stamps each Claude Code server with its 30-day figures, matched by
 /// `normalized(name)` against the log's own keys. Two configured servers
 /// that normalize to the same string cannot be told apart in the logs, so
 /// neither gets a figure -- showing either one's number on both would be a
-/// guess dressed up as a fact. A server the logs know about that nothing
-/// here configures anymore is simply left alone: it is not this app's to
-/// report on. Every other client is untouched -- this figure is measured
-/// for Claude Code only.
+/// guess dressed up as a fact. Same refusal for a server whose own
+/// normalized name contains `__`: `server_of` splits a tool name at the
+/// FIRST `__` after the `mcp__` prefix, so such a server name reads
+/// identically to a shorter server name plus a tool part, and there is no
+/// way to tell which one a log line meant. A server the logs know about
+/// that nothing here configures anymore is simply left alone: it is not
+/// this app's to report on. Every other client is untouched -- this figure
+/// is measured for Claude Code only.
 pub fn attach(servers: &mut [McpServer], by_server: &HashMap<String, McpUsage>) {
     let mut counts: HashMap<String, usize> = HashMap::new();
     for s in servers.iter().filter(|s| s.client == "Claude Code") {
@@ -94,6 +125,9 @@ pub fn attach(servers: &mut [McpServer], by_server: &HashMap<String, McpUsage>) 
             continue;
         }
         let key = normalized(&s.name);
+        if key.contains("__") {
+            continue; // indistinguishable from a shorter server plus a tool part
+        }
         if counts.get(&key).copied().unwrap_or(0) != 1 {
             continue; // zero or ambiguous -- either way, no figure
         }
@@ -201,6 +235,30 @@ mod tests {
         assert_eq!(normalized("my server!!"), "my_server__");
         assert_eq!(normalized("acme-search_1"), "acme-search_1");
         assert_eq!(normalized("a/b\\c"), "a_b_c");
+    }
+
+    #[test]
+    fn normalized_collapses_underscores_for_a_claude_ai_connector() {
+        assert_eq!(normalized("claude.ai Google Drive"), "claude_ai_Google_Drive");
+        assert_eq!(normalized("claude.ai  A  B"), "claude_ai_A_B");
+    }
+
+    #[test]
+    fn server_of_splits_at_the_first_separator() {
+        assert_eq!(server_of("mcp__my_server__get__thing"), Some("my_server".to_string()));
+        assert_eq!(server_of("mcp__a__b__c"), Some("a".to_string()));
+    }
+
+    #[test]
+    fn a_server_whose_name_holds_the_separator_gets_no_figure() {
+        let mut servers = vec![server("my__server", "Claude Code")];
+        let mut by_server = HashMap::new();
+        by_server.insert("my__server".to_string(), McpUsage { calls: 40, result_bytes: 1000 });
+        attach(&mut servers, &by_server);
+        assert_eq!(
+            servers[0].usage, None,
+            "a normalized server name that itself holds \"__\" can't be told apart from a shorter server plus a tool part"
+        );
     }
 
     #[test]

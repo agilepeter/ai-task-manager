@@ -328,7 +328,7 @@ function pinPanel(s: McpServer): string {
     </div>`;
 }
 
-function renderMcp(list: McpServer[]): string {
+export function renderMcp(list: McpServer[]): string {
   const rows = list
     .map((s) => {
       const what = s.package ?? s.target;
@@ -372,6 +372,10 @@ function renderMcp(list: McpServer[]): string {
       </select>
       <button class="lg-link" data-link="https://staas.fund/mcp/">${esc(T("trust.aboutIndex"))}</button>
     </label><p class="dt-caption inv-trust-note">${esc(status)}</p>`;
+  // The coverage note only means something once a server actually has a
+  // figure to show it about -- with none, it would be a caveat about a
+  // measurement nobody on screen carries.
+  const hasUsage = list.some((s) => s.usage);
   const lead =
     trustLead +
     (apps.length > 1
@@ -382,7 +386,7 @@ function renderMcp(list: McpServer[]): string {
           </select>
         </label>`
       : "") +
-    `<p class="dt-caption inv-mcp-usage-note">${esc(T("mcp.usageNote"))}</p>`;
+    (hasUsage ? `<p class="dt-caption inv-mcp-usage-note">${esc(T("mcp.usageNote"))}</p>` : "");
   return section("mcp", T("section.mcp"), list.length, rows, T("empty.mcp"), { lead });
 }
 

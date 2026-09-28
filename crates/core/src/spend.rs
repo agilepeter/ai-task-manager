@@ -450,7 +450,10 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 /// waiting for their result), which the MCP context-cost finding needs. A
 /// cache written under 11 has neither; without the bump it would go on
 /// reporting zero context cost for every server forever instead of taking
-/// the one rescan that back-fills it.
+/// the one rescan that back-fills it. `ClaudeFileState::counted_mcp` (ids
+/// already counted, kept past their result arriving) rides along under the
+/// same version 12, since nothing has shipped at 12 yet -- no bump needed
+/// for a field this cache format never let out the door.
 const PERSIST_VERSION: u32 = 12;
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
@@ -1021,9 +1024,22 @@ const MAX_DEDUP_IDS: usize = 8192;
 /// (or a hostile log) from growing the checkpoint without bound.
 const MAX_PENDING_MCP: usize = 256;
 
+/// Ids kept in `counted_mcp` so a call already booked stays "already
+/// counted" even long after its result has landed and `pending_mcp` has
+/// forgotten it. Same bound and eviction policy (oldest dropped first) as
+/// `pending_mcp`, and deliberately its own queue rather than folded into
+/// that one: an id leaves `pending_mcp` the moment its result resolves, but
+/// has to go on sitting here so a later replay of the same call line is
+/// still recognized.
+const MAX_COUNTED_MCP: usize = MAX_PENDING_MCP;
+
 fn clip_claude_ckpt(st: Option<ClaudeFileState>) -> Option<ClaudeFileState> {
     let st = st?;
-    if st.seen.len() > MAX_DEDUP_IDS || st.seen_mids.len() > MAX_DEDUP_IDS || st.pending_mcp.len() > MAX_PENDING_MCP {
+    if st.seen.len() > MAX_DEDUP_IDS
+        || st.seen_mids.len() > MAX_DEDUP_IDS
+        || st.pending_mcp.len() > MAX_PENDING_MCP
+        || st.counted_mcp.len() > MAX_COUNTED_MCP
+    {
         None
     } else {
         Some(st)
@@ -1739,6 +1755,13 @@ struct ClaudeFileState {
     /// still-open calls need.
     #[serde(default)]
     pending_mcp: VecDeque<(String, String)>,
+    /// Tool_use ids already counted as a call, kept around even after
+    /// `pending_mcp` has forgotten them on their result arriving -- see
+    /// `MAX_COUNTED_MCP`. Persisted the same way `pending_mcp` is, so a tail
+    /// resume still recognizes a replayed line whose call it already booked
+    /// long enough ago that the matching result already landed too.
+    #[serde(default)]
+    counted_mcp: VecDeque<String>,
 }
 
 /// Parse one Claude Code session-log line into spend events. Persisted
@@ -1886,17 +1909,34 @@ fn mcp_key_for(data: &FileData, server: String) -> String {
     }
 }
 
-/// Counts each `tool_use` block addressed to an MCP server, once per id.
-/// Runs on every assistant line the same way `claude_area` does -- ahead of
-/// the message/request dedup below -- because a tool_use block earns its
-/// count even on a line the cost accounting will go on to treat as a
-/// duplicate. The tool_use id itself is the de-dup key here, not
-/// `{message.id}:{requestId}`: a block already remembered in `pending_mcp`
-/// is a replay of a call already counted, so it is skipped rather than
-/// counted again. The id is then kept in `pending_mcp` so the matching
-/// `tool_result` -- which arrives later, on a "user" line -- knows which
-/// server to charge its bytes to.
+/// Counts each `tool_use` block addressed to an MCP server, once per id --
+/// once ever, not just once while its result is still outstanding. Runs on
+/// every assistant line the same way `claude_area` does -- ahead of the
+/// message/request dedup below -- because a tool_use block earns its count
+/// even on a line the cost accounting will go on to treat as a duplicate.
+/// The tool_use id is the de-dup key, checked against two places: still
+/// waiting on its result (`pending_mcp`) or already resolved
+/// (`counted_mcp`). Either one means this id was already counted, so a
+/// replay -- a resumed session tailing the same line again, a rescan --
+/// adds nothing. A first sighting is recorded in both: `pending_mcp` so the
+/// matching `tool_result` -- which arrives later, on a "user" line -- knows
+/// which server to charge its bytes to, and `counted_mcp` so the call still
+/// reads as "already counted" long after its result has come and gone and
+/// `pending_mcp` has forgotten it.
+///
+/// Also skips a line whose `isSidechain` flag does not match this file's
+/// own nature (see `sidechain_parent`): Claude Code mirrors a subagent's
+/// tool call into the parent session's own file, flagged `isSidechain: true`
+/// the same as in the subagent's own file, so without this check the same
+/// call would be counted once in each of the two files that make up one
+/// session. A subagent's own file (`st.parent_session` is `Some`) only ever
+/// counts a line that IS flagged that way; a parent session file
+/// (`st.parent_session` is `None`) only ever counts a line that is NOT.
 fn claude_mcp_calls(st: &mut ClaudeFileState, v: &Value, ts: DateTime<Utc>, data: &mut FileData) {
+    let sidechain = v.get("isSidechain").and_then(Value::as_bool).unwrap_or(false);
+    if sidechain != st.parent_session.is_some() {
+        return;
+    }
     let Some(blocks) = v.pointer("/message/content").and_then(Value::as_array) else { return };
     for block in blocks {
         if block.get("type").and_then(Value::as_str) != Some("tool_use") {
@@ -1908,8 +1948,10 @@ fn claude_mcp_calls(st: &mut ClaudeFileState, v: &Value, ts: DateTime<Utc>, data
             continue;
         };
         let Some(server) = crate::mcp_usage::server_of(name) else { continue };
-        if st.pending_mcp.iter().any(|(pid, _)| pid == id) {
-            continue; // a replay of a call already counted
+        let already_counted =
+            st.pending_mcp.iter().any(|(pid, _)| pid == id) || st.counted_mcp.iter().any(|cid| cid == id);
+        if already_counted {
+            continue; // a replay of a call already counted, whether still open or long since resolved
         }
         let key = mcp_key_for(data, server);
         let entry = data.mcp.entry((day_of_utc(ts), key.clone())).or_insert((0, 0));
@@ -1918,6 +1960,10 @@ fn claude_mcp_calls(st: &mut ClaudeFileState, v: &Value, ts: DateTime<Utc>, data
             st.pending_mcp.pop_front();
         }
         st.pending_mcp.push_back((id.to_string(), key));
+        if st.counted_mcp.len() >= MAX_COUNTED_MCP {
+            st.counted_mcp.pop_front();
+        }
+        st.counted_mcp.push_back(id.to_string());
     }
 }
 
@@ -1940,12 +1986,34 @@ fn mcp_result_bytes(content: &Value) -> u64 {
     }
 }
 
+/// Test-only instrument for the fast bail in front of `claude_mcp_result`'s
+/// one call site (`claude_line` only calls it when `pending_mcp` is
+/// non-empty): every time this function actually runs, it means that guard
+/// let a line through, so a test can watch this to prove a JSON parse did
+/// or did not happen without changing the function's real behavior at all.
+/// Thread-local rather than a shared global, so two tests running
+/// concurrently on their own threads -- the normal `cargo test` default --
+/// never see each other's counts. Does not exist in a release build.
+#[cfg(test)]
+thread_local! {
+    static MCP_RESULT_PARSE_COUNT: std::cell::Cell<u64> = std::cell::Cell::new(0);
+}
+
 /// The other half of `claude_mcp_calls`: a "user" line's `tool_result`
 /// block, matched back by `tool_use_id` to the server its call was booked
 /// to and charged that result's byte size. An id with nothing pending (an
-/// unknown call, or one already resolved) is left alone.
+/// unknown call, or one already resolved) is left alone. Same
+/// `isSidechain`-versus-file-nature check as `claude_mcp_calls`, and for the
+/// same reason: a result Claude Code mirrors into the parent session's own
+/// file, alongside a mirrored call, must add nothing there either.
 fn claude_mcp_result(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
+    #[cfg(test)]
+    MCP_RESULT_PARSE_COUNT.with(|c| c.set(c.get() + 1));
     let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let sidechain = v.get("isSidechain").and_then(Value::as_bool).unwrap_or(false);
+    if sidechain != st.parent_session.is_some() {
+        return;
+    }
     let Some(blocks) = v.pointer("/message/content").and_then(Value::as_array) else { return };
     let Some(ts) = parse_ts(v.get("timestamp")) else { return };
     for block in blocks {
@@ -5089,6 +5157,7 @@ mod tests {
                     last_ms: Some(1_790_000_900_000),
                     parent_session: None, // #[serde(skip)]: never persisted, recomputed from the path instead
                     pending_mcp: [("toolu_1".to_string(), "acme".to_string())].into_iter().collect(),
+                    counted_mcp: ["toolu_0".to_string(), "toolu_1".to_string()].into_iter().collect(),
                 }),
                 pi_seen: vec!["pi-msg-1".into()],
                 parent_session: Some("11111111-1111-1111-1111-111111111111".into()),
@@ -5126,6 +5195,7 @@ mod tests {
         assert_eq!((&sa.root, &sa.area), (&sb.root, &sb.area));
         assert_eq!((sa.first_ms, sa.last_ms), (sb.first_ms, sb.last_ms));
         assert_eq!(sa.pending_mcp, sb.pending_mcp, "a still-open call must survive to match its result later");
+        assert_eq!(sa.counted_mcp, sb.counted_mcp, "an id already counted must stay recognized after a restart");
     }
 
     /// `PersistEntry::mcp` and `ClaudeFileState::pending_mcp` specifically --
@@ -6905,6 +6975,91 @@ mod tests {
         let total_calls: u64 = data.mcp.values().map(|(calls, _)| *calls).sum();
         assert_eq!(total_calls, 1, "the same tool_use id must not be counted twice");
         assert_eq!(st.pending_mcp.len(), 1, "one id, remembered once");
+    }
+
+    #[test]
+    fn a_call_replayed_after_its_result_is_still_counted_once() {
+        let call = mcp_tool_use_line("2026-07-10T10:00:00Z", "msg_1", "req_1", "toolu_1", "mcp__acme__search");
+        let result = mcp_tool_result_line("2026-07-10T10:00:01Z", "toolu_1", json!("0123456789"));
+        let mut st = ClaudeFileState::default();
+        let mut data = FileData::default();
+        claude_line(&mut st, &call, &mut data);
+        claude_line(&mut st, &result, &mut data);
+        assert!(st.pending_mcp.is_empty(), "the result already resolved and removed the pending id");
+        // A tail resume (or any other replay) sees the exact same call line
+        // again, long after its result already landed.
+        claude_line(&mut st, &call, &mut data);
+        let total_calls: u64 = data.mcp.values().map(|(calls, _)| *calls).sum();
+        let total_bytes: u64 = data.mcp.values().map(|(_, bytes)| *bytes).sum();
+        assert_eq!(total_calls, 1, "a call already counted once must stay counted once, even after its result came and left pending_mcp");
+        assert_eq!(total_bytes, 10, "the result's bytes must still be counted exactly once");
+    }
+
+    #[test]
+    fn a_call_logged_in_a_session_and_its_sidechain_is_counted_once() {
+        // A subagent transcript's own lines carry `isSidechain: true`; Claude
+        // Code also mirrors that same tool call into the parent session's own
+        // file, where the mirrored copy carries the very same flag even
+        // though a parent file's own, non-mirrored lines never do. The call
+        // is real exactly once -- in whichever file the flag actually
+        // matches the file's own nature -- so the mirrored copy sitting in
+        // the parent file must add nothing.
+        let call_id = "toolu_shared";
+        let mirrored_in_parent = json!({"type": "assistant", "timestamp": "2026-07-10T10:00:00Z", "requestId": "req_1",
+            "isSidechain": true,
+            "message": {"id": "msg_1", "model": "claude-sonnet-5", "usage": {"input_tokens": 1.0, "output_tokens": 1.0},
+                "content": [{"type": "tool_use", "id": call_id, "name": "mcp__acme__search"}]}})
+        .to_string();
+        let mut parent_st = ClaudeFileState::default(); // parent_session: None -- a top-level session file
+        let mut parent_data = FileData::default();
+        claude_line(&mut parent_st, &mirrored_in_parent, &mut parent_data);
+
+        let real_call = json!({"type": "assistant", "timestamp": "2026-07-10T10:00:00Z", "requestId": "req_1",
+            "isSidechain": true,
+            "message": {"id": "msg_1", "model": "claude-sonnet-5", "usage": {"input_tokens": 1.0, "output_tokens": 1.0},
+                "content": [{"type": "tool_use", "id": call_id, "name": "mcp__acme__search"}]}})
+        .to_string();
+        let real_result = mcp_tool_result_line("2026-07-10T10:00:01Z", call_id, json!("payload"));
+        let mut sub_st = ClaudeFileState { parent_session: Some("parent-uuid".to_string()), ..Default::default() };
+        let mut sub_data = FileData::default();
+        claude_line(&mut sub_st, &real_call, &mut sub_data);
+        claude_line(&mut sub_st, &real_result, &mut sub_data);
+
+        let parent_calls: u64 = parent_data.mcp.values().map(|(c, _)| *c).sum();
+        let sub_calls: u64 = sub_data.mcp.values().map(|(c, _)| *c).sum();
+        assert_eq!(parent_calls, 0, "a call mirrored into the parent file, wrongly flagged for that file's own nature, must count nothing");
+        assert_eq!(sub_calls, 1, "the real call, correctly flagged in its own subagents file, is the one that counts");
+
+        // `mcp_usage_30d` sums every cached file's data with no further
+        // dedup -- across the two files one session produced, the call must
+        // land once in that sum, not twice.
+        assert_eq!(parent_calls + sub_calls, 1);
+    }
+
+    #[test]
+    fn a_result_line_is_not_parsed_while_nothing_is_pending() {
+        MCP_RESULT_PARSE_COUNT.with(|c| c.set(0));
+        let mut st = ClaudeFileState::default();
+        let mut data = FileData::default();
+        for i in 0..5 {
+            let line = mcp_tool_result_line("2026-07-10T10:00:00Z", &format!("toolu_{i}"), json!("x"));
+            claude_line(&mut st, &line, &mut data);
+        }
+        assert_eq!(
+            MCP_RESULT_PARSE_COUNT.with(|c| c.get()),
+            0,
+            "nothing was pending -- the result path must never even parse the line's JSON"
+        );
+
+        // Now something is pending: the same shape of line must actually reach the parser.
+        let call = mcp_tool_use_line("2026-07-10T10:00:00Z", "msg_1", "req_1", "toolu_x", "mcp__acme__search");
+        claude_line(&mut st, &call, &mut data);
+        let result = mcp_tool_result_line("2026-07-10T10:00:01Z", "toolu_x", json!("y"));
+        claude_line(&mut st, &result, &mut data);
+        assert!(
+            MCP_RESULT_PARSE_COUNT.with(|c| c.get()) > 0,
+            "with something pending, the result path must parse the line"
+        );
     }
 
     #[test]
