@@ -889,6 +889,7 @@
   "notify.longSession.title": "長時間実行中のセッション",
   "notify.longSession.body": "現在も使用しているセッションが {days} 日間開いたままで、30 日間で ${cost} かかっています。新しい作業には新しいセッションのほうが低コストで、操作もしやすくなります。",
   "notify.longSession.others.other": "他にも {count} 件のセッションが同じ状態です。",
+  "error.setupHistory.newer": "このアプリの新しいバージョンが書き込んだもので、そのまま残されます",
   "error.pin.alreadyPinned": "すでに固定されています",
   "error.pin.invalidJson": "設定ファイルが有効な JSON ではないため、変更していません",
   "error.pin.notFound": "そのパッケージ指定はこのファイルにもう存在しません",

@@ -190,7 +190,21 @@ async fn get_inventory() -> Result<inventory::Inventory, String> {
 /// this command, cached or not, only ever reads it.
 #[tauri::command]
 async fn get_setup_changes() -> Result<changes::SetupChanges, String> {
-    tauri::async_runtime::spawn_blocking(|| {
+    let cfg = config_with_defaults(load_config());
+    tauri::async_runtime::spawn_blocking(move || {
+        // Said before anything cached is returned: with such a file there is
+        // no history to show, and "history starts today" would be untrue.
+        if changes::history_is_from_a_newer_app(&providers::config_dir()) {
+            return Err(user_error(&cfg, &changes::newer_history_msg()));
+        }
+        Ok(get_setup_changes_now())
+    })
+    .await
+    .map_err(|e| format!("setup changes: {e}"))?
+}
+
+fn get_setup_changes_now() -> changes::SetupChanges {
+    {
         if let Ok(slot) = SETUP_CHANGES_CACHE.lock() {
             if let Some((captured, sc)) = slot.as_ref() {
                 if cache_is_fresh(*captured, AGENT_SPEND_CACHE_TTL, std::time::Instant::now()) {
@@ -201,9 +215,7 @@ async fn get_setup_changes() -> Result<changes::SetupChanges, String> {
         let inv = inventory::scan();
         let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
         changes::changes_at(&providers::config_dir(), &inv, &today)
-    })
-    .await
-    .map_err(|e| format!("setup changes: {e}"))
+    }
 }
 
 /// Renders a core `Msg` error in the resolved locale before it crosses the
@@ -456,6 +468,7 @@ static AGENT_SPEND_CACHE: Mutex<Option<(std::time::Instant, Vec<spend::AgentSpen
 /// calls do not each pay for an `inventory::scan()` plus a `changes::changes_at`
 /// a few milliseconds apart; written only here, never by `get_setup_changes`
 /// itself, so a caller of that command alone always sees a real comparison.
+static SNAPSHOT_FAILURE_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static SETUP_CHANGES_CACHE: Mutex<Option<(std::time::Instant, changes::SetupChanges)>> = Mutex::new(None);
 
 /// Whether a rows snapshot captured at `captured` is still within `ttl` of
@@ -2091,8 +2104,18 @@ fn spawn_background_refresh(app: &tauri::AppHandle) {
                 })
                 .await
                 {
-                    Ok(Err(e)) => eprintln!("[aitm] setup snapshot: could not write inventory_snapshots.json: {e}"),
-                    Err(e) => eprintln!("[aitm] setup snapshot: task did not complete: {e}"),
+                    // Said once a launch: what stops one write stops the
+                    // next, and this loop comes round every few minutes.
+                    Ok(Err(e)) => {
+                        if !SNAPSHOT_FAILURE_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                            eprintln!("[aitm] setup snapshot: could not write inventory_snapshots.json: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        if !SNAPSHOT_FAILURE_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                            eprintln!("[aitm] setup snapshot: task did not complete: {e}");
+                        }
+                    }
                     Ok(Ok(())) => {}
                 }
             }

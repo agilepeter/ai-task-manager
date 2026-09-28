@@ -889,6 +889,7 @@
   "notify.longSession.title": "장기 실행 중인 세션",
   "notify.longSession.body": "지금도 사용 중인 세션이 {days}일째 열려 있고 30일간 ${cost}가 들었습니다. 새 작업에는 새 세션이 더 저렴하고 다루기도 쉽습니다.",
   "notify.longSession.others.other": "다른 {count}개의 세션도 같은 상태입니다.",
+  "error.setupHistory.newer": "이 앱의 더 새로운 버전이 기록한 것이어서 그대로 둡니다",
   "error.pin.alreadyPinned": "이미 고정됨",
   "error.pin.invalidJson": "설정이 올바른 JSON이 아니어서 그대로 둠",
   "error.pin.notFound": "그 패키지 지정이 더 이상 이 파일에 없음",

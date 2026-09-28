@@ -889,6 +889,7 @@
   "notify.longSession.title": "有一个长时间运行的会话",
   "notify.longSession.body": "你仍在使用的一个会话已经开了 {days} 天，30 天内花费了 ${cost}。对于新的工作，开一个新会话更省钱也更容易掌控。",
   "notify.longSession.others.other": "另有 {count} 个会话处于同样的状态。",
+  "error.setupHistory.newer": "它由此应用的较新版本写入，保持原样不动",
   "error.pin.alreadyPinned": "已经固定过了",
   "error.pin.invalidJson": "配置文件不是有效的 JSON；未做任何改动。",
   "error.pin.notFound": "这个包版本声明已经不在这个文件里了",

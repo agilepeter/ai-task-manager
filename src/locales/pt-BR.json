@@ -944,6 +944,7 @@
   "notify.longSession.body": "Uma sessão que você ainda está usando está aberta há {days} dias e custou ${cost} em 30 dias. Para trabalho novo, uma sessão nova é mais barata e mais fácil de conduzir.",
   "notify.longSession.others.one": "Outra sessão está no mesmo estado.",
   "notify.longSession.others.other": "Outras {count} sessões estão no mesmo estado.",
+  "error.setupHistory.newer": "ele foi gravado por uma versão mais recente deste app e fica como está",
   "error.pin.alreadyPinned": "já fixado",
   "error.pin.invalidJson": "a configuração não é um JSON válido; nada será alterado",
   "error.pin.notFound": "essa especificação de pacote não está mais neste arquivo",

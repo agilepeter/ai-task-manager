@@ -781,6 +781,7 @@ mod tests {
             .chain(crate::procs::ERROR_KEYS)
             .chain(crate::ledger::ERROR_KEYS)
             .chain(crate::trust::ERROR_KEYS)
+            .chain(crate::changes::ERROR_KEYS)
             .chain(EXPORT_ERROR_KEYS)
             .copied()
             .collect();
@@ -822,6 +823,7 @@ mod tests {
             .chain(crate::procs::ERROR_KEYS)
             .chain(crate::ledger::ERROR_KEYS)
             .chain(crate::trust::ERROR_KEYS)
+            .chain(crate::changes::ERROR_KEYS)
             .chain(EXPORT_ERROR_KEYS)
             .copied()
             .collect();

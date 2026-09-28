@@ -83,7 +83,9 @@ directory with upstream Pane would let the two apps overwrite each other.
   0.1.3 it makes one exception: a line holding a `tool_result` that carries
   the id of an MCP call still waiting for its answer. The result of a shell
   command or a file read carries no such id and stays closed, and so does
-  your prompt. All it takes from the line it opens is a size: for text, the
+  your prompt. (One exception, which Claude Code does not write: a line
+  whose id is spelled with an escape cannot be compared unopened, so it is
+  opened to compare it, and nothing is taken unless it matches.) All it takes from the line it opens is a size: for text, the
   bytes of the text; for anything else, such as an image, the bytes of that
   block as the log holds it. The line is parsed in memory to take that
   number and then let go. The result's content, the tool's input, the
@@ -104,7 +106,8 @@ directory with upstream Pane would let the two apps overwrite each other.
   name can carry your organization's name, and so can the name you gave a
   server, an agent or a skill: names are what this file keeps. The file
   holds the last 40 snapshots written, and a copy of it written by a newer
-  version of the app is left as it is, neither read nor replaced. It is read only to show what changed in
+  version of the app is left as it is, neither read nor replaced, and the
+  Changes section says so. It is read only to show what changed in
   Inventory's Changes section, is never sent anywhere, and is never part of
   the seat report.
 - **Folder and client names stay local.** Work areas are your directory names

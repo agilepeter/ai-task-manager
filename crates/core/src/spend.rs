@@ -1978,6 +1978,9 @@ fn claude_mcp_calls(st: &mut ClaudeFileState, v: &Value, ts: DateTime<Utc>, data
             continue;
         };
         let Some(server) = crate::mcp_usage::server_of(name) else { continue };
+        if id.is_empty() {
+            continue; // nothing a result could be matched back to
+        }
         if !st.seen.insert(mcp_seen_key(id)) {
             continue; // a replay of a call already counted, whether still open or long since resolved
         }
@@ -2052,20 +2055,36 @@ fn claude_mcp_result(st: &mut ClaudeFileState, line: &str, data: &mut FileData) 
     }
 }
 
-/// Whether the raw line holds `id` as a whole JSON string.
-fn names_id(line: &str, id: &str) -> bool {
-    line.match_indices(id).any(|(at, _)| line[..at].ends_with('"') && line[at + id.len()..].starts_with('"'))
+/// Whether the raw line, still unparsed, has a `tool_use_id` that is one of
+/// the calls waiting. One pass over the line however many calls wait, since
+/// a result can be megabytes long. Text that merely quotes such a field (a
+/// log pasted into a prompt, the output of a tool that printed one) has its
+/// quotes escaped inside the string that holds it, so the key as written
+/// here, with bare quotes, is not in it.
+///
+/// An id written with an escape in it cannot be compared unparsed. Those
+/// lines are opened, and `claude_mcp_result` compares the id properly: the
+/// cost of being wrong here is a parse, never a wrong number.
+fn answers_a_waiting_call(line: &str, waiting: &VecDeque<(String, String)>) -> bool {
+    const KEY: &str = "\"tool_use_id\"";
+    line.match_indices(KEY).any(|(at, _)| {
+        let rest = line[at + KEY.len()..].trim_start();
+        let Some(rest) = rest.strip_prefix(':') else { return false };
+        let Some(rest) = rest.trim_start().strip_prefix('"') else { return false };
+        let Some(end) = rest.find('"') else { return false };
+        let id = &rest[..end];
+        id.contains('\\') || waiting.iter().any(|(w, _)| w == id)
+    })
 }
 
 fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
     if !line.contains("\"type\":\"assistant\"") {
         // A tool_result lives on a "user" line, never an assistant one. The
-        // only such line ever opened is one that carries the id of an MCP
-        // call still waiting for its result: a prompt, or the result of a
-        // shell command or a file read, names no such id and stays closed,
-        // whatever else is waiting. An id is matched whole, quotes included,
-        // so one id that begins another cannot open a line for it.
-        if line.contains("tool_result") && st.pending_mcp.iter().any(|(id, _)| names_id(line, id)) {
+        // only such line ever opened is one that answers an MCP call still
+        // waiting for its result: a prompt, or the result of a shell command
+        // or a file read, answers no such call and stays closed, whatever
+        // else is waiting.
+        if !st.pending_mcp.is_empty() && answers_a_waiting_call(line, &st.pending_mcp) {
             claude_mcp_result(st, line, data);
         }
         return;
@@ -7215,14 +7234,65 @@ mod tests {
     #[test]
     fn a_result_for_an_unknown_id_is_ignored() {
         let call = mcp_tool_use_line("2026-07-10T10:00:00Z", "msg_1", "req_1", "toolu_1", "mcp__acme__search");
-        let stray = mcp_tool_result_line("2026-07-10T10:00:01Z", "toolu_never_called", json!("stray result"));
+        // One line answering two calls: the one that waits, and one nobody
+        // made. The line is opened for the first; the second must add nothing.
+        let both = json!({"type": "user", "timestamp": "2026-07-10T10:00:01Z", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "toolu_never_called", "content": "a stray result, thirty bytes."},
+            {"type": "tool_result", "tool_use_id": "toolu_1", "content": "0123456789"},
+        ]}})
+        .to_string();
         let mut st = ClaudeFileState::default();
         let mut data = FileData::default();
         claude_line(&mut st, &call, &mut data);
-        claude_line(&mut st, &stray, &mut data);
+        MCP_RESULT_PARSE_COUNT.with(|c| c.set(0));
+        claude_line(&mut st, &both, &mut data);
+        assert_eq!(MCP_RESULT_PARSE_COUNT.with(|c| c.get()), 1, "the line has to be opened for this to prove anything");
         let total_bytes: u64 = data.mcp.values().map(|(_, bytes)| *bytes).sum();
-        assert_eq!(total_bytes, 0, "a result for an id nobody called must add no bytes");
-        assert_eq!(st.pending_mcp.len(), 1, "the real pending call is still waiting");
+        assert_eq!(total_bytes, 10, "a result for an id nobody called must add no bytes");
+        assert!(st.pending_mcp.is_empty());
+    }
+
+    #[test]
+    fn a_call_with_no_id_never_waits() {
+        let call = mcp_tool_use_line("2026-07-10T10:00:00Z", "msg_1", "req_1", "", "mcp__acme__search");
+        let other = mcp_tool_result_line("2026-07-10T10:00:01Z", "", json!("PLANTED"));
+        let mut st = ClaudeFileState::default();
+        let mut data = FileData::default();
+        claude_line(&mut st, &call, &mut data);
+        assert!(st.pending_mcp.is_empty(), "a call that cannot be answered is not waited for");
+        MCP_RESULT_PARSE_COUNT.with(|c| c.set(0));
+        claude_line(&mut st, &other, &mut data);
+        assert_eq!(MCP_RESULT_PARSE_COUNT.with(|c| c.get()), 0);
+    }
+
+    #[test]
+    fn the_answer_is_found_however_the_line_is_spaced_or_escaped() {
+        let waiting: VecDeque<(String, String)> = [("toolu_1".to_string(), "acme".to_string())].into();
+        for (line, opened) in [
+            (r#"{"type":"tool_result","tool_use_id":"toolu_1","content":"x"}"#, true),
+            (r#"{"type": "tool_result", "tool_use_id" : "toolu_1", "content": "x"}"#, true),
+            (r#"{"type":"tool_result","tool_use_id":"toolu_12","content":"x"}"#, false),
+            (r#"{"type":"tool_result","tool_use_id":"toolu_","content":"toolu_1"}"#, false),
+            // The field quoted inside a prompt or another tool's output.
+            (r#"{"type":"user","message":{"content":"a tool_result: {\"tool_use_id\":\"toolu_1\"}"}}"#, false),
+            // An id written with an escape cannot be compared unparsed: opened, to be compared properly.
+            (r#"{"type":"tool_result","tool_use_id":"toolu\u005f1","content":"x"}"#, true),
+            (r#"{"type":"tool_result","tool_use_id":17}"#, false),
+            (r#"{"type":"tool_result","tool_use_id":"toolu_1"#, false),
+        ] {
+            assert_eq!(answers_a_waiting_call(line, &waiting), opened, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_very_long_result_of_another_tool_is_passed_over_quickly() {
+        let waiting: VecDeque<(String, String)> = (0..MAX_PENDING_MCP).map(|i| (format!("toolu_{i:04}"), "acme".to_string())).collect();
+        let line = mcp_tool_result_line("2026-07-10T10:00:01Z", "toolu_other", json!("x".repeat(2 * 1024 * 1024)));
+        let started = std::time::Instant::now();
+        assert!(!answers_a_waiting_call(&line, &waiting));
+        // A pass per waiting call took about a second here; one pass takes
+        // a few milliseconds. The bound is loose so a slow machine passes.
+        assert!(started.elapsed() < std::time::Duration::from_millis(250), "{:?}", started.elapsed());
     }
 
     #[test]

@@ -103,13 +103,32 @@ pub(crate) const FINDING_IDS: &[&str] = &["guardrail-removed", "setup-changed"];
 /// (the history in it belongs to the copy that can read it).
 const STORE_VERSION: u32 = 1;
 
-/// What the file says its version is, when it says one at all.
-fn stated_version(raw: &str) -> Option<u64> {
-    serde_json::from_str::<serde_json::Value>(raw).ok()?.get("version")?.as_u64()
+/// A file that states a version this one does not know. Anything stated
+/// that is not a whole number up to `STORE_VERSION` counts: this version
+/// only ever writes such a number, so a larger one, a fraction or a word is
+/// somebody else's. A file that states nothing, or is not JSON at all, is
+/// not a newer app's: it reads as no history and is written over.
+fn from_a_newer_app(raw: &str) -> bool {
+    let Ok(body) = serde_json::from_str::<serde_json::Value>(raw) else { return false };
+    match body.get("version") {
+        None | Some(serde_json::Value::Null) => false,
+        Some(stated) => !stated.as_u64().is_some_and(|v| v <= u64::from(STORE_VERSION)),
+    }
 }
 
-fn from_a_newer_app(raw: &str) -> bool {
-    stated_version(raw).is_some_and(|v| v > u64::from(STORE_VERSION))
+#[cfg(test)]
+pub(crate) const ERROR_KEYS: &[&str] = &["error.setupHistory.newer"];
+
+/// What to tell the user when the history on file is a newer version's.
+pub fn newer_history_msg() -> crate::i18n::Msg {
+    crate::i18n::Msg::new("error.setupHistory.newer")
+}
+
+/// Whether the history on file belongs to a newer version of the app, so
+/// that "no history" can be told apart from "history this version leaves
+/// alone" by whoever shows it.
+pub fn history_is_from_a_newer_app(dir: &Path) -> bool {
+    std::fs::read_to_string(store_path(dir)).is_ok_and(|raw| from_a_newer_app(&raw))
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -627,6 +646,26 @@ mod tests {
         assert!(load_from(&dir).is_empty(), "a newer shape is not guessed at");
         assert!(record_at(&dir, empty_snapshot("2026-09-27")).is_err(), "and its history is not replaced");
         assert_eq!(std::fs::read_to_string(store_path(&dir)).unwrap(), theirs, "the file is left byte for byte");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn any_version_this_one_never_writes_is_somebody_elses() {
+        for stated in ["2", "99999999999999999999999", "1.5", "-1", "\"2\"", "[1]"] {
+            let dir = tmp_dir("odd");
+            let theirs = history_stating(Some(STORE_VERSION)).replacen(&format!("\"version\":{STORE_VERSION}"), &format!("\"version\":{stated}"), 1);
+            assert!(theirs.contains(stated), "the fixture has to state it: {theirs}");
+            std::fs::write(store_path(&dir), &theirs).unwrap();
+            assert!(history_is_from_a_newer_app(&dir), "{stated}");
+            assert!(load_from(&dir).is_empty(), "{stated}");
+            assert!(record_at(&dir, empty_snapshot("2026-09-27")).is_err(), "{stated}");
+            assert_eq!(std::fs::read_to_string(store_path(&dir)).unwrap(), theirs, "{stated}");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        let dir = tmp_dir("none");
+        assert!(!history_is_from_a_newer_app(&dir), "no file is nobody's");
+        std::fs::write(store_path(&dir), "not json").unwrap();
+        assert!(!history_is_from_a_newer_app(&dir), "garbage is nobody's");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

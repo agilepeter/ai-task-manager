@@ -999,6 +999,7 @@
   "notify.longSession.others.one": "Ещё {count} сессия в таком же состоянии.",
   "notify.longSession.others.few": "Ещё {count} сессии в таком же состоянии.",
   "notify.longSession.others.many": "Ещё {count} сессий в таком же состоянии.",
+  "error.setupHistory.newer": "она записана более новой версией этого приложения и оставлена как есть",
   "error.pin.alreadyPinned": "уже закреплено",
   "error.pin.invalidJson": "конфигурация не является допустимым JSON; файл не изменён.",
   "error.pin.notFound": "этой записи пакета больше нет в файле",
