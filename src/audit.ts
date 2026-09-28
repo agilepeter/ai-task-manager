@@ -29,8 +29,10 @@ interface AuditReport {
 export interface AuditHost {
   seen(): boolean;
   markSeen(): void;
-  /** Where a check sends the user: a tab of the main view. */
-  goTo(view: "inventory" | "ledger" | "usage"): void;
+  /** Where a check sends the user: a tab of the main view, or the Agents
+   *  view -- a slide-in panel, not a tab, but reached through this same
+   *  goTo() so a check never needs to know the difference. */
+  goTo(view: "inventory" | "ledger" | "usage" | "agents"): void;
 }
 
 let host: AuditHost | null = null;
@@ -38,11 +40,15 @@ let report: AuditReport | null = null;
 let note = "";
 let firstRun = false;
 
-/** Which tab fixes a check, when one does. */
-const WHERE: Record<string, "inventory" | "ledger" | "usage"> = {
+/** Which tab (or the Agents view) fixes a check, when one does. The three
+ *  agent guardrail checks (agent-tools, agent-model, deny-shell) and
+ *  agents-none used to point at Inventory, back when Inventory itself
+ *  showed agent rows; now that those rows live only in the Agents view,
+ *  these four point there instead. */
+const WHERE: Record<string, "inventory" | "ledger" | "usage" | "agents"> = {
   "mcp-unpinned": "inventory", "mcp-env-secrets": "inventory", "mcp-remote": "inventory",
   "perm-none": "inventory", "perm-deny": "inventory", "perm-deny-only": "inventory", "hooks-none": "inventory",
-  "agents-none": "inventory", "agent-tools": "inventory", "deny-shell": "inventory", "agent-model": "inventory",
+  "agents-none": "agents", "agent-tools": "agents", "deny-shell": "agents", "agent-model": "agents",
   ledger: "ledger", "ledger-idle": "ledger", "ledger-dates": "ledger",
   clients: "usage", "areas-unsorted": "usage", "mix-top-heavy": "usage", "session-long-lived": "usage",
   "cache-read-share": "usage", "subagent-share": "usage",
@@ -78,10 +84,12 @@ function sectionLabel(name: string, nameKey?: string): string {
   return key ? t(key) : name;
 }
 
-/// The "Open …" link under a check that names which tab fixes it.
-function gotoLabel(where: "inventory" | "ledger" | "usage"): string {
+/// The "Open …" link under a check that names which tab (or the Agents view)
+/// fixes it.
+function gotoLabel(where: "inventory" | "ledger" | "usage" | "agents"): string {
   if (where === "ledger") return T("goto.ledger");
   if (where === "usage") return T("goto.usage");
+  if (where === "agents") return T("goto.agents");
   return T("goto.inventory");
 }
 
@@ -173,7 +181,7 @@ export function setupAudit(h: AuditHost): void {
   });
   document.querySelector("#audit-body")?.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
-    const go = target.closest<HTMLElement>("[data-goto]")?.dataset.goto as "inventory" | "ledger" | "usage" | undefined;
+    const go = target.closest<HTMLElement>("[data-goto]")?.dataset.goto as "inventory" | "ledger" | "usage" | "agents" | undefined;
     if (go) {
       close();
       host?.goTo(go);

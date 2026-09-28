@@ -1,5 +1,6 @@
 import { rerender as rerenderInventory, setupViews, showView } from "./inventory";
-import { maybeFirstRunAudit, rerender as rerenderAudit, setupAudit } from "./audit";
+import { maybeFirstRunAudit, openAudit, rerender as rerenderAudit, setupAudit } from "./audit";
+import { openAgents, rerender as rerenderAgents, setupAgents } from "./agents";
 import { rerender as rerenderAbout, setupAbout } from "./about";
 import { rerender as rerenderLedger, setupLedger } from "./ledger";
 import { applySavedWide, cardExtras, refreshDetail, rerender as rerenderDetail, setupDetail } from "./detail";
@@ -4432,6 +4433,7 @@ function applyLocale(): void {
   rerenderDetail();
   rerenderInventory();
   rerenderAudit();
+  rerenderAgents();
   rerenderAbout();
   rerenderLedger();
   if (lastSnapshots.length) renderIfVisible();
@@ -4753,7 +4755,12 @@ window.addEventListener("DOMContentLoaded", () => {
   setupAudit({
     seen: () => config.auditSeen === true,
     markSeen: () => void patchConfig({ auditSeen: true }),
-    goTo: (view) => showView(view),
+    // "agents" is a slide-in panel, not a tab -- showView() only knows the
+    // three tabs, so that one destination routes to openAgents() instead.
+    goTo: (view) => (view === "agents" ? openAgents() : showView(view)),
+  });
+  setupAgents({
+    openAudit: () => openAudit(),
   });
   setupLedger({
     usage30: () => Object.fromEntries(lastSpend.map((s) => [s.id, s.last30.cost])),

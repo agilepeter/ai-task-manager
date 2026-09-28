@@ -455,6 +455,26 @@ const KEYED_SOURCES = [
   ["../src/audit.ts", "section."],
   ["../src/about.ts", "about."],
   ["../src/ledger.ts", "ledger."],
+  // The Agents view's own prefix, read through its T() alias.
+  ["../src/agents.ts", "agents."],
+  // agents.ts reuses several existing "inventory.*" strings verbatim
+  // (its empty states, the built-in-agents heading) rather than duplicate
+  // them under its own prefix.
+  ["../src/agents.ts", "inventory."],
+  // NOT registered: ["../src/inventory.ts", "agents."]. inventory.ts's
+  // agentsSummaryLine() reads three genuine top-level "agents.summary.*"
+  // keys directly by key (the same way audit.ts's sectionLabel() reads
+  // "section.*" directly instead of through its own "audit." alias) -- but
+  // inventory.ts ALSO has its own long-standing "agents.*" SUB-namespace
+  // under its own "inventory." prefix (T("agents.neverRun") etc, meaning
+  // "inventory.agents.neverRun"), and the qualified-reference regex this
+  // loop runs cannot tell those two shapes apart: it would flag every one of
+  // that existing sub-namespace's T()-aliased literals as an unqualified
+  // top-level "agents.*" reference and fail on keys that were never meant to
+  // exist at that level. agentsSummaryLine()'s three keys are covered
+  // instead by the demo fixture rendering through them and by this view's
+  // own tests (scripts/agents-view.test.mjs), which render the real
+  // sentence per locale and would fail on a missing or malformed key.
 ];
 
 function escapeForRegex(s) {
