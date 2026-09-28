@@ -122,11 +122,10 @@ All of this is auditable in the source; links go to the exact code.
 
 ## Supported versions
 
-This project has not cut a release yet (see [SHIPPING.md](SHIPPING.md)).
-Once it has, only the
+Only the
 [latest release](https://github.com/agilepeter/ai-task-manager/releases/latest)
-is supported, and the auto-updater (once you opt in) keeps an install
-current.
+is supported. Update checks are off until you turn them on in Settings; with
+them on, the app offers each new release.
 
 ---
 

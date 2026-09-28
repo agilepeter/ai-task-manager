@@ -1,6 +1,6 @@
 # Shipping AI Task Manager
 
-Where distribution stands, and what each remaining step needs. Checked 2026-09-24.
+Where distribution stands, and what each remaining step needs. Checked 2026-09-28.
 
 ## Works today
 

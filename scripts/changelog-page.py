@@ -162,6 +162,19 @@ _CODE_OR_LINK_RE = re.compile(r"`([^`]+)`|\[([^\]]+)\]\(((?:[^()]|\([^()]*\))+)\
 _STASH_RE = re.compile("\x00(\\d+)\x00")
 
 
+def on_the_site(address: str) -> str:
+    """A link written for the repository, made to work on the page.
+
+    CHANGELOG.md links to files beside it (`docs/privacy.md`). On the site
+    there is no such file beside the page, so the same link answers 404. A
+    link with no scheme that is not an anchor or a site path is a file in the
+    repository, and points there."""
+    if re.match(r"[a-zA-Z][a-zA-Z0-9+.-]*:", address) or address.startswith(("#", "/")):
+        return address
+    path = address[2:] if address.startswith("./") else address
+    return f"{REPO_URL}/blob/main/{path}"
+
+
 def render_inline(md: str) -> str:
     """**bold** leads, *emphasis*, `code`, and [text](url) links become
     their HTML; everything else comes out as escaped text. An em dash and
@@ -199,7 +212,7 @@ def render_inline(md: str) -> str:
         # Markdown, whatever it happens to contain. Its label stays in place
         # and is rendered like any other prose, code spans included.
         label = _CODE_RE.sub(lambda c: keep(f"<code>{c.group(1)}</code>"), m.group(2))
-        address = m.group(3).replace('"', "&quot;")
+        address = on_the_site(m.group(3)).replace('"', "&quot;")
         return f'<a href="{keep(address)}" rel="noopener">{label}</a>'
 
     text = _CODE_OR_LINK_RE.sub(code_or_link, text)
@@ -942,6 +955,16 @@ def selftest() -> int:
     check("<code>inline code</code>" in rendered_bullet, f"inline code not preserved: {rendered_bullet!r}")
     check('<a href="https://example.com/page" rel="noopener">link</a>' in rendered_bullet,
           f"link not rendered: {rendered_bullet!r}")
+    for written, served in [
+        ("docs/privacy.md", f"{REPO_URL}/blob/main/docs/privacy.md"),
+        ("./SHIPPING.md#cutting-a-release", f"{REPO_URL}/blob/main/SHIPPING.md#cutting-a-release"),
+        ("https://example.com/a", "https://example.com/a"),
+        ("mailto:someone@example.com", "mailto:someone@example.com"),
+        ("#v0-1-0", "#v0-1-0"),
+        ("/task-manager/", "/task-manager/"),
+    ]:
+        got = render_inline(f"See [the file]({written}).")
+        check(f'href="{served}"' in got, f"a link to {written!r} should be served as {served!r}: {got!r}")
 
     escaped_bullet = render_inline(releases[0].sections["Changed"][0])
     check("<code>&lt;Config&gt;</code>" in escaped_bullet, f"code content not escaped: {escaped_bullet!r}")
