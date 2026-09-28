@@ -619,7 +619,7 @@
   "inventory.projectsScanned.other": "프로젝트 {n}개 스캔함.",
   "inventory.audit.button": "감사",
   "inventory.agents.button": "에이전트",
-  "inventory.agents.tip": "실행 중인 에이전트, 내 에이전트, 기본 제공 에이전트, 30일 비용을 한곳에서 확인하세요",
+  "inventory.agents.tip": "실행 중인 에이전트, 내 에이전트, 기본 제공 에이전트, 30일 지출을 한곳에서 확인하세요",
   "inventory.audit.tip": "이 전체 구성을 점수로 확인하고 내보낼 수 있습니다",
   "inventory.rescan.button": "다시 스캔",
   "inventory.rescan.tip": "로컬 구성을 다시 읽습니다",

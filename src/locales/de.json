@@ -634,7 +634,7 @@
   "inventory.projectsScanned.other": "{n} Projekte gescannt.",
   "inventory.audit.button": "Prüfung",
   "inventory.agents.button": "Agenten",
-  "inventory.agents.tip": "Laufende Agenten, Ihre Agenten, eingebaute Agenten und die Kosten der letzten 30 Tage an einem Ort",
+  "inventory.agents.tip": "Laufende Agenten, Ihre Agenten, eingebaute Agenten und die Ausgaben der letzten 30 Tage an einem Ort",
   "inventory.audit.tip": "Eine bewertete Übersicht dieser gesamten Einrichtung, exportierbar",
   "inventory.rescan.button": "Erneut scannen",
   "inventory.rescan.tip": "Lokale Einrichtung erneut lesen",

@@ -619,7 +619,7 @@
   "inventory.projectsScanned.other": "已扫描 {n} 个项目。",
   "inventory.audit.button": "审计",
   "inventory.agents.button": "智能体",
-  "inventory.agents.tip": "正在运行的智能体、你的智能体、内置智能体，以及 30 天成本，都在一个地方",
+  "inventory.agents.tip": "正在运行的智能体、你的智能体、内置智能体，以及 30 天花费，都在一个地方",
   "inventory.audit.tip": "对整体配置进行评分式检查，可导出",
   "inventory.rescan.button": "重新扫描",
   "inventory.rescan.tip": "重新读取本机配置",

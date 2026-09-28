@@ -633,7 +633,7 @@
   "inventory.projectsScanned.one": "Scanned {n} project.",
   "inventory.projectsScanned.other": "Scanned {n} projects.",
   "inventory.agents.button": "Agents",
-  "inventory.agents.tip": "Running agents, your agents, built-ins, and 30-day cost, all in one place",
+  "inventory.agents.tip": "Running agents, your agents, built-ins, and 30-day spend, all in one place",
   "inventory.audit.button": "Audit",
   "inventory.audit.tip": "A scored read of this whole setup, which you can export",
   "inventory.rescan.button": "Rescan",

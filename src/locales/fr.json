@@ -634,7 +634,7 @@
   "inventory.projectsScanned.other": "{n} projets analysés.",
   "inventory.audit.button": "Audit",
   "inventory.agents.button": "Agents",
-  "inventory.agents.tip": "Agents actifs, vos agents, les agents intégrés et le coût sur 30 jours, tout au même endroit",
+  "inventory.agents.tip": "Agents actifs, vos agents, les agents intégrés et les dépenses sur 30 jours, tout au même endroit",
   "inventory.audit.tip": "Une lecture notée de toute cette configuration, exportable",
   "inventory.rescan.button": "Réanalyser",
   "inventory.rescan.tip": "Relire la configuration locale",
