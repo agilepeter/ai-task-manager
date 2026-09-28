@@ -4009,9 +4009,11 @@ body.wide:not(.agents-open) #agents {
   font-size: 10.5px;
   line-height: 1.3;
   color: var(--muted-foreground);
+  /* Breaks between words only. The browser's own hyphenation split German
+     "Subagenten" as "Suba-genten", which no reader of German would. */
   overflow-wrap: break-word;
-  -webkit-hyphens: auto;
-  hyphens: auto;
+  -webkit-hyphens: manual;
+  hyphens: manual;
 }
 /* The failing-guardrail line: the sentence on its own line(s), the "Open
    Audit" button on its own line under it, left aligned -- never a button
@@ -4280,45 +4282,55 @@ body.wide #detail {
   margin-bottom: 6px;
 }
 
-/* End task shares the sub line (where/uptime/process count) instead of
-   reserving an empty line under every server, always -- that reserved blank
-   line, present even at rest, was the bug this fixed. It still never sits
-   inline with the numbers above (.inv-row-main's name and memory figure):
-   that is the actual stray-click risk this row has always guarded against,
-   so the button's line is always the sub text's line, never the numbers'.
-   The sub text itself wraps normally (no white-space: nowrap), so flex-wrap
-   here is a fallback for the rare case there is truly no room beside it --
-   in practice the button stays at the line's right while the text wraps
-   around it. */
+/* End task shares the sub line (where, uptime, process count) and no
+   longer reserves an empty line under every server. It never sits beside
+   the numbers above (the name and the memory figure): that is the stray
+   click this row has always guarded against. */
 .run-sub-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
+  position: relative;
 }
-.run-sub-row .inv-row-sub {
-  flex: 1;
-  min-width: 0;
-}
+/* At rest the text has the whole line. The button takes no room until it is
+   shown: reserving its width while it was invisible made German and Russian
+   wrap around nothing. Shown, it lies over the end of the line on a solid
+   ground, so text under it is covered, never overlapped. */
 .run-actions {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
-  flex: none;
-  justify-content: flex-end;
-}
-.run-end {
+  padding-left: 14px;
+  background: linear-gradient(to right, transparent, var(--card) 14px);
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.15s;
 }
-.run-row:hover .run-end,
-.run-end:focus-visible {
+.run-row:hover .run-actions,
+.run-actions:focus-within {
   opacity: 1;
+  pointer-events: auto;
 }
-/* A touch device has no hover state to reveal the button with -- without
-   this it would stay opacity: 0 forever there. */
+/* A touch device has no hover to reveal the button with, so there it is
+   always shown, and has its own place after the text. */
 @media (hover: none) {
-  .run-end {
+  .run-sub-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .run-sub-row .inv-row-sub {
+    flex: 1;
+    min-width: 0;
+  }
+  .run-actions {
+    position: static;
+    transform: none;
+    padding-left: 0;
+    background: none;
     opacity: 1;
+    pointer-events: auto;
+    flex: none;
   }
 }
 /* The confirmation only exists for the one row being confirmed, so it gets
