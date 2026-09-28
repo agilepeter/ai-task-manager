@@ -435,6 +435,26 @@ body.settings-open #settings {
   color: var(--secondary-foreground);
 }
 
+/* Baseline visible focus ring for every button, link, <summary> and ARIA
+   tab/button that has no dedicated :focus-visible rule of its own -- most of
+   this app's controls (.mini-btn, .inv-*, .tab, chips, rows) had none at all
+   before src/tabbable.ts made them keyboard-reachable, so a keyboard user
+   tabbing through could land anywhere with no visible indication. The more
+   specific rules below and elsewhere (input/select, .toggle, .lg-link,
+   .dt-drillable, .ab-bot-btn, .ab-link, .inv-head) already carry their own
+   treatment and win over this one on specificity; this is only the floor
+   under everything else. `:focus-visible`, never plain `:focus`, so a mouse
+   click never shows it -- only a real keyboard (or programmatic) focus does. */
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible {
+  outline: 1px solid var(--chart-blue);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 input[type="number"],
 input[type="password"],
 select {

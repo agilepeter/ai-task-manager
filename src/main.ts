@@ -4,6 +4,7 @@ import { applyRescan, openAgents, reloadAgents, rerender as rerenderAgents, setu
 import { rerender as rerenderAbout, setupAbout } from "./about";
 import { rerender as rerenderLedger, setupLedger } from "./ledger";
 import { applySavedWide, cardExtras, refreshDetail, rerender as rerenderDetail, setupDetail } from "./detail";
+import { watchTabbable } from "./tabbable";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -4816,6 +4817,10 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#theme-btn")!.addEventListener("click", toggleTheme);
   setupTrailFisheye();
   setupTooltips();
+  // See src/tabbable.ts's own header for what this fixes and how it was
+  // measured. Started once, here, before the first render -- it also covers
+  // every panel's static markup already in index.html at boot.
+  watchTabbable();
   setupViews({
     trustLookup: () => config.trustLookup === true,
     setTrustLookup: (trustLookup) => patchConfig({ trustLookup }),
