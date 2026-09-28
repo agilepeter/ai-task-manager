@@ -37,7 +37,7 @@ account and no admin rights. Everything below is written for both paths.
 
 | | State today |
 |---|---|
-| Downloadable release | [v0.1.2](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.2), 2026-09-26 (earlier: v0.1.1 on 2026-09-25, v0.1.0 on 2026-09-24), built and published by `release.yml` from the tagged commit. |
+| Downloadable release | [v0.1.3](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.3), 2026-09-27 (earlier: v0.1.2 on 2026-09-26, v0.1.1 on 2026-09-25, v0.1.0 on 2026-09-24), built and published by `release.yml` from the tagged commit. |
 | macOS signing | None yet. Open it once, then allow it under System Settings > Privacy & Security > Open Anyway (macOS 14 or earlier: right-click the app > Open). Or `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`. |
 | Windows signing | None yet. SmartScreen warns: More info, then Run anyway. |
 | Auto-update | **Opt-in, off by default.** See [Updates](#updates). |
@@ -165,7 +165,8 @@ files and `latest.json`, to a **draft** release. A final job then checks the dra
 signatures and dated changelog section, and publishes it only if every check
 passes; a failed check leaves the draft untouched. The first release was
 [v0.1.0](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.0); the latest is
-[v0.1.2](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.2), the first one the
+[v0.1.3](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.3).
+[v0.1.2](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.2) was the first one the
 workflow published by itself. The
 artifacts are not signed, so building from source above remains the better
 path if you want to read what you are running. Every release's changelog
@@ -292,7 +293,18 @@ agent rows carry thirty days of spend too, your own custom agents and Claude
 Code's built-ins alike, so one nobody has run shows up as an opportunity
 instead of going unnoticed, and each row names the client its spend mostly
 went to, the same matching the Clients tab uses -- only when one client is a
-true majority, never a mere plurality. **Audit** scores the whole setup,
+true majority, never a mere plurality. For Claude Code, a server's row also
+carries its own thirty-day context cost: how many tool calls it answered and
+how many bytes of result came back, with an opportunity when a server has
+answered at least 20 calls and sent back at least 2 MB in that window --
+every result goes straight back into the conversation, so a heavy one can
+burn through your context window fast. A **Changes** section keeps a dated
+history of the setup's own shape -- servers, agents, skills, hook events, and
+how many allow and deny rules there are -- once a local day, and shows what
+moved since the newest snapshot that is at least a week old (or the oldest
+one on file, saying honestly how far back that reaches), flagging it
+separately when what went missing was a guardrail: a deny rule, a hook or
+shell coverage. **Audit** scores the whole setup,
 including three guardrail checks on agents (no tools allowlist, no shell in the
 deny list, no model pinned): every finding is computed from your machine,
 states its own numbers, and disappears when it no longer applies. Nothing is
@@ -372,6 +384,20 @@ including every network call the app can make and the greps that prove it, is
   cache, replaces one JSON string byte for byte, re-parses to prove nothing
   else moved, refuses if the file changed since the preview, and leaves a
   backup beside it.
+- **MCP context cost reads a result's length, never its content.** The
+  scanner now also opens a line holding a tool's result, and only while one
+  of your open MCP calls is still waiting for it, to take that one number.
+  The result's content, the tool's input, the tool's name and your prompt
+  are never stored, logged or returned; the scan cache keeps only a
+  server's name, a day, a count of calls and a number of bytes. None of it
+  is sent anywhere or reaches the seat report.
+- **A daily snapshot of your setup's shape** -- server names, clients,
+  transports, packages and pin state; agent and skill names; hook event
+  counts; allow/deny counts and shell coverage -- lives in
+  `inventory_snapshots.json` in the app's own config folder, never a value
+  from env, args, headers, a URL or a path. It is read only to show what
+  changed in Inventory, and it is never sent anywhere or part of the seat
+  report.
 - **Prompts and conversation titles are never read.** Claude Code stores titles
   derived from your prompts in the same logs the spend scanner walks. It skips
   them on purpose.

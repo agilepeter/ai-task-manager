@@ -6,6 +6,61 @@ numbering at 0.1.0, so the numbers here do not continue upstream's. Pane's own
 release history is kept verbatim in
 [docs/upstream-changelog.md](docs/upstream-changelog.md).
 
+## 0.1.3 — 2026-09-27
+
+### Added
+
+- **Setup changes, in the Inventory tab.** Once a local day, the app writes
+  down the shape of your setup: for each MCP server its name, client,
+  transport, package and whether it is pinned; the names of your agents and
+  skills; each hook event and how many hooks fire on it; and how many allow
+  and deny rules there are, plus whether a deny rule covers the shell --
+  never a value from env, args, headers or a URL, and never a path. The file
+  holds the last 40 snapshots written, and nothing is ever dropped for its
+  own date, so a clock that runs backward or jumps ahead for a day cannot
+  erase history. A new Changes section shows what moved since the newest
+  snapshot that is at least a week old, or the oldest one on file, saying
+  honestly how far back that reaches; a snapshot dated in the future or more
+  than 35 days back is never the one compared against. Two new findings,
+  both "learn" and unscored: `guardrail-removed`, when a deny rule, a hook
+  or shell coverage went away and is worth confirming it was meant, and
+  `setup-changed` for everything else that moved. The weekly digest now
+  names the day it is comparing against.
+- **MCP context cost, in Inventory.** For each MCP server Claude Code has
+  configured, how many tool calls it answered and the total size, in bytes,
+  of what came back over the last 30 days, shown as a fact on the server's
+  own row. A new "learn" finding, `mcp-context-heavy`, flags a server with
+  at least 20 calls and at least 2 MB of results in that window. Claude Code
+  only. A server whose name holds a double underscore gets no figure,
+  because its calls cannot be told apart from a shorter server name followed
+  by a tool part; the same goes for two configured servers whose names
+  collapse to the same string once everything but letters, digits,
+  underscores and hyphens turns into an underscore. A result whose call was
+  made more than 256 MCP calls earlier without being answered is not sized.
+  Counting a call is protected against the same replay a resumed session or
+  a rescan could cause that the spend figures already guard against, no
+  more and no less.
+
+### Changed
+
+- **The local scan cache re-scans once.** The MCP context-cost figures need
+  a per-server, per-day count of calls and result bytes the persisted cache
+  did not keep before, so the first launch after updating re-reads session
+  logs once to back-fill it; every other total is unaffected.
+
+### Fixed
+
+- **The browser demo's footer answered "v0.1.0" no matter what it was built
+  from.** It now reports the version it was actually built from, the same
+  one in `package.json`.
+- **The install notes told Mac users to right-click the app and choose
+  Open**, which macOS 15 and later refuse for an app that is not notarized.
+  They now give the step that works: System Settings > Privacy & Security >
+  Open Anyway.
+- **GitHub listed the licence as "Other"** because two of the copyright
+  notices in `LICENSE` wrapped across more than one line each. Every notice
+  is now on its own line, and GitHub reads the licence as MIT.
+
 ## 0.1.2 — 2026-09-26
 
 ### Added

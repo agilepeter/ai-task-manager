@@ -77,6 +77,27 @@ directory with upstream Pane would let the two apps overwrite each other.
   your machine; only the public price tables are downloaded. Claude Code keeps
   conversation titles derived from your prompts in those same logs, and the
   scanner skips them on purpose.
+- **The scan now also opens a line that carries a tool's result, and only
+  while a call to an MCP server is still waiting for it.** Until 0.1.3 the
+  scanner skipped every line of a session log that was not an assistant
+  line. From 0.1.3 it makes one exception: a line holding a `tool_result`,
+  read only for as long as one of your open MCP calls has not yet been
+  answered. All it takes from that line is the LENGTH of the result. The
+  result's content, the tool's input, the tool's name and your prompt are
+  never stored, logged or returned. The scan cache keeps only a server's
+  name, a day, a count of calls and a number of bytes -- nothing else about
+  an MCP call reaches disk. This never leaves your machine and is never part
+  of the seat report.
+- **A daily snapshot of your setup's shape.** Once a local day, the app
+  writes what your setup looks like -- for each MCP server its name, client,
+  transport, package and whether it is pinned; the names of your agents and
+  skills; which hook events exist and how many hooks are on each; how many
+  allow and deny rules there are and whether a deny rule covers the shell --
+  to `inventory_snapshots.json` in the app's own config folder. Never a
+  value from env, args, headers or a URL, and never a path. The file holds
+  the last 40 snapshots written. It is read only to show what changed in
+  Inventory's Changes section, is never sent anywhere, and is never part of
+  the seat report.
 - **Folder and client names stay local.** Work areas are your directory names
   and clients are your customers' names. Neither is published anywhere by
   default.
