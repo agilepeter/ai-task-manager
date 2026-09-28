@@ -22,6 +22,11 @@ Upstream's own release history, up to the imported commit, is kept verbatim in
 [docs/upstream-changelog.md](docs/upstream-changelog.md). This app's history
 restarts at 0.1.0 in [CHANGELOG.md](CHANGELOG.md).
 
+Upstream's roadmap as it stood at the imported commit is kept the same way in
+[docs/upstream-roadmap.md](docs/upstream-roadmap.md). It describes Pane, including a
+daily statistic Pane sends and this app does not: that module was removed here.
+[ROADMAP.md](ROADMAP.md) is this app's own.
+
 To pull a provider fix from upstream, diff the single provider file under
 `crates/core/src/providers/` against this commit and port it by hand. (The
 provider code lived in `src-tauri/src/providers/` at import time; it moved when

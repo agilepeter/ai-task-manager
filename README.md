@@ -11,6 +11,9 @@ what are all these MCP servers doing in the background?*
 
 macOS and Windows. No account, no cloud, no telemetry.
 
+**Free and MIT licensed.** [Download the latest release](https://github.com/agilepeter/ai-task-manager/releases/latest),
+or [try the demo in a browser](https://staas.fund/task-manager/) first.
+
 <img src="docs/promo.png" width="820" alt="AI Task Manager in wide mode: the usage list on the left with a Total Spend donut and Claude pace bars, and on the right a detail view showing each limit over the last seven days, when each one runs out at the current pace, and a heatmap of which hours of the week the weekly limit gets used." />
 
 <sub>Wide mode, on a fictional machine: the browser demo's data, not anyone's real usage.</sub>
