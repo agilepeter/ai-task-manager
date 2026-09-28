@@ -73,6 +73,7 @@ let loadError = "";
 let runningAgents: RunningAgent[] = [];
 let runningAgentsError = "";
 let agentSpend: AgentSpend[] = [];
+let agentSpendError = "";
 let failingGuardrails = 0;
 /** The button that was clicked to open this view (the toolbar button, the
  *  door row, or null when opened some other way -- see openAgents()),
@@ -133,6 +134,7 @@ export function renderAgentsView(
   running: RunningAgent[],
   runningError: string,
   spend: AgentSpend[],
+  spendError: string,
   failing: number,
   nowMs: number,
 ): string {
@@ -141,12 +143,18 @@ export function renderAgentsView(
   // above). Wraps at 380px via flex-wrap, same as every other toolbar/filter
   // row in this app; no card-inside-card, just the app's own caption size
   // and colour for the label under a slightly larger number.
+  // The spend figure falls back to "?" (this app's existing convention for a
+  // figure it could not read -- see src/inventory.ts's trustChip()) when
+  // spendError is set: `spend` is `[]` on a failed read the same as it would
+  // be on a genuinely quiet 30 days, and stats.spend30 sums to 0 either way,
+  // so "$0.00" would show as a real, confident zero instead of the unknown it
+  // actually is.
   const stats = agentStats(inv, running, spend);
   const statsRow = `
     <div class="ag-stats">
       <div class="ag-stat"><span class="ag-stat-n">${stats.yours}</span><span class="ag-stat-label">${esc(T("stat.yours"))}</span></div>
       <div class="ag-stat"><span class="ag-stat-n">${stats.runningNow}</span><span class="ag-stat-label">${esc(T("stat.running"))}</span></div>
-      <div class="ag-stat"><span class="ag-stat-n">${esc(money(stats.spend30))}</span><span class="ag-stat-label">${esc(T("stat.spend"))}</span></div>
+      <div class="ag-stat"><span class="ag-stat-n">${spendError ? "?" : esc(money(stats.spend30))}</span><span class="ag-stat-label">${esc(T("stat.spend"))}</span></div>
     </div>`;
 
   // 2. Running now -- the exact rows Inventory used to show, folded above
@@ -163,7 +171,11 @@ export function renderAgentsView(
   // 3. Your agents -- the same custom agent rows Setup used to show, in
   // every scope (this view has no scope filter of its own: it gathers
   // everything into one place, not a second copy of Inventory's filter UI).
-  const spendByName = new Map(spend.map((s) => [s.name, s]));
+  // A null spend map (spendError set) makes agentRows() drop every row's
+  // spend sub-line entirely, rather than showing each of the user's agents
+  // as "Never run" -- a claim about the agent -- when the truth is this view
+  // simply could not read spend at all -- a claim about the request.
+  const spendByName = spendError ? null : new Map(spend.map((s) => [s.name, s]));
   const yourAgentsBody = inv.agents.length
     ? agentRows(inv.agents, spendByName, nowMs)
     : `<p class="inv-empty">${esc(t("inventory.empty.agents"))}</p>`;
@@ -175,15 +187,21 @@ export function renderAgentsView(
   // would look like a gap instead of an answer, so this view names it. Either
   // way the section's own heading carries the count and the hint stays under
   // the title, the same shape every other section in this view uses.
+  // A spend read failure pre-empts both of those readings: there is no "0
+  // built-ins" or "no runs" to report, only that the 30-day read itself
+  // failed, so the section shows that error in place of its rows or its
+  // empty state.
   const totalRuns = spend.reduce((sum, s) => sum + s.runs, 0);
   const builtInCount = builtInAgentCount(inv.agents, spend);
   const builtInsBody = builtInAgentRows(inv.agents, spend, nowMs);
   const builtInHead = (count: number) => `<h3>${esc(t("inventory.agents.builtIn"))} <span class="plan">${count}</span></h3><p class="inv-note">${esc(t("inventory.agents.builtInHint"))}</p>`;
-  const builtInSection = builtInsBody
-    ? `<section class="dt-section">${builtInHead(builtInCount)}${builtInsBody}</section>`
-    : totalRuns === 0
-      ? `<section class="dt-section">${builtInHead(0)}<p class="inv-empty">${esc(T("empty.noSubagentRuns"))}</p></section>`
-      : "";
+  const builtInSection = spendError
+    ? `<section class="dt-section">${builtInHead(0)}<p class="inv-empty">${esc(T("spendError", { error: spendError }))}</p></section>`
+    : builtInsBody
+      ? `<section class="dt-section">${builtInHead(builtInCount)}${builtInsBody}</section>`
+      : totalRuns === 0
+        ? `<section class="dt-section">${builtInHead(0)}<p class="inv-empty">${esc(T("empty.noSubagentRuns"))}</p></section>`
+        : "";
 
   // 5. Worth a look -- the findings that are about agents, and only those
   // (see AGENT_FINDING_IDS above), painted with the exact renderer
@@ -250,21 +268,48 @@ export function renderLoadError(error: string): string {
 export const RELOAD_FRESHNESS_MS = 60_000;
 
 /// When the popover-shown path should actually reload: never for a closed
-/// view (nothing to refresh); never for one whose data is still fresh; always
+/// view (nothing to refresh); never while a load this view itself started is
+/// still in flight (`loading` -- reopening the popover mid-fetch must not
+/// stack a second concurrent get_inventory); always at once when the last
+/// load FAILED (`lastFailed`) -- a stale error has nothing worth waiting 60s
+/// behind; never for one whose last successful load is still fresh; always
 /// once it has gone stale; and always when the clock has moved backwards
 /// (`now < lastLoadedAt`, e.g. a system clock change) -- a negative age is
 /// not a trustworthy "fresh", so that case reloads rather than trusting it.
 /// Pure and exported so it can be tested without a DOM (see its own test).
-export function shouldReload(lastLoadedAt: number, now: number, open: boolean): boolean {
+export function shouldReload(
+  lastLoadedAt: number,
+  now: number,
+  open: boolean,
+  loading: boolean,
+  lastFailed: boolean,
+): boolean {
   if (!open) return false;
+  if (loading) return false;
+  if (lastFailed) return true;
   if (now < lastLoadedAt) return true;
   return now - lastLoadedAt >= RELOAD_FRESHNESS_MS;
 }
 
-/// Stamped every time this view's data is (re)loaded, by whichever path did
-/// it -- loadData() or applyRescan() -- so reloadAgents() can tell how old
-/// what is currently shown is.
+/// Stamped only when a load actually SUCCEEDS (get_inventory's own promise
+/// resolving, in loadData() below, or a rescan that carried no loadError, in
+/// applyRescan()) -- never optimistically at call time. A failed load used to
+/// stamp this immediately, which made the view read as fresh for a full
+/// minute despite showing an error, so reopening the popover within that
+/// window silently skipped the retry a user opening it again was clearly
+/// asking for.
 let lastLoadedAt = 0;
+/// True from the moment loadData() fires its get_inventory call to the moment
+/// that call settles (either way) -- tracked separately from `lastLoadedAt`
+/// so reloadAgents() can tell "a load is already in flight, don't start a
+/// second one" apart from "the last load is still fresh", which used to be
+/// the same signal and so could not express both figures.
+let loading = false;
+/// True when the last get_inventory call failed, cleared the moment one
+/// succeeds. Lets shouldReload() retry immediately the next time the popover
+/// is shown, instead of trusting the stale `lastLoadedAt` a failure used to
+/// leave behind.
+let lastFailed = false;
 
 function isOpen(): boolean {
   return document.body.classList.contains("agents-open");
@@ -286,7 +331,7 @@ function render(): void {
     el.innerHTML = `<p class="dt-empty">${esc(t("detail.loading"))}</p>`;
     return;
   }
-  el.innerHTML = renderAgentsView(inventory, runningAgents, runningAgentsError, agentSpend, failingGuardrails, Date.now());
+  el.innerHTML = renderAgentsView(inventory, runningAgents, runningAgentsError, agentSpend, agentSpendError, failingGuardrails, Date.now());
 }
 
 async function loadFailingGuardrails(): Promise<number> {
@@ -316,18 +361,30 @@ async function loadFailingGuardrails(): Promise<number> {
 /// applyRescan() below, which is handed three of these four pieces directly
 /// instead of re-invoking them.
 function loadData(): void {
-  lastLoadedAt = Date.now();
+  loading = true;
   void invoke<Inventory>("get_inventory").then(
-    (inv) => { inventory = inv; loadError = ""; render(); },
-    (err) => { loadError = String(err); render(); },
+    (inv) => {
+      inventory = inv;
+      loadError = "";
+      lastLoadedAt = Date.now();
+      loading = false;
+      lastFailed = false;
+      render();
+    },
+    (err) => {
+      loadError = String(err);
+      loading = false;
+      lastFailed = true;
+      render();
+    },
   );
   void invoke<RunningAgent[]>("get_running_agents").then(
     (rows) => { runningAgents = rows; runningAgentsError = ""; render(); },
     (err) => { runningAgents = []; runningAgentsError = String(err); render(); },
   );
   void invoke<AgentSpend[]>("get_agent_spend").then(
-    (rows) => { agentSpend = rows; render(); },
-    () => { agentSpend = []; render(); },
+    (rows) => { agentSpend = rows; agentSpendError = ""; render(); },
+    (err) => { agentSpend = []; agentSpendError = String(err); render(); },
   );
   void loadFailingGuardrails().then((n) => { failingGuardrails = n; render(); });
 }
@@ -382,7 +439,7 @@ export function openAgents(opener_: HTMLElement | null = null): void {
 /// innerHTML does not reset its parent's scrollTop, so the panel's scroll
 /// position survives a reload on its own, with nothing here to manage.
 export function reloadAgents(): void {
-  if (!shouldReload(lastLoadedAt, Date.now(), isOpen())) return;
+  if (!shouldReload(lastLoadedAt, Date.now(), isOpen(), loading, lastFailed)) return;
   loadData();
 }
 
@@ -407,7 +464,16 @@ export function applyRescan(data: RescanResult): void {
   runningAgents = data.runningAgents;
   runningAgentsError = data.runningAgentsError;
   agentSpend = data.agentSpend;
-  lastLoadedAt = Date.now();
+  agentSpendError = data.agentSpendError;
+  // Same "stamp freshness only on success" rule loadData() follows: a rescan
+  // whose own get_inventory failed (data.loadError set) must not read as
+  // fresh for the next 60s of popover-shown checks either.
+  if (data.loadError) {
+    lastFailed = true;
+  } else {
+    lastLoadedAt = Date.now();
+    lastFailed = false;
+  }
   render();
   void loadFailingGuardrails().then((n) => { failingGuardrails = n; render(); });
 }

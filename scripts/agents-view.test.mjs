@@ -52,7 +52,21 @@ async function buildAgentsModule() {
     .replace('import { showLedger } from "./ledger";', "")
     .replace('import { localeTag, plural, t, tm, type Msg } from "./i18n";', "")
     .replace('import { byteSize, money, relativeDay, tokens } from "./format";', "")
-    .replace("function render(): void {", "function __unusedInventoryRender(): void {");
+    // A whole-word rename, not just a declaration move: every bare `render()`
+    // call site AND every bare `render` callback reference (inventory.ts's
+    // own `.then(render)`, with no trailing "()" of its own) would otherwise
+    // still resolve to i18n's own exported `render(locale, msg)` once the two
+    // sources are concatenated, since that is now the only "render" binding
+    // left standing. Harmless for the pure-function tests below (none of them
+    // ever reach a call site), but fatal the moment a test actually calls an
+    // exported function that runs load() end to end (see applyRescan()'s own
+    // behavioural test further down) -- `render(locale, msg)` called with too
+    // few arguments throws on `msg.vars`. `\brender\b` catches the
+    // declaration, every `render()` call and every bare `.then(render)`
+    // reference in one pass; it can never touch `renderAgents`/
+    // `renderAgentsDoor`/etc (no word boundary before their own trailing
+    // text) nor `rerender` (no word boundary before "render" inside it).
+    .replace(/\brender\b/g, "__unusedInventoryRender");
   if (strippedInventory === inventorySource) throw new Error("no substitution matched -- src/inventory.ts's source shape moved under this test");
 
   const agentsSource = await readFile(new URL("../src/agents.ts", import.meta.url), "utf8");
@@ -74,7 +88,10 @@ async function buildAgentsModule() {
 } from "./inventory";`,
       "",
     )
-    .replace("function render(): void {", "function __unusedAgentsRender(): void {")
+    // Same whole-word fix as inventory.ts's own rename above, for the same
+    // reason (agents.ts has no bare `.then(render)` reference today, but the
+    // broader pattern costs nothing and stays correct if one is ever added).
+    .replace(/\brender\b/g, "__unusedAgentsRender")
     .replace(/\besc\b/g, "__agentsEsc")
     // Both files export their own rerender() (redraw in place after a
     // locale switch); this test never calls either one, so the export is
@@ -95,6 +112,75 @@ async function buildAgentsModule() {
     compilerOptions: { module: ts.ModuleKind.ESNext },
   }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+}
+
+// A minimal stand-in for `document`, just capable enough for openAgents() /
+// applyRescan() / reloadAgents() / render() to run end to end: a body
+// classList real code can toggle "agents-open" on (isOpen() reads it back the
+// same way), and querySelector() handing back one persistent fake element per
+// selector (so writing #agents-body's innerHTML in one call and reading it
+// back in a later one sees the same object) rather than a fresh, disconnected
+// one every time. Every fake element carries the handful of members this
+// module's code actually touches on one: `.innerHTML`, `.focus()`,
+// `.classList` and `.addEventListener()` -- new members are added here only
+// when some code path is actually found to need them, never speculatively.
+function makeFakeDocument() {
+  const bodyClasses = new Set();
+  const elements = new Map();
+  function elementFor(selector) {
+    if (!elements.has(selector)) {
+      elements.set(selector, {
+        innerHTML: "",
+        focus() {},
+        addEventListener() {},
+        classList: { contains: () => false, add() {}, remove() {} },
+      });
+    }
+    return elements.get(selector);
+  }
+  return {
+    elements,
+    body: {
+      classList: {
+        contains: (c) => bodyClasses.has(c),
+        add: (c) => bodyClasses.add(c),
+        remove: (c) => bodyClasses.delete(c),
+      },
+    },
+    querySelector: (selector) => elementFor(selector),
+    querySelectorAll: () => [],
+    contains: () => false,
+    addEventListener: () => {},
+  };
+}
+
+// A recording `invoke()` stand-in: every call is pushed to `calls` (command
+// name only -- these tests never need to inspect args) before it resolves
+// (or rejects) from `fixtures`, so a test can assert both WHAT was called and
+// in WHAT ORDER. `delays` lets one specific command's promise settle after an
+// extra microtask/timer tick, for proving something else really did wait for
+// it rather than merely happening to run after it once.
+function makeRecordingInvoke(fixtures, delays = {}) {
+  const calls = [];
+  const invoke = async (cmd, args) => {
+    calls.push(cmd);
+    if (delays[cmd]) await delays[cmd]();
+    if (!(cmd in fixtures)) throw new Error(`makeRecordingInvoke: no fixture registered for "${cmd}"`);
+    const v = fixtures[cmd];
+    if (v instanceof Error) throw v;
+    return typeof v === "function" ? v(args) : v;
+  };
+  return { calls, invoke };
+}
+
+// Drains the microtask queue completely (every pending .then()/await, however
+// many hops deep), unlike a fixed chain of `.then().then()…` which only
+// covers as many hops as it happens to name. A setTimeout callback is only
+// ever run once nothing microtask-queued is left, so this is the simplest
+// reliable "let everything that has already started actually finish" for a
+// test with no real Tauri round-trip to await.
+function flushMicrotasks() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 const NOW_MS = 1_790_000_000_000;
@@ -155,7 +241,7 @@ test("the_agents_view_shows_what_inventory_showed: same rows, same text, for a f
   const mcpFinding = opportunity({ id: "mcp-remote", kind: "learn", title: "A server connects remotely" });
   const inv = inventory({ agents, opportunities: [agentFinding, mcpFinding] });
 
-  const html = renderAgentsView(inv, running, "", spend, 0, NOW_MS);
+  const html = renderAgentsView(inv, running, "", spend, "", 0, NOW_MS);
 
   // Reused verbatim, not reimplemented: the view's HTML contains the exact
   // same markup these renderers produce when called directly on the same
@@ -195,7 +281,7 @@ test("names_are_escaped_in_the_agents_view: a hostile agent name renders as text
   const spend = [agentSpendRow({ name: hostile })];
   const inv = inventory({ agents });
 
-  const html = renderAgentsView(inv, [], "", spend, 0, NOW_MS);
+  const html = renderAgentsView(inv, [], "", spend, "", 0, NOW_MS);
 
   assert.ok(!html.includes(hostile), "the raw, unescaped hostile name appears in the rendered view");
   assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"), "the escaped form of the hostile name is missing");
@@ -225,7 +311,7 @@ test("inventory_no_longer_lists_agents_but_offers_the_door: Setup carries no age
   // line is the same three labelled facts joined by " · " the Agents view's
   // own stats row shows (see agentStats()/T("stat.*") in src/agents.ts),
   // never the old one-sentence summary this replaced.
-  const doorHtml = renderAgentsDoor(inventory(), 0, 0);
+  const doorHtml = renderAgentsDoor(inventory(), 0, 0, "");
   assert.ok(doorHtml.includes("Your agents: 0"), "the door row does not show a real 'Your agents' count at zero");
   assert.ok(doorHtml.includes("Running now: 0"), "the door row does not show a real 'Running now' count at zero");
   assert.ok(doorHtml.includes("Subagent spend, 30 days: $0.00"), "the door row does not show a real spend figure at zero");
@@ -261,7 +347,7 @@ test("the_summary_counts_equal_the_rows_shown: the stats row and every section h
   assert.deepEqual(stats, { yours: 2, runningNow: 3, spend30: 0.015 }, "agentStats() computed the wrong raw numbers");
   assert.equal(money(stats.spend30), "$0.01", "money() of the raw sum should be $0.01, not the sum of four already-rounded $0.00 rows");
 
-  const html = renderAgentsView(inv, running, "", spend, 0, NOW_MS);
+  const html = renderAgentsView(inv, running, "", spend, "", 0, NOW_MS);
 
   // The stats row's own three numbers.
   assert.match(html, /ag-stat-n">2<\/span><span class="ag-stat-label">Your agents/, "stats row does not show 2 for Your agents");
@@ -288,7 +374,7 @@ test("an_empty_machine_gets_the_teaching_states: each empty state says what woul
   const { renderAgentsView, setActiveLocale, t } = await loadAgentsModule();
   setActiveLocale("en");
 
-  const html = renderAgentsView(inventory(), [], "", [], 0, NOW_MS);
+  const html = renderAgentsView(inventory(), [], "", [], "", 0, NOW_MS);
 
   assert.ok(html.includes(esc(t("inventory.empty.agents"))), "no agents defined: teaching text is missing");
   assert.ok(html.includes(esc(t("inventory.empty.runningAgents"))), "none running: teaching text is missing");
@@ -336,15 +422,15 @@ test("the failing-guardrail line: present with the right count when checks fail,
   setActiveLocale("en");
   const inv = inventory();
 
-  const clean = renderAgentsView(inv, [], "", [], 0, NOW_MS);
+  const clean = renderAgentsView(inv, [], "", [], "", 0, NOW_MS);
   assert.ok(!clean.includes("agents-open-audit"), "no failing guardrail checks should mean no Open Audit button at all");
   assert.ok(!clean.includes("guardrail"), "no failing guardrail checks should mean no guardrail line at all");
 
-  const oneFailing = renderAgentsView(inv, [], "", [], 1, NOW_MS);
+  const oneFailing = renderAgentsView(inv, [], "", [], "", 1, NOW_MS);
   assert.match(oneFailing, /1 agent guardrail check needs attention/, "one failing check should be named in the singular, with its count");
   assert.ok(oneFailing.includes('id="agents-open-audit"'), "a failing check should carry the Open Audit button");
 
-  const threeFailing = renderAgentsView(inv, [], "", [], 3, NOW_MS);
+  const threeFailing = renderAgentsView(inv, [], "", [], "", 3, NOW_MS);
   assert.match(threeFailing, /3 agent guardrail checks need attention/, "three failing checks should be named in the plural, with their count");
 });
 
@@ -382,9 +468,49 @@ test("esc() escapes a hostile load-error and a hostile running-agents error, nev
   assert.ok(!loadErrorHtml.includes(hostile), "the raw load-error string leaked into the rendered page");
   assert.ok(loadErrorHtml.includes(escaped), "the escaped load-error string is missing");
 
-  const runningErrorHtml = renderAgentsView(inventory(), [], hostile, [], 0, NOW_MS);
+  const runningErrorHtml = renderAgentsView(inventory(), [], hostile, [], "", 0, NOW_MS);
   assert.ok(!runningErrorHtml.includes(hostile), "the raw running-agents error string leaked into the rendered page");
   assert.ok(runningErrorHtml.includes(escaped), "the escaped running-agents error string is missing");
+});
+
+// A failed get_agent_spend used to collapse to an empty array with no error
+// at all, which read as "$0.00" and "Never run" -- both confident, specific
+// and wrong. spendError now carries the failure through to every place spend
+// would otherwise show: the stats row's own figure, "Your agents"'s spend
+// sub-line, the built-in section, and src/inventory.ts's door row.
+test("a failed agent-spend read never shows $0.00 or 'Never run': the stats figure, Your agents, the built-in section and the door row all name the error instead", async () => {
+  const { renderAgentsView, renderAgentsDoor, agentRows, setActiveLocale, t } = await loadAgentsModule();
+  setActiveLocale("en");
+  const hostile = "<img src=x onerror=alert(1)>";
+  const escaped = "&lt;img src=x onerror=alert(1)&gt;";
+
+  const agents = [definition({ name: "deploy-checker" })];
+  const inv = inventory({ agents });
+  const html = renderAgentsView(inv, [], "", [], hostile, 0, NOW_MS);
+
+  // The stats row: "?" (this app's own convention for a figure it could not
+  // read -- src/inventory.ts's trustChip() falls back to the same glyph),
+  // never a confident, specific "$0.00".
+  assert.match(html, /ag-stat-n">\?<\/span><span class="ag-stat-label">Subagent spend/, "the stats row must show ? for spend, not a number, once the read failed");
+  assert.ok(!html.includes("$0.00"), "no $0.00 must appear anywhere in the view once the spend read failed");
+
+  // Your agents: agentRows(..., null, ...) drops the spend sub-line entirely
+  // -- never "Never run", a claim about the agent that is not what actually
+  // happened (this view simply could not check).
+  assert.ok(!html.includes(t("inventory.agents.neverRun")), "a spend-read failure must never render as 'Never run'");
+  assert.ok(!/inv-sub inv-sub-wrap/.test(agentRows(agents, null, NOW_MS)), "agentRows(list, null, now) must render no spend sub-line at all");
+
+  // Built-in agents: the error itself, escaped, replacing both the rows and
+  // the usual "no runs in 30 days" empty state -- a read failure is not the
+  // same fact as a genuinely quiet 30 days.
+  assert.ok(!html.includes(hostile), "the raw, unescaped spend-read error must never reach the page");
+  assert.ok(html.includes(escaped), "the escaped spend-read error is missing from the built-in section");
+  assert.ok(!html.includes(t("agents.empty.noSubagentRuns")), "a read failure must not be shown as if 30 days were genuinely quiet");
+
+  // The Inventory door row (src/inventory.ts) shows the same placeholder.
+  const doorHtml = renderAgentsDoor(inv, 0, 0, hostile);
+  assert.ok(doorHtml.includes("?"), "the door row must show ? for spend once the read failed");
+  assert.ok(!doorHtml.includes("$0.00"), "the door row must not show $0.00 once the read failed");
 });
 
 // The one line under an agent's name (its 30-day spend) must wrap instead of
@@ -416,7 +542,7 @@ test("an agent's spend line carries inv-sub-wrap, so it wraps instead of ending 
 test("the failing-guardrail line is a block, not a button inside a sentence", async () => {
   const { renderAgentsView, setActiveLocale } = await loadAgentsModule();
   setActiveLocale("en");
-  const oneFailing = renderAgentsView(inventory(), [], "", [], 1, NOW_MS);
+  const oneFailing = renderAgentsView(inventory(), [], "", [], "", 1, NOW_MS);
   assert.match(
     oneFailing,
     /<div class="ag-guardrail"><p class="dt-caption">[^<]*<\/p><button class="inv-learn" id="agents-open-audit">/,
@@ -429,49 +555,128 @@ test("the failing-guardrail line is a block, not a button inside a sentence", as
 // this view's data actually changes, so a fresh load should not be re-fetched
 // just because the popover closed and reopened a second later. Exercised
 // directly, with no DOM, exactly the way this suite's other pure functions
-// are (closeFocusTarget() above).
-test("shouldReload(): closed never reloads, open+fresh does not, open+stale does, a backwards clock reloads", async () => {
+// are (closeFocusTarget() above). Extended with `loading` and `lastFailed`
+// (item 2's fix): a load in flight must never be joined by a second one, and
+// a failed load must retry the moment the popover is shown again rather than
+// sitting inside the 60s freshness window a failure used to leave behind.
+test("shouldReload(): closed never reloads, open+fresh does not, open+stale does, a backwards clock reloads, loading blocks a second load, a failure retries at once", async () => {
   const { shouldReload, RELOAD_FRESHNESS_MS } = await loadAgentsModule();
   const now = 1_790_000_000_000;
 
-  assert.equal(shouldReload(now - 1, now, false), false, "a closed view must never reload, no matter how stale");
-  assert.equal(shouldReload(now, now, true), false, "just loaded (age 0) must not reload");
-  assert.equal(shouldReload(now - (RELOAD_FRESHNESS_MS - 1), now, true), false, "one millisecond inside the freshness window must not reload");
-  assert.equal(shouldReload(now - RELOAD_FRESHNESS_MS, now, true), true, "exactly at the freshness window must reload");
-  assert.equal(shouldReload(now - RELOAD_FRESHNESS_MS - 1, now, true), true, "past the freshness window must reload");
-  assert.equal(shouldReload(now + 1, now, true), true, "a clock that moved backwards must reload rather than trust the (negative) age");
+  assert.equal(shouldReload(now - 1, now, false, false, false), false, "a closed view must never reload, no matter how stale");
+  assert.equal(shouldReload(now - 1, now, false, false, true), false, "closed must never reload even with a failed last load");
+  assert.equal(shouldReload(now, now, true, false, false), false, "just succeeded (age 0) must not reload");
+  assert.equal(shouldReload(now - 10_000, now, true, false, false), false, "succeeded 10s ago must not reload");
+  assert.equal(shouldReload(now - (RELOAD_FRESHNESS_MS - 1), now, true, false, false), false, "one millisecond inside the freshness window must not reload");
+  assert.equal(shouldReload(now - RELOAD_FRESHNESS_MS, now, true, false, false), true, "exactly at the freshness window must reload");
+  assert.equal(shouldReload(now - RELOAD_FRESHNESS_MS - 1, now, true, false, false), true, "past the freshness window must reload");
+  assert.equal(shouldReload(now - 61_000, now, true, false, false), true, "succeeded 61s ago must reload");
+  assert.equal(shouldReload(now + 1, now, true, false, false), true, "a clock that moved backwards must reload rather than trust the (negative) age");
+  assert.equal(shouldReload(now, now, true, true, false), false, "a load already in flight must never be joined by a second one, even at age 0 (irrelevant) or beyond the window");
+  assert.equal(shouldReload(now - RELOAD_FRESHNESS_MS - 1, now, true, true, false), false, "loading must block a reload even when the last success is stale");
+  assert.equal(shouldReload(now, now, true, false, true), true, "a failed load must retry at once, shown again a moment later, even though its own timestamp reads as fresh");
+  assert.equal(shouldReload(now - RELOAD_FRESHNESS_MS - 1, now, true, false, true), true, "a failed, stale load must also reload (failure wins either way)");
 });
 
 // applyRescan() (src/agents.ts) exists so a rescan hands this view the data
 // src/inventory.ts's load() already fetched, instead of this view
 // re-invoking get_inventory / get_running_agents / get_agent_spend a second
 // time for the same event -- the actual bug this fixes (a view left open
-// used to cause a full second scan on every rescan). This suite has no real
-// Tauri bridge to spy on, so it checks the same thing at the source level:
-// applyRescan()'s own body names get_audit (still needed -- a rescan's data
-// carries nothing about the Audit's checks) but none of the three commands
-// the rescan's data already covers.
+// used to cause a full second scan on every rescan). Exercised for real this
+// time: openAgents() first (its own loadData() makes the view's normal four
+// calls), then applyRescan() with fresh data, checking that the ONLY new
+// invoke() call it causes is get_audit (via loadFailingGuardrails() -- a
+// rescan's own data carries nothing about the Audit's checks, so that one
+// call cannot be avoided), and that the panel actually redraws from the
+// argument it was handed rather than from a second scan.
 test("applyRescan() re-invokes only get_audit, never get_inventory/get_running_agents/get_agent_spend", async () => {
-  const source = await readFile(new URL("../src/agents.ts", import.meta.url), "utf8");
-  const match = source.match(/export function applyRescan\([^)]*\): void \{[\s\S]*?\n\}/);
-  assert.ok(match, "applyRescan() not found, or its source shape moved under this test");
-  const body = match[0];
-  assert.ok(!/invoke</.test(body), "applyRescan() must not call invoke() itself -- it should read loadFailingGuardrails() only, and take its other three fields from its argument");
-  assert.match(body, /loadFailingGuardrails\(\)/, "applyRescan() must still refresh the failing-guardrail count (get_audit), which a rescan's own data never carries");
-  assert.match(body, /data\.inventory/, "applyRescan() must take `inventory` from its argument, not re-fetch it");
-  assert.match(body, /data\.runningAgents/, "applyRescan() must take `runningAgents` from its argument, not re-fetch it");
-  assert.match(body, /data\.agentSpend/, "applyRescan() must take `agentSpend` from its argument, not re-fetch it");
+  const { openAgents, applyRescan } = await loadAgentsModule();
+  const fakeDocument = makeFakeDocument();
+  globalThis.document = fakeDocument;
+
+  const initialInv = inventory({ agents: [definition({ name: "initial-agent" })] });
+  const { calls, invoke } = makeRecordingInvoke({
+    get_inventory: initialInv,
+    get_running_agents: [],
+    get_agent_spend: [],
+    get_audit: { sections: [] },
+  });
+  globalThis.invoke = invoke;
+
+  try {
+    openAgents();
+    // loadData()'s four invoke() calls, plus loadFailingGuardrails()'s own
+    // get_audit, are all fire-and-forget promises openAgents() never awaits --
+    // let their microtasks drain before moving on.
+    await flushMicrotasks();
+    assert.deepEqual(
+      [...calls].sort(),
+      ["get_agent_spend", "get_audit", "get_inventory", "get_running_agents"].sort(),
+      "openAgents()'s own initial load did not make the four calls this test's baseline assumes",
+    );
+    calls.length = 0; // only calls made by applyRescan() itself matter from here
+
+    const rescannedInv = inventory({ agents: [definition({ name: "rescanned-agent" })] });
+    applyRescan({
+      inventory: rescannedInv,
+      loadError: "",
+      runningAgents: [],
+      runningAgentsError: "",
+      agentSpend: [],
+      agentSpendError: "",
+    });
+    await flushMicrotasks();
+
+    assert.deepEqual(calls, ["get_audit"], "applyRescan() must cause exactly one new invoke() call, get_audit, and nothing else");
+    const body = fakeDocument.elements.get("#agents-body");
+    assert.ok(body.innerHTML.includes("rescanned-agent"), "the panel must redraw from applyRescan()'s own argument, not from a fresh scan");
+    assert.ok(!body.innerHTML.includes("initial-agent"), "the panel must not still show the pre-rescan data");
+  } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
 });
 
 // render() (src/agents.ts) must not write into #agents-body once the panel
 // has closed -- a load that was in flight when the panel closed must not
-// still paint over it when it lands late. No DOM exists in this harness to
-// prove that behaviourally, so this checks the guard is the first thing the
-// function does, at the source level (the same kind of source-shape check
-// the Open Audit id-agreement test above already relies on).
+// still paint over it when it lands late. Exercised as the real race:
+// openAgents() fires get_inventory but its promise is held back a tick; the
+// panel is closed before it settles; once it does settle, #agents-body must
+// still read whatever it held at close time, never the freshly loaded data.
 test("render() bails out before touching the DOM when the panel is closed", async () => {
-  const source = await readFile(new URL("../src/agents.ts", import.meta.url), "utf8");
-  const match = source.match(/function render\(\): void \{\n( {2}.*\n)+?\}/);
-  assert.ok(match, "render() not found, or its source shape moved under this test");
-  assert.match(match[0].split("\n")[1], /^\s*if \(!isOpen\(\)\) return;/, "render()'s first statement must bail out when the panel is not open");
+  const { openAgents } = await loadAgentsModule();
+  const fakeDocument = makeFakeDocument();
+  globalThis.document = fakeDocument;
+
+  let releaseInventory;
+  const held = new Promise((resolve) => { releaseInventory = resolve; });
+  const { invoke } = makeRecordingInvoke(
+    {
+      get_inventory: inventory({ agents: [definition({ name: "late-agent" })] }),
+      get_running_agents: [],
+      get_agent_spend: [],
+      get_audit: { sections: [] },
+    },
+    { get_inventory: () => held },
+  );
+  globalThis.invoke = invoke;
+
+  try {
+    openAgents();
+    // The panel is open and loading, but get_inventory has not settled yet --
+    // #agents-body must still show the loading placeholder, not late-agent.
+    const bodyWhileLoading = fakeDocument.elements.get("#agents-body").innerHTML;
+    assert.ok(!bodyWhileLoading.includes("late-agent"), "get_inventory resolved before this test released it");
+
+    fakeDocument.body.classList.remove("agents-open"); // the user closed the panel
+    releaseInventory();
+    await flushMicrotasks();
+
+    const bodyAfterClose = fakeDocument.elements.get("#agents-body").innerHTML;
+    assert.equal(bodyAfterClose, bodyWhileLoading, "render() must not overwrite #agents-body once the panel has closed, even for a load that was already in flight");
+    assert.ok(!bodyAfterClose.includes("late-agent"), "a load that settled after close must never reach the DOM");
+  } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
 });

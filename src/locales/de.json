@@ -649,6 +649,7 @@
   "agents.guardrailFailing.other": "{count} Leitplanken-Prüfungen für Agenten brauchen Aufmerksamkeit",
   "agents.openAudit": "Prüfung öffnen",
   "agents.loadError": "Agentendaten konnten nicht gelesen werden: {error}",
+  "agents.spendError": "Agentenausgaben konnten nicht gelesen werden: {error}",
   "audit.loading": "KI-Einrichtung dieses Computers wird gelesen…",
   "audit.welcome": "Das ist es, was sich auf diesem Computer befindet. Dafür wurde nichts irgendwohin gesendet.",
   "audit.score.none": "Noch nichts zu bewerten",

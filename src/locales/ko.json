@@ -633,6 +633,7 @@
   "agents.guardrailFailing.other": "{count}개의 에이전트 가드레일 검사에 주의가 필요합니다",
   "agents.openAudit": "감사 열기",
   "agents.loadError": "에이전트 데이터를 읽을 수 없습니다: {error}",
+  "agents.spendError": "에이전트 지출을 읽을 수 없습니다: {error}",
   "audit.loading": "이 컴퓨터의 AI 구성을 읽는 중…",
   "audit.welcome": "이 컴퓨터에 있는 내용입니다. 이를 확인하기 위해 어디로도 아무것도 전송하지 않았습니다.",
   "audit.score.none": "아직 점수를 매길 항목이 없습니다",

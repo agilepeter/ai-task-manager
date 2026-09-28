@@ -633,6 +633,7 @@
   "agents.guardrailFailing.other": "{count} 件のエージェントガードレールチェックに対応が必要です",
   "agents.openAudit": "監査を開く",
   "agents.loadError": "エージェントデータを読み込めませんでした：{error}",
+  "agents.spendError": "エージェントの支出を読み込めませんでした：{error}",
   "audit.loading": "このコンピューターの AI 構成を読み取り中…",
   "audit.welcome": "このコンピューターにある内容です。これを調べるために、どこにも何も送信していません。",
   "audit.score.none": "まだスコア対象がありません",

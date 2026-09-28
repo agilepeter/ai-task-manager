@@ -649,6 +649,7 @@
   "agents.guardrailFailing.other": "{count} agent guardrail checks need attention",
   "agents.openAudit": "Open Audit",
   "agents.loadError": "Could not read agent data: {error}",
+  "agents.spendError": "Could not read agent spend: {error}",
   "audit.loading": "Reading this computer's AI setup…",
   "audit.welcome": "Here is what is on this computer. Nothing was sent anywhere to work this out.",
   "audit.score.none": "Nothing to score yet",

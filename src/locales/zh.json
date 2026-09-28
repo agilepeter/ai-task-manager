@@ -633,6 +633,7 @@
   "agents.guardrailFailing.other": "{count} 项智能体护栏检查需要关注",
   "agents.openAudit": "打开审计",
   "agents.loadError": "无法读取智能体数据：{error}",
+  "agents.spendError": "无法读取智能体花费：{error}",
   "audit.loading": "正在读取本机的 AI 配置…",
   "audit.welcome": "以下是本机的情况。得出这些结果的过程中没有向任何地方发送任何信息。",
   "audit.score.none": "暂无可评分的内容",

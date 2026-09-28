@@ -163,13 +163,17 @@ interface TrustView {
 /// only in the sense their own error string explains: a rescan does not blank
 /// out a still-good previous value on a fresh failure (see load()'s own
 /// comment), so this mirrors exactly what this module is showing right now,
-/// not a fresh always-successful read.
+/// not a fresh always-successful read. `agentSpend` carries its own
+/// `agentSpendError` the same way, rather than folding a failed spend read
+/// into an empty, indistinguishable-from-"never run" array (see
+/// loadAgentSpend()'s own comment).
 export interface RescanResult {
   inventory: Inventory | null;
   loadError: string;
   runningAgents: RunningAgent[];
   runningAgentsError: string;
   agentSpend: AgentSpend[];
+  agentSpendError: string;
 }
 
 /// Config lives in main.ts; the Inventory tab only needs this one switch,
@@ -227,6 +231,7 @@ let runningError = "";
 let runningAgents: RunningAgent[] = [];
 let runningAgentsError = "";
 let agentSpend: AgentSpend[] = [];
+let agentSpendError = "";
 let setupChanges: SetupChanges | null = null;
 let setupChangesError = "";
 let signIns: Diagnosis[] = [];
@@ -536,8 +541,13 @@ export function describeAgent(a: RunningAgent): { title: string; place: string; 
 /// a label's own punctuation before its value (a plain colon, or French's
 /// non-breaking space before one, or Japanese/Chinese's full-width colon)
 /// is that locale's call, not a rule this function could apply generically.
-function agentsDoorLine(defined: number, runningNow: number, cost30: number): string {
-  return T("agents.doorLine", { yours: defined, running: runningNow, spend: money(cost30) });
+/// `spendError` set means cost30 is not a real zero, just what an empty spend
+/// array sums to -- so the line's spend figure falls back to "?", the app's
+/// own convention for a figure it could not read (see trustChip()'s
+/// `r.score ?? "?"` above), rather than quietly printing "$0" as if the
+/// 30-day window had truly seen no spend.
+function agentsDoorLine(defined: number, runningNow: number, cost30: number, spendError: string): string {
+  return T("agents.doorLine", { yours: defined, running: runningNow, spend: spendError ? "?" : money(cost30) });
 }
 
 /// The live agents, folded above the MCP server rows inside the same Running
@@ -765,14 +775,20 @@ export function describeAgentSpend(s: AgentSpend | undefined, nowMs: number): st
 /// same precedent as `.inv-name.inv-change` in src/styles.css -- while the
 /// chips on the right (model, scope) stay in their own flex item and so stay
 /// on the row's first line regardless of how tall the name/sub column grows.
-export function agentRows(list: Definition[], spend: Map<string, AgentSpend>, nowMs: number): string {
+/// `spend` is `null` when the 30-day scan itself could not be read (see
+/// src/agents.ts's renderAgentsView(), which passes null exactly when its own
+/// agentSpendError is set) -- distinct from a Map that came back empty, which
+/// legitimately means "never run". A null spend drops the sub-line entirely
+/// rather than showing every custom agent as "Never run", which would read as
+/// a true fact about the agent instead of a fact about this failed read.
+export function agentRows(list: Definition[], spend: Map<string, AgentSpend> | null, nowMs: number): string {
   return list
     .map(
       (d) => `
       <div class="inv-row">
         <div class="inv-row-main">
           <span class="inv-name">${esc(d.name)}</span>
-          <span class="inv-sub inv-sub-wrap">${esc(describeAgentSpend(spend.get(d.name), nowMs))}</span>
+          ${spend ? `<span class="inv-sub inv-sub-wrap">${esc(describeAgentSpend(spend.get(d.name), nowMs))}</span>` : ""}
         </div>
         <div class="inv-row-meta">${d.model ? `<span class="inv-fact">${esc(d.model)}</span>` : ""}${scopeChip(d)}</div>
       </div>`,
@@ -934,8 +950,8 @@ function scopeOptions(inv: Inventory): string {
 /// Exported and pure (a plain header row, no action control, same as every
 /// other section header in this file) so a test can check it carries no
 /// per-agent control and still renders at zero.
-export function renderAgentsDoor(inv: Inventory, runningNow: number, cost30: number): string {
-  const summary = agentsDoorLine(inv.agents.length, runningNow, cost30);
+export function renderAgentsDoor(inv: Inventory, runningNow: number, cost30: number, spendError: string): string {
+  const summary = agentsDoorLine(inv.agents.length, runningNow, cost30, spendError);
   return `
     <article class="provider inv-section" data-section="agents-door">
       <button class="inv-head" id="agents-door-btn" title="${esc(T("agents.tip"))}">
@@ -977,7 +993,7 @@ function render(): void {
       </span>
     </div>
     <p class="inv-note">${esc(T("note", { scanned }))}</p>
-    ${renderAgentsDoor(inv, runningAgents.length, agentsCost30)}
+    ${renderAgentsDoor(inv, runningAgents.length, agentsCost30, agentSpendError)}
     ${renderOpportunities(inv.opportunities)}
     ${renderChanges(setupChanges, setupChangesError)}
     ${renderRunning()}
@@ -1021,14 +1037,19 @@ async function loadAgents(): Promise<void> {
 
 /// 30 days of subagent spend, grouped by who ran it. Same cadence as
 /// loadRunning()/loadAgents() -- no rescan, refreshed on every Inventory
-/// open -- but errors collapse to no rows rather than to the tab's own
-/// loadError: every custom agent then simply reads as "never run", which is
-/// the right answer when spend cannot be read at all, not a scan failure.
-async function loadAgentSpend(): Promise<AgentSpend[]> {
+/// open -- but its own error rather than the tab's own loadError, since a
+/// spend read failing is not the same as the scan itself failing.
+/// The error rides alongside the (still empty-on-failure) rows rather than
+/// being swallowed: a caller that only saw `[]` could not tell "never run"
+/// (a true fact about every agent) from "could not read" (a fact about this
+/// request), and showed the former for the latter -- see agents.ts's
+/// renderAgentsView() and inventory.ts's agentsDoorLine() for where the two
+/// are kept apart.
+async function loadAgentSpend(): Promise<{ rows: AgentSpend[]; error: string }> {
   try {
-    return await invoke<AgentSpend[]>("get_agent_spend");
-  } catch {
-    return [];
+    return { rows: await invoke<AgentSpend[]>("get_agent_spend"), error: "" };
+  } catch (err) {
+    return { rows: [], error: String(err) };
   }
 }
 
@@ -1069,14 +1090,15 @@ async function load(): Promise<void> {
   // one lands, same as before, so Inventory's own progressive fill is
   // unchanged.
   const runningAgentsLoaded = loadAgents().then(render);
-  const agentSpendLoaded = loadAgentSpend().then((rows) => {
+  const agentSpendLoaded = loadAgentSpend().then(({ rows, error }) => {
     agentSpend = rows;
+    agentSpendError = error;
     render();
   });
   void loadRunning().then(render);
   void loadSetupChanges().then(render);
   await Promise.all([runningAgentsLoaded, agentSpendLoaded]);
-  host?.rescanned({ inventory, loadError, runningAgents, runningAgentsError, agentSpend });
+  host?.rescanned({ inventory, loadError, runningAgents, runningAgentsError, agentSpend, agentSpendError });
 }
 
 function show(view: View): void {

@@ -21,10 +21,14 @@ import { inlineLocaleImports } from "./inline-locales.mjs";
 // from the inlined i18n source above it) and its body is appended ahead of inventory.ts's, with
 // inventory.ts's own import of the two functions dropped in turn. Its own
 // top-level `function render(): void` (the DOM orchestrator) would otherwise
-// collide with i18n.ts's exported `render(locale, msg)`; only the declaration
-// is renamed, not its call sites, which is safe because nothing this file
-// calls -- describeAgent() and the plain helpers under it -- ever calls the
-// tab's own render().
+// collide with i18n.ts's exported `render(locale, msg)`; the declaration AND
+// every bare `render()` call site are renamed together (a plain
+// `\brender\(\)` word-boundary rename, never touching `rerender(` or any
+// `renderXxx(` identifier), because the load()/host.rescanned() test further
+// down calls the real, exported load() path end to end, through every one of
+// those call sites -- a declaration-only rename would leave them all calling
+// i18n's own `render(locale, msg)` with zero arguments instead, which throws
+// on `msg.vars` the moment it runs.
 // Cached after the first build: every test below calls loadInventoryModule()
 // again, and re-reading, re-inlining and re-transpiling this combined source
 // from scratch each time was most of this file's runtime. Sharing one built
@@ -51,7 +55,17 @@ async function buildInventoryModule() {
     .replace('import { showLedger } from "./ledger";', "")
     .replace('import { localeTag, plural, t, tm, type Msg } from "./i18n";', "")
     .replace('import { byteSize, money, relativeDay, tokens } from "./format";', "")
-    .replace("function render(): void {", "function __unusedInventoryRender(): void {");
+    // A whole-word rename (not just the `render()` call form): load()'s own
+    // `.then(render)` passes the bare identifier as a callback reference,
+    // with no trailing "()" of its own for a narrower regex to catch, and
+    // that call site needs exactly the same fix -- left unrenamed, it would
+    // hand i18n's `render(locale, msg)` to `.then()` as the callback instead,
+    // called there with just the resolved value as `locale` and no `msg` at
+    // all. `\brender\b` matches the declaration, every bare `render()` call
+    // and every bare `.then(render)` reference in one pass, and (via the
+    // trailing `\b`) never touches `renderAgents`/`renderAgentsDoor`/etc, nor
+    // (via the leading `\b`) `rerender`.
+    .replace(/\brender\b/g, "__unusedInventoryRender");
   if (stripped === inventorySource) throw new Error("no substitution matched -- src/inventory.ts's source shape moved under this test");
   const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${stripped}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
@@ -194,29 +208,124 @@ test("renderRunningRows(): confirm markup appears only for the row being confirm
   assert.ok(!html.includes('data-end-yes="filesystem"'), "a row that is not being confirmed must show no confirm markup of its own");
 });
 
+// A minimal stand-in for `document`: load()'s own render() calls (renamed to
+// __unusedInventoryRender() in buildInventoryModule() above, for the reason
+// given in that function's own comment) all bail out on their own first line
+// once `document.querySelector("#inventory")` reads back null, so this test
+// needs nothing more than that -- it is not inspecting any rendered HTML,
+// only the timing and payload of the real invoke() calls and the real
+// host.rescanned() call underneath them.
+function makeFakeDocument() {
+  return {
+    body: { classList: { contains: () => false, add() {}, remove() {} } },
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    contains: () => false,
+    addEventListener: () => {},
+  };
+}
+
+// A recording `invoke()` stand-in -- same shape as scripts/agents-view.test.mjs's
+// own copy: every call is pushed to `calls` before it resolves (or rejects)
+// from `fixtures`; `delays[cmd]`, when given, is awaited first, so this test
+// can hold get_agent_spend back and prove host.rescanned() really waits for
+// it rather than firing the moment get_inventory alone has landed.
+function makeRecordingInvoke(fixtures, delays = {}) {
+  const calls = [];
+  const invoke = async (cmd, args) => {
+    calls.push(cmd);
+    if (delays[cmd]) await delays[cmd]();
+    if (!(cmd in fixtures)) throw new Error(`makeRecordingInvoke: no fixture registered for "${cmd}"`);
+    const v = fixtures[cmd];
+    if (v instanceof Error) throw v;
+    return typeof v === "function" ? v(args) : v;
+  };
+  return { calls, invoke };
+}
+
+// Drains the microtask queue completely -- see scripts/agents-view.test.mjs's
+// own copy for why a setTimeout callback, not a fixed `.then()` chain, is the
+// reliable way to say "let everything already in flight finish".
+function flushMicrotasks() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 // load()'s host.rescanned() call (src/inventory.ts) used to take no
 // arguments, which is why the Agents view had to re-fetch get_inventory /
 // get_running_agents / get_agent_spend all over again on every rescan just to
 // find out what changed -- a full second scan for a view that was already
-// open. It now hands the rescan's own results over directly. Checked at the
-// source level (this suite has no Tauri bridge to spy on real invoke()
-// calls): the call site passes an object literal, and it happens only after
-// the running-agents and agent-spend promises have resolved, not right after
-// get_inventory alone.
-test("load()'s host.rescanned() call carries the rescan's own data, and waits for it first", async () => {
-  const source = await readFile(new URL("../src/inventory.ts", import.meta.url), "utf8");
-  assert.match(
-    source,
-    /host\?\.rescanned\(\{\s*inventory,\s*loadError,\s*runningAgents,\s*runningAgentsError,\s*agentSpend\s*\}\);/,
-    "host.rescanned() must be called with the rescan's own data, not with no arguments",
+// open. It now hands the rescan's own results over directly, and only once
+// they are actually ready. Exercised for real this time, through the same
+// exported showView("inventory") entry point main.ts itself uses to trigger a
+// scan: get_agent_spend is held back, so host.rescanned() firing early would
+// mean it read as called before that promise resolved.
+test("load()'s host.rescanned() call carries the rescan's own data, and only fires after get_inventory, get_running_agents AND get_agent_spend have all resolved", async () => {
+  const { setupViews, showView } = await loadInventoryModule();
+  globalThis.document = makeFakeDocument();
+
+  const invFixture = {
+    mcpServers: [], agents: [], skills: [], hooks: [],
+    permissions: { defaultMode: null, allow: 0, ask: 0, deny: 0 },
+    model: null, projects: 1, tools: [], opportunities: [],
+  };
+  const runningAgentsFixture = [
+    { tool: "Claude Code", pid: 1, elapsedSecs: 10, rssBytes: 1024, cpuPercent: null, cwd: null, area: null, client: null, pace: null },
+  ];
+  const agentSpendFixture = [
+    { name: "deploy-checker", runs: 2, cost: 1.5, tokens: 100, lastUsedMs: 0, topModel: null, byClient: [] },
+  ];
+
+  let releaseSpend;
+  const heldSpend = new Promise((resolve) => { releaseSpend = resolve; });
+  const { calls, invoke } = makeRecordingInvoke(
+    {
+      get_inventory: invFixture,
+      get_running_agents: runningAgentsFixture,
+      get_agent_spend: agentSpendFixture,
+      get_running: [],
+      get_diagnosis: [],
+      get_setup_changes: { since: null, changes: [], daysOfHistory: 0 },
+    },
+    { get_agent_spend: () => heldSpend },
   );
-  const loadFn = source.match(/async function load\(\): Promise<void> \{[\s\S]*?\n\}/);
-  assert.ok(loadFn, "load() not found, or its source shape moved under this test");
-  assert.match(
-    loadFn[0],
-    /await Promise\.all\(\[[^\]]*\]\);\s*\n\s*host\?\.rescanned\(/,
-    "host.rescanned() must be called only after this rescan's own bonus loads have resolved, not immediately after get_inventory",
-  );
+  globalThis.invoke = invoke;
+
+  let rescannedWith = null;
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const host = {
+    trustLookup: () => false, // skips get_trust entirely -- no fixture needed for it
+    setTrustLookup: async () => {},
+    rescanned: (data) => { rescannedWith = data; resolveDone(); },
+  };
+
+  try {
+    setupViews(host);
+    showView("inventory");
+
+    // Everything except get_agent_spend can settle right away. Let it all
+    // run, then prove host.rescanned() has still NOT fired while the one
+    // held promise is still outstanding.
+    await flushMicrotasks();
+    assert.ok(calls.includes("get_inventory"), "load() never called get_inventory");
+    assert.ok(calls.includes("get_running_agents"), "load() never called get_running_agents");
+    assert.ok(calls.includes("get_agent_spend"), "load() never called get_agent_spend");
+    assert.equal(rescannedWith, null, "host.rescanned() must not fire before get_agent_spend has resolved");
+
+    releaseSpend();
+    await flushMicrotasks();
+    await done;
+
+    assert.ok(rescannedWith, "host.rescanned() never fired at all");
+    assert.equal(rescannedWith.inventory, invFixture, "host.rescanned() must carry load()'s own inventory");
+    assert.deepEqual(rescannedWith.runningAgents, runningAgentsFixture, "host.rescanned() must carry load()'s own running agents");
+    assert.deepEqual(rescannedWith.agentSpend, agentSpendFixture, "host.rescanned() must carry the agent spend data that arrived, not a stale or empty value");
+    assert.equal(rescannedWith.agentSpendError, "", "a successful spend read must carry no error");
+    assert.equal(rescannedWith.loadError, "", "a successful inventory read must carry no error");
+  } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
 });
 
 test("empty.runningAgentsError carries the error message with no leftover {error} in every locale", async () => {

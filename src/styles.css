@@ -24,6 +24,13 @@
      card. */
   --spend-cursor: #ececef;
   --radius: 10px;
+  /* .card-panel's translucent fill, at rest and under .provider:hover --
+     the row's real background is this wash composited over --background,
+     not a flat swatch. .run-actions (near .run-row below) reads these same
+     two properties to paint an opaque equivalent for its fade, so the two
+     never drift apart. */
+  --panel-wash: rgba(255, 255, 255, 0.05);
+  --panel-wash-hover: rgba(255, 255, 255, 0.07);
 
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
@@ -45,6 +52,8 @@
   --primary-foreground: #fafafa;
   --accent: #f4f4f5;
   --spend-cursor: #18181b;
+  --panel-wash: rgba(0, 0, 0, 0.04);
+  --panel-wash-hover: rgba(0, 0, 0, 0.055);
   color-scheme: light;
 }
 
@@ -820,7 +829,7 @@ select:focus-visible {
 /* Borderless grouped fill (upstream's metric panel): the card chrome is
    the fill, not an outline. */
 .card-panel {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--panel-wash);
   border: none;
   border-radius: 12px;
   padding: 5px 14px;
@@ -828,16 +837,11 @@ select:focus-visible {
 }
 
 .provider:hover .card-panel {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--panel-wash-hover);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
 }
 
-:root[data-theme="light"] .card-panel {
-  background: rgba(0, 0, 0, 0.04);
-}
-
 :root[data-theme="light"] .provider:hover .card-panel {
-  background: rgba(0, 0, 0, 0.055);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.07);
 }
 
@@ -4293,6 +4297,39 @@ body.wide #detail {
    shown: reserving its width while it was invisible made German and Russian
    wrap around nothing. Shown, it lies over the end of the line on a solid
    ground, so text under it is covered, never overlapped. */
+/* The button's ground must be the row's REAL colour, not --card: .run-row
+   lives inside .card-panel, whose fill is --panel-wash (a translucent wash,
+   different at rest vs. .provider:hover, and different again in light
+   theme -- see the tokens beside --panel-wash above) painted over the page
+   colour (--background). A flat --card swatch showed through as a visibly
+   lighter rectangle in the light theme, because --card and the hovered wash
+   are not the same colour there.
+   Faking translucency here would just reproduce the bug through a second
+   path, so instead this paints an OPAQUE composite that equals the wash
+   blended over the page: a gradient of --panel-wash(-hover) with itself
+   (two identical stops, so it renders as a flat, fully-opaque colour rather
+   than a see-through one) layered over --background. That is exactly
+   .card-panel's own rendering, with no rgb guessed by hand. The fade itself
+   moves into a mask (alpha only) instead of living in the background colour,
+   so the composed colour underneath stays opaque all the way to the left
+   edge.
+   Default is the resting wash; .provider:hover .run-actions below swaps in
+   the hovered wash, because hovering .run-row (the only way this becomes
+   visible via :hover) always also hovers its ancestor .provider -- the two
+   states cannot disagree. A keyboard :focus-within with the mouse elsewhere
+   correctly keeps the resting wash, since the panel itself is not hovered
+   then.
+   color-mix() would do this in one line, but this app sets no
+   minimumSystemVersion (tauri.conf.json has no bundle.macOS block, and
+   README only documents *behaviour* differences at 14-vs-15, not a floor),
+   so Tauri's own default -- macOS 10.13 -- is the effective floor, well
+   below Safari 16.2/macOS 13's color-mix() support. The gradient+mask
+   composite below needs nothing newer than that.
+   .card-panel/.run-actions are never part of the glass system either --
+   every no-glass/no-svg-lens rule in this file (search them) targets only
+   .sidebar, .main-col footer, .glass-bar, .cust-dock and the dialog boxes --
+   so this composite is already correct with glass on or off; no separate
+   case is needed. */
 .run-actions {
   position: absolute;
   right: 0;
@@ -4300,10 +4337,15 @@ body.wide #detail {
   transform: translateY(-50%);
   display: flex;
   padding-left: 14px;
-  background: linear-gradient(to right, transparent, var(--card) 14px);
+  background: linear-gradient(var(--panel-wash), var(--panel-wash)), var(--background);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 14px);
+  mask-image: linear-gradient(to right, transparent, #000 14px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s;
+}
+.provider:hover .run-actions {
+  background: linear-gradient(var(--panel-wash-hover), var(--panel-wash-hover)), var(--background);
 }
 .run-row:hover .run-actions,
 .run-actions:focus-within {
@@ -4328,6 +4370,12 @@ body.wide #detail {
     transform: none;
     padding-left: 0;
     background: none;
+    /* No ground to fake and nothing to fade: the button sits after the
+       text in its own room here, not over it, so drop the mask along with
+       the background above -- an inherited left-edge fade would otherwise
+       still clip this element's own opacity to nothing at x=0. */
+    -webkit-mask-image: none;
+    mask-image: none;
     opacity: 1;
     pointer-events: auto;
     flex: none;

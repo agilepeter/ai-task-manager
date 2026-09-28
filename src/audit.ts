@@ -46,15 +46,36 @@ let opener: HTMLElement | null = null;
 /// duplicated rather than imported, the same convention this file already
 /// follows for esc() and closeFocusTarget() (each view keeps its own tiny
 /// copy rather than share one across independent views). See that file's
-/// comment for why the window is 60s and why a backwards clock reloads.
+/// comment for why the window is 60s, why a backwards clock reloads, why
+/// `loading` blocks a second concurrent get_audit, and why `lastFailed`
+/// retries at once instead of trusting a stale `lastLoadedAt` a failed load
+/// left behind.
 export const RELOAD_FRESHNESS_MS = 60_000;
-export function shouldReload(lastLoadedAt: number, now: number, open: boolean): boolean {
+export function shouldReload(
+  lastLoadedAt: number,
+  now: number,
+  open: boolean,
+  loading: boolean,
+  lastFailed: boolean,
+): boolean {
   if (!open) return false;
+  if (loading) return false;
+  if (lastFailed) return true;
   if (now < lastLoadedAt) return true;
   return now - lastLoadedAt >= RELOAD_FRESHNESS_MS;
 }
-/** Stamped every time get_audit resolves, by whichever path asked for it. */
+/** Stamped only when get_audit actually SUCCEEDS -- never optimistically at
+ *  call time. See src/agents.ts's own lastLoadedAt comment: stamping on a
+ *  failure used to mark this view fresh for a full minute despite showing an
+ *  error. */
 let lastLoadedAt = 0;
+/** True from the moment a get_audit call fires to the moment it settles,
+ *  either way -- lets shouldReload() refuse to start a second concurrent
+ *  request rather than treating "in flight" the same as "still fresh". */
+let loading = false;
+/** True when the last get_audit call failed, cleared the moment one
+ *  succeeds -- lets the next popover-shown check retry at once. */
+let lastFailed = false;
 
 function isOpen(): boolean {
   return document.body.classList.contains("audit-open");
@@ -208,10 +229,16 @@ export function openAudit(opener_: HTMLElement | null = null): void {
   document.body.classList.add("audit-open");
   note = "";
   render();
-  lastLoadedAt = Date.now();
+  loading = true;
   void invoke<AuditReport>("get_audit").then(
-    (r) => { report = r; render(); },
-    (err) => { note = String(err); report = report ?? { generatedAt: 0, passed: 0, attention: 0, score: null, sections: [] }; render(); },
+    (r) => { report = r; lastLoadedAt = Date.now(); loading = false; lastFailed = false; render(); },
+    (err) => {
+      note = String(err);
+      report = report ?? { generatedAt: 0, passed: 0, attention: 0, score: null, sections: [] };
+      loading = false;
+      lastFailed = true;
+      render();
+    },
   );
 }
 
@@ -255,12 +282,12 @@ export function rerender(): void {
 /// on its own.
 export function reloadAudit(force = false): void {
   const open = isOpen();
-  if (!force && !shouldReload(lastLoadedAt, Date.now(), open)) return;
+  if (!force && !shouldReload(lastLoadedAt, Date.now(), open, loading, lastFailed)) return;
   if (!open) return;
-  lastLoadedAt = Date.now();
+  loading = true;
   void invoke<AuditReport>("get_audit").then(
-    (r) => { report = r; note = ""; render(); },
-    (err) => { note = String(err); render(); },
+    (r) => { report = r; note = ""; lastLoadedAt = Date.now(); loading = false; lastFailed = false; render(); },
+    (err) => { note = String(err); loading = false; lastFailed = true; render(); },
   );
 }
 

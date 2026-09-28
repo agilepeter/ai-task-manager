@@ -649,6 +649,7 @@
   "agents.guardrailFailing.other": "{count} verificaciones de barrera de seguridad de agentes necesitan atención",
   "agents.openAudit": "Abrir auditoría",
   "agents.loadError": "No se pudieron leer los datos de los agentes: {error}",
+  "agents.spendError": "No se pudieron leer el gasto de los agentes: {error}",
   "audit.loading": "Leyendo la configuración de IA de este equipo…",
   "audit.welcome": "Esto es lo que hay en este equipo. No se envió nada a ningún sitio para averiguarlo.",
   "audit.score.none": "Aún no hay nada que puntuar",
