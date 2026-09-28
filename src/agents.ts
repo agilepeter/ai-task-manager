@@ -13,10 +13,11 @@
 // reimplemented here.
 
 import { invoke } from "@tauri-apps/api/core";
+import { money } from "./format";
 import { plural, t } from "./i18n";
 import {
   agentRows,
-  agentsSummaryLine,
+  builtInAgentCount,
   builtInAgentRows,
   renderAgents,
   renderOpportunityRows,
@@ -34,16 +35,23 @@ const T = (k: string, v?: Record<string, string | number>) => t(`agents.${k}`, v
 /// "subagent-share" comes from crates/core/src/coaching.rs's FINDING_IDS
 /// (the one usage-coaching finding that is about agents). Every other id in
 /// either registry is about MCP servers, permissions or usage patterns that
-/// have nothing to do with agents, so it stays out of this list.
-const AGENT_FINDING_IDS = new Set(["agents-none", "agents-model-unset", "agent-unused", "subagent-share"]);
+/// have nothing to do with agents, so it stays out of this list. Exported so
+/// scripts/agent-id-registries.test.mjs can check this set against the Rust
+/// source directly, rather than trusting this comment to stay accurate.
+export const AGENT_FINDING_IDS = new Set(["agents-none", "agents-model-unset", "agent-unused", "subagent-share"]);
 
 /// The Audit's own agent guardrail checks (crates/core/src/audit.rs's
-/// agent_checks()): "agent-tools", "deny-shell" and "agent-model". These are
-/// never shown as rows here -- they stay scored inside the Audit -- but a
-/// failing one (status "attention", the only status that counts against the
-/// Audit's score) gets counted into the one-line summary below, with a
-/// button that opens the Audit itself.
-const AGENT_GUARDRAIL_CHECK_IDS = new Set(["agent-tools", "deny-shell", "agent-model"]);
+/// agent_checks()) that can actually fail: "agent-tools" and "deny-shell".
+/// These are never shown as rows here -- they stay scored inside the Audit
+/// -- but a failing one (status "attention", the only status that counts
+/// against the Audit's score) gets counted into the guardrail line below,
+/// with a button that opens the Audit itself. "agent-model" is deliberately
+/// NOT in this set: crates/core/src/audit.rs's agent_checks() only ever
+/// gives it status "consider" (a model left to inherit is worth a look, not
+/// a failing) -- it has no "attention" branch at all, so counting it here
+/// would count something that can never happen. Exported for the same
+/// registry test as AGENT_FINDING_IDS above.
+export const AGENT_GUARDRAIL_CHECK_IDS = new Set(["agent-tools", "deny-shell"]);
 
 interface AuditCheckLite {
   id: string;
@@ -65,13 +73,54 @@ let runningAgents: RunningAgent[] = [];
 let runningAgentsError = "";
 let agentSpend: AgentSpend[] = [];
 let failingGuardrails = 0;
-/** Whatever had focus right before openAgents() was called, restored on close. */
-let lastFocused: HTMLElement | null = null;
+/** The button that was clicked to open this view (the toolbar button, the
+ *  door row, or null when opened some other way -- see openAgents()),
+ *  restored on close. */
+let opener: HTMLElement | null = null;
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
   );
+}
+
+/// What close() should hand focus to: the element that opened this view, if
+/// it is still attached to the document, else the fallback button --
+/// deliberately a plain decision with no DOM reads of its own, so a test can
+/// exercise every branch with plain objects standing in for elements. WebKit
+/// does not focus a button on a mouse click (document.activeElement stays
+/// <body>), which is why close() cannot simply restore "whatever had focus
+/// before" the way it used to: the opener has to be the button the click
+/// handler actually saw, passed in explicitly. `openerStillInDocument` is a
+/// parameter rather than a `document.contains()` call inside this function
+/// on purpose -- it is what makes this testable without a real DOM, and it
+/// is also the reason a soon-to-close Audit's own "Open" button never wins
+/// here: main.ts's goTo() passes no opener at all for that path (see the
+/// comment on openAgents() below), so this function never even sees it.
+export function closeFocusTarget(
+  opener: HTMLElement | null,
+  openerStillInDocument: boolean,
+  fallback: HTMLElement | null,
+): HTMLElement | null {
+  if (opener && openerStillInDocument) return opener;
+  return fallback;
+}
+
+/// The three headline numbers, computed once so the stats row (below) and
+/// the door row's matching line in src/inventory.ts (agentsDoorLine()) can
+/// never disagree about what they count: `yours` is the user's own agent
+/// definitions, `runningNow` is agent HOSTS running right now, and `spend30`
+/// is 30 days of ALL subagent spend -- overwhelmingly the built-in agents',
+/// not the user's own few definitions, which is exactly why this view never
+/// joins the three into one sentence any more (see the review this fixed:
+/// "2 agents, 2 running, $17" read as if the two defined agents had spent
+/// the $17). `spend30` sums the RAW per-row costs before money() rounds the
+/// total once, so it can never drift from the sum of what "Your agents" and
+/// "Built-in agents" show on their own rows -- rounding each of those rows
+/// individually first and adding the rounded strings would not, in general,
+/// equal this total.
+export function agentStats(inv: Inventory, running: RunningAgent[], spend: AgentSpend[]): { yours: number; runningNow: number; spend30: number } {
+  return { yours: inv.agents.length, runningNow: running.length, spend30: spend.reduce((sum, s) => sum + s.cost, 0) };
 }
 
 /// The whole view's content, top to bottom, for a given snapshot of data --
@@ -86,9 +135,18 @@ export function renderAgentsView(
   failing: number,
   nowMs: number,
 ): string {
-  // 1. Summary line.
-  const cost30 = spend.reduce((sum, s) => sum + s.cost, 0);
-  const summary = agentsSummaryLine(inv.agents.length, running.length, cost30);
+  // 1. Three labelled facts, not one sentence that joins a count of the
+  // user's own agents with a cost that is mostly built-ins' (see agentStats()
+  // above). Wraps at 380px via flex-wrap, same as every other toolbar/filter
+  // row in this app; no card-inside-card, just the app's own caption size
+  // and colour for the label under a slightly larger number.
+  const stats = agentStats(inv, running, spend);
+  const statsRow = `
+    <div class="ag-stats">
+      <div class="ag-stat"><span class="ag-stat-n">${stats.yours}</span><span class="ag-stat-label">${esc(T("stat.yours"))}</span></div>
+      <div class="ag-stat"><span class="ag-stat-n">${stats.runningNow}</span><span class="ag-stat-label">${esc(T("stat.running"))}</span></div>
+      <div class="ag-stat"><span class="ag-stat-n">${esc(money(stats.spend30))}</span><span class="ag-stat-label">${esc(T("stat.spend"))}</span></div>
+    </div>`;
 
   // 2. Running now -- the exact rows Inventory used to show, folded above
   // the (now absent) MCP server rows. renderAgents() itself stays silent at
@@ -113,13 +171,17 @@ export function renderAgentsView(
   // stays silent when there is nothing to attribute, which reads fine when
   // SOME subagent spend exists but none of it happens to be a built-in's;
   // when there has been NO subagent spend at all in the window, that silence
-  // would look like a gap instead of an answer, so this view names it.
+  // would look like a gap instead of an answer, so this view names it. Either
+  // way the section's own heading carries the count and the hint stays under
+  // the title, the same shape every other section in this view uses.
   const totalRuns = spend.reduce((sum, s) => sum + s.runs, 0);
+  const builtInCount = builtInAgentCount(inv.agents, spend);
   const builtInsBody = builtInAgentRows(inv.agents, spend, nowMs);
+  const builtInHead = (count: number) => `<h3>${esc(t("inventory.agents.builtIn"))} <span class="plan">${count}</span></h3><p class="inv-note">${esc(t("inventory.agents.builtInHint"))}</p>`;
   const builtInSection = builtInsBody
-    ? `<section class="dt-section">${builtInsBody}</section>`
+    ? `<section class="dt-section">${builtInHead(builtInCount)}${builtInsBody}</section>`
     : totalRuns === 0
-      ? `<section class="dt-section"><h3>${esc(t("inventory.agents.builtIn"))}</h3><p class="inv-empty">${esc(T("empty.noSubagentRuns"))}</p></section>`
+      ? `<section class="dt-section">${builtInHead(0)}<p class="inv-empty">${esc(T("empty.noSubagentRuns"))}</p></section>`
       : "";
 
   // 5. Worth a look -- the findings that are about agents, and only those
@@ -128,7 +190,7 @@ export function renderAgentsView(
   // never drifts from what that section shows for the same finding. A
   // failing agent guardrail check is a one-line count with a button to the
   // Audit, not a second Opportunity card -- the Audit is still where that
-  // check is scored.
+  // check is scored, so it is not part of this heading's own count either.
   const findings = inv.opportunities.filter((o) => AGENT_FINDING_IDS.has(o.id));
   const findingsBody = findings.length
     ? renderOpportunityRows(findings)
@@ -138,29 +200,44 @@ export function renderAgentsView(
       ? `<p class="dt-caption">${esc(plural("agents.guardrailFailing", failing))} <button class="inv-learn" id="agents-open-audit">${esc(T("openAudit"))}</button></p>`
       : "";
 
+  // One shape for all four section titles -- a name with its count beside
+  // it, same as Inventory's own sections ("Running now 2", "Your agents 2")
+  // -- rather than the three different shapes this view used to mix: a bare
+  // h3 with no count (Your agents, Worth a look), an h3 with a nested
+  // sub-heading duplicating its own count underneath (Running now used to
+  // carry an "AGENTS 2" grouphead plus a "2 agents running" line, both
+  // dead now that the section title itself carries the number), and no h3 at
+  // all, just a grouphead from inside the row renderer (Built-in agents).
   return `
-    <p class="dt-caption ag-summary">${esc(summary)}</p>
+    ${statsRow}
     <section class="dt-section">
-      <h3>${esc(T("section.running"))}</h3>
+      <h3>${esc(T("section.running"))} <span class="plan">${running.length}</span></h3>
       ${runningBody}
     </section>
     <section class="dt-section">
-      <h3>${esc(T("section.yours"))}</h3>
+      <h3>${esc(T("section.yours"))} <span class="plan">${inv.agents.length}</span></h3>
       ${yourAgentsBody}
     </section>
     ${builtInSection}
     <section class="dt-section">
-      <h3>${esc(T("section.worthALook"))}</h3>
+      <h3>${esc(T("section.worthALook"))} <span class="plan">${findings.length}</span></h3>
       ${findingsBody}
       ${guardrailLine}
     </section>`;
+}
+
+/// The load-error page, pulled out of render() below so a hostile error
+/// string's escaping can be exercised directly, the same way renderAgentsView()
+/// already lets a test feed a hostile `runningError` straight in.
+export function renderLoadError(error: string): string {
+  return `<p class="dt-empty">${esc(T("loadError", { error }))}</p>`;
 }
 
 function render(): void {
   const el = document.querySelector<HTMLElement>("#agents-body");
   if (!el) return;
   if (loadError) {
-    el.innerHTML = `<p class="dt-empty">${esc(T("loadError", { error: loadError }))}</p>`;
+    el.innerHTML = renderLoadError(loadError);
     return;
   }
   if (!inventory) {
@@ -185,23 +262,17 @@ async function loadFailingGuardrails(): Promise<number> {
   }
 }
 
-function close(): void {
-  document.body.classList.remove("agents-open");
-  lastFocused?.focus();
-  lastFocused = null;
-}
-
-/// Opens the view and loads its own data fresh -- the same way openAudit()
-/// (src/audit.ts) owns its own get_audit() call rather than reading
-/// whatever Inventory happens to have cached, so this works whether or not
-/// the Inventory tab was ever visited this session.
-export function openAgents(): void {
-  lastFocused = document.activeElement as HTMLElement | null;
-  document.body.classList.add("agents-open");
-  loadError = "";
-  render();
+/// The four invoke() calls this view's data comes from, fired together --
+/// shared by openAgents() (the first load) and reloadAgents() (every later
+/// refresh while the panel is already open). Deliberately does not touch
+/// `loadError` on the way in and does not reset any of the four pieces of
+/// state before the calls resolve: reloadAgents() must never flash a
+/// "loading" page over content the panel is already showing (see its own
+/// comment), so the previous render stays up until fresh data actually
+/// lands, one piece at a time, same as it always has.
+function loadData(): void {
   void invoke<Inventory>("get_inventory").then(
-    (inv) => { inventory = inv; render(); },
+    (inv) => { inventory = inv; loadError = ""; render(); },
     (err) => { loadError = String(err); render(); },
   );
   void invoke<RunningAgent[]>("get_running_agents").then(
@@ -213,9 +284,54 @@ export function openAgents(): void {
     () => { agentSpend = []; render(); },
   );
   void loadFailingGuardrails().then((n) => { failingGuardrails = n; render(); });
+}
+
+function close(): void {
+  document.body.classList.remove("agents-open");
+  const fallback = document.querySelector<HTMLElement>("#agents-open-btn");
+  const stillThere = opener != null && document.contains(opener);
+  closeFocusTarget(opener, stillThere, fallback)?.focus();
+  opener = null;
+}
+
+/// Opens the view and loads its own data fresh -- the same way openAudit()
+/// (src/audit.ts) owns its own get_audit() call rather than reading
+/// whatever Inventory happens to have cached, so this works whether or not
+/// the Inventory tab was ever visited this session.
+///
+/// `opener` is the element close() returns focus to, when it is still in the
+/// document -- the button the click handler actually saw (setupAgents()
+/// passes #agents-open-btn or the door row's button), never
+/// `document.activeElement`: WebKit does not focus a button on a mouse
+/// click, so reading the active element back would just see <body>. Left
+/// out (main.ts's goTo() does this for the Audit's own "Open" button) when
+/// there is no real opener to return to -- the Audit has already closed by
+/// the time this runs, and its button, though still technically attached
+/// off-screen, is not where focus should land -- close() then falls back to
+/// #agents-open-btn on its own.
+export function openAgents(opener_: HTMLElement | null = null): void {
+  opener = opener_;
+  document.body.classList.add("agents-open");
+  loadError = "";
+  render();
+  loadData();
   // The heading lives in the static panel head (index.html), not in
   // anything render() paints, so it is already there to receive focus.
   document.querySelector<HTMLElement>("#agents-heading")?.focus();
+}
+
+/// Refreshes this view's own data in place, without opening the panel,
+/// capturing a new opener, or moving focus -- called when the popover is
+/// shown again or an inventory rescan finishes while this view happens to
+/// still be open (main.ts wires both). A no-op while the panel is closed.
+/// loadData() never clears the current render before the new data lands, so
+/// #agents-body's content only changes once, in place -- #agents itself
+/// (not #agents-body) is the scrollable element, and replacing a child's
+/// innerHTML does not reset its parent's scrollTop, so the panel's scroll
+/// position survives a reload on its own, with nothing here to manage.
+export function reloadAgents(): void {
+  if (!document.body.classList.contains("agents-open")) return;
+  loadData();
 }
 
 /// Redraws the Agents panel in place, e.g. after a locale switch. A no-op
@@ -230,9 +346,11 @@ export function setupAgents(h: AgentsHost): void {
   // Global click delegation for both places Inventory opens this view from
   // (its toolbar button and its own summary door row) -- the same mechanism
   // audit.ts uses for #audit-open-btn, so it works no matter which module
-  // rendered the button.
+  // rendered the button. Passes the actual button clicked, not just the
+  // fact that one was, so close() has a real opener to return focus to.
   document.addEventListener("click", (e) => {
-    if ((e.target as HTMLElement).closest("#agents-open-btn, #agents-door-btn")) openAgents();
+    const btn = (e.target as HTMLElement).closest<HTMLElement>("#agents-open-btn, #agents-door-btn");
+    if (btn) openAgents(btn);
   });
   document.querySelector("#agents-body")?.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;

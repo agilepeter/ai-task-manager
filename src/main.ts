@@ -1,6 +1,6 @@
 import { rerender as rerenderInventory, setupViews, showView } from "./inventory";
 import { maybeFirstRunAudit, openAudit, rerender as rerenderAudit, setupAudit } from "./audit";
-import { openAgents, rerender as rerenderAgents, setupAgents } from "./agents";
+import { openAgents, reloadAgents, rerender as rerenderAgents, setupAgents } from "./agents";
 import { rerender as rerenderAbout, setupAbout } from "./about";
 import { rerender as rerenderLedger, setupLedger } from "./ledger";
 import { applySavedWide, cardExtras, refreshDetail, rerender as rerenderDetail, setupDetail } from "./detail";
@@ -4750,6 +4750,10 @@ window.addEventListener("DOMContentLoaded", () => {
   setupViews({
     trustLookup: () => config.trustLookup === true,
     setTrustLookup: (trustLookup) => patchConfig({ trustLookup }),
+    // A no-op unless the Agents view happens to still be open over this
+    // rescan (see reloadAgents()'s own comment) -- the Audit's own behaviour
+    // is deliberately untouched here.
+    rescanned: () => reloadAgents(),
   });
   setupAbout();
   setupAudit({
@@ -5055,6 +5059,10 @@ window.addEventListener("DOMContentLoaded", () => {
     setSettings(false);
     dismissConfirm?.();
     resetsPopover.dismiss();
+    // A no-op while the Agents view is closed; refreshes its data in place,
+    // keeping scroll and focus, when it happens to still be open (the Audit's
+    // own behaviour is untouched here).
+    reloadAgents();
     // Replay any renders skipped while hidden, before the reveal plays.
     if (pendingRender) {
       pendingRender = false;

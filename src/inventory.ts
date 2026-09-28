@@ -156,10 +156,16 @@ interface TrustView {
   errorMsg?: Msg | null;
 }
 
-/// Config lives in main.ts; the Inventory tab only needs this one switch.
+/// Config lives in main.ts; the Inventory tab only needs this one switch,
+/// plus a way to tell another open view a rescan just landed.
 export interface InventoryHost {
   trustLookup(): boolean;
   setTrustLookup(on: boolean): Promise<void>;
+  /** Called once a rescan's primary get_inventory() call has settled, success
+   *  or failure -- lets the Agents view (src/agents.ts's reloadAgents()), if
+   *  it happens to still be open, refresh its own copy of the same data
+   *  instead of going stale underneath it. A no-op the rest of the time. */
+  rescanned(): void;
 }
 
 type View = "usage" | "inventory" | "ledger";
@@ -498,19 +504,20 @@ export function describeAgent(a: RunningAgent): { title: string; place: string; 
   return { title, place, pace, tip };
 }
 
-/// Defined agents, agents running right now, and 30-day subagent cost -- the
-/// one sentence Inventory's own door row (below, in render()) and the Agents
-/// view's own heading (src/agents.ts) both show, computed here once so the
-/// two can never disagree. Keys live under "agents." -- the view's own
-/// prefix, a sibling of "audit." -- read directly by key rather than through
-/// this file's own T() alias, the same way audit.ts's sectionLabel() reads
-/// "section.*" directly instead of through its own "audit." alias.
-export function agentsSummaryLine(defined: number, runningNow: number, cost30: number): string {
-  return t("agents.summary.line", {
-    defined: plural("agents.summary.defined", defined),
-    running: plural("agents.summary.running", runningNow),
-    cost: money(cost30),
-  });
+/// Defined agents, agents running right now, and 30-day subagent cost, joined
+/// into the one line Inventory's own door row (below, in renderAgentsDoor())
+/// shows -- three labelled facts, not one sentence that joins a count of the
+/// user's own agent definitions with a cost that is mostly built-ins' (the
+/// Agents view's own stats row, src/agents.ts's agentStats()/T("stat.*"),
+/// shows the same three numbers with the same labels, so the two can never
+/// name a different number for the same fact). The whole line -- labels,
+/// numbers and the "·" between them -- is one key per locale
+/// ("inventory.agents.doorLine"), not built up here from smaller pieces:
+/// a label's own punctuation before its value (a plain colon, or French's
+/// non-breaking space before one, or Japanese/Chinese's full-width colon)
+/// is that locale's call, not a rule this function could apply generically.
+function agentsDoorLine(defined: number, runningNow: number, cost30: number): string {
+  return T("agents.doorLine", { yours: defined, running: runningNow, spend: money(cost30) });
 }
 
 /// The live agents, folded above the MCP server rows inside the same Running
@@ -519,14 +526,17 @@ export function agentsSummaryLine(defined: number, runningNow: number, cost30: n
 /// coding agent running at all, and repeating an empty line under every
 /// server list would be noise the servers themselves never had to carry. A
 /// failed scan still surfaces the group, so a permission or lsof gap is
-/// visible rather than swallowed.
+/// visible rather than swallowed. Used only by the Agents view now (Inventory
+/// itself no longer shows agent rows at all), whose own section heading
+/// already carries this list's count ("Running now N") -- this used to repeat
+/// that count in a nested "AGENTS N" sub-heading plus an "N agents running"
+/// line of its own, which is exactly the duplicate, differently-shaped
+/// heading a review caught; both are gone, not replaced.
 export function renderAgents(list: RunningAgent[]): string {
   if (!list.length && !runningAgentsError) return "";
-  const head = `<div class="inv-grouphead">${esc(T("running.agentsTitle"))} <span class="inv-grouphead-n">${list.length}</span></div>`;
   if (!list.length) {
-    return `${head}<p class="inv-empty">${esc(runningAgentsError ? T("empty.runningAgentsError", { error: runningAgentsError }) : T("empty.runningAgents"))}</p>`;
+    return `<p class="inv-empty">${esc(runningAgentsError ? T("empty.runningAgentsError", { error: runningAgentsError }) : T("empty.runningAgents"))}</p>`;
   }
-  const lead = `<p class="inv-note run-lead">${esc(plural("inventory.running.agentCount", list.length))}</p>`;
   const rows = list
     .map((a) => {
       const d = describeAgent(a);
@@ -551,7 +561,7 @@ export function renderAgents(list: RunningAgent[]): string {
       </div>`;
     })
     .join("");
-  return `${head}${lead}${rows}`;
+  return rows;
 }
 
 /// The Task Manager view: what is in memory right now, heaviest first. The
@@ -702,7 +712,12 @@ export function describeAgentSpend(s: AgentSpend | undefined, nowMs: number): st
 /// Custom agent rows, each with its 30-day spend line underneath the name --
 /// skills use the plain defRows() above since they carry no spend of their
 /// own to show. Exported: the Agents view (src/agents.ts) paints its "Your
-/// agents" section with this exact row, never a second renderer for it.
+/// agents" section with this exact row, never a second renderer for it. The
+/// spend line wraps ("30 days: 2 runs · $1.69 · last used 3 days ago mostly
+/// for Northwind" can run long) instead of losing its tail to an ellipsis --
+/// same precedent as `.inv-name.inv-change` in src/styles.css -- while the
+/// chips on the right (model, scope) stay in their own flex item and so stay
+/// on the row's first line regardless of how tall the name/sub column grows.
 export function agentRows(list: Definition[], spend: Map<string, AgentSpend>, nowMs: number): string {
   return list
     .map(
@@ -710,12 +725,34 @@ export function agentRows(list: Definition[], spend: Map<string, AgentSpend>, no
       <div class="inv-row">
         <div class="inv-row-main">
           <span class="inv-name">${esc(d.name)}</span>
-          <span class="inv-sub">${esc(describeAgentSpend(spend.get(d.name), nowMs))}</span>
+          <span class="inv-sub inv-sub-wrap">${esc(describeAgentSpend(spend.get(d.name), nowMs))}</span>
         </div>
         <div class="inv-row-meta">${d.model ? `<span class="inv-fact">${esc(d.model)}</span>` : ""}${scopeChip(d)}</div>
       </div>`,
     )
     .join("");
+}
+
+/// allAgents/spend split into the built-in rows builtInAgentRows() below will
+/// paint: `named` is every spend row whose name is real and does not belong
+/// to a custom agent, `unattributed` is the one spend row (if any) with no
+/// attribution line at all. Pulled out so the count and the rows themselves
+/// can never drift onto two different ideas of "how many built-ins".
+function builtInAgentSpend(allAgents: Definition[], spend: AgentSpend[]): { named: AgentSpend[]; unattributed: AgentSpend | undefined } {
+  const customNames = new Set(allAgents.map((a) => a.name));
+  return { named: spend.filter((s) => s.name !== "" && !customNames.has(s.name)), unattributed: spend.find((s) => s.name === "") };
+}
+
+/// The number of rows builtInAgentRows() will render for this spend list --
+/// exported so the Agents view's own section heading (src/agents.ts) can show
+/// a count that can never disagree with the rows beneath it, the same way
+/// every other section title in that view works now (see item 6's fix:
+/// this count used to live only inside a nested grouphead this function
+/// painted itself; now the heading is the caller's job, and this is what it
+/// counts by).
+export function builtInAgentCount(allAgents: Definition[], spend: AgentSpend[]): number {
+  const { named, unattributed } = builtInAgentSpend(allAgents, spend);
+  return named.length + (unattributed ? 1 : 0);
 }
 
 /// Agents Claude Code ships with -- never a file on disk, so never a
@@ -725,25 +762,21 @@ export function agentRows(list: Definition[], spend: Map<string, AgentSpend>, no
 /// "already listed", not reappear here). An empty name (a transcript with
 /// no attribution line at all) is still real spend, so it is never dropped
 /// -- it renders as this group's last row, under its own label rather than
-/// blank, so that spend cannot go missing from the tab.
+/// blank, so that spend cannot go missing from the tab. Rows only: the
+/// group's own heading and hint used to live here too, but this function is
+/// reached only from the Agents view now, whose own section wrapper carries
+/// both (see builtInAgentCount() above and src/agents.ts's renderAgentsView()).
 export function builtInAgentRows(allAgents: Definition[], spend: AgentSpend[], nowMs: number): string {
-  const customNames = new Set(allAgents.map((a) => a.name));
-  const named = spend.filter((s) => s.name !== "" && !customNames.has(s.name));
-  const unattributed = spend.find((s) => s.name === "");
-  const total = named.length + (unattributed ? 1 : 0);
-  if (!total) return "";
+  const { named, unattributed } = builtInAgentSpend(allAgents, spend);
+  if (!named.length && !unattributed) return "";
   const row = (label: string, s: AgentSpend) => `
       <div class="inv-row">
         <div class="inv-row-main">
           <span class="inv-name">${esc(label)}</span>
-          <span class="inv-sub">${esc(describeAgentSpend(s, nowMs))}</span>
+          <span class="inv-sub inv-sub-wrap">${esc(describeAgentSpend(s, nowMs))}</span>
         </div>
       </div>`;
-  const rows = named.map((s) => row(s.name, s)).join("") + (unattributed ? row(T("agents.unattributed"), unattributed) : "");
-  return (
-    `<div class="inv-grouphead">${esc(T("agents.builtIn"))} <span class="inv-grouphead-n">${total}</span></div>` +
-    `<p class="inv-note">${esc(T("agents.builtInHint"))}</p>${rows}`
-  );
+  return named.map((s) => row(s.name, s)).join("") + (unattributed ? row(T("agents.unattributed"), unattributed) : "");
 }
 
 /// Skills and guardrails are both "how this machine is configured", they
@@ -855,7 +888,7 @@ function scopeOptions(inv: Inventory): string {
 /// other section header in this file) so a test can check it carries no
 /// per-agent control and still renders at zero.
 export function renderAgentsDoor(inv: Inventory, runningNow: number, cost30: number): string {
-  const summary = agentsSummaryLine(inv.agents.length, runningNow, cost30);
+  const summary = agentsDoorLine(inv.agents.length, runningNow, cost30);
   return `
     <article class="provider inv-section" data-section="agents-door">
       <button class="inv-head" id="agents-door-btn" title="${esc(T("agents.tip"))}">
@@ -981,6 +1014,7 @@ async function load(): Promise<void> {
     loadError = String(err);
   }
   render();
+  host?.rescanned();
   void loadTrust();
   void loadRunning().then(render);
   void loadAgents().then(render);
