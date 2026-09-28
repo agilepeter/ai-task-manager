@@ -30,6 +30,18 @@ release history is kept verbatim in
   rest of the same language's file. They now use each language's own. German
   addresses the reader formally throughout, and Japanese names the tab and
   its section in Japanese.
+- **Polish.** Running now's End task button sits on the row's own sub line
+  now, instead of leaving an empty line under every server; it still only
+  shows on hover or keyboard focus, and now shows on a touch device too. The
+  three figures at the top of the Agents view stay on one row in every
+  language, instead of the third one dropping alone in French, Portuguese
+  and Russian. The failing guardrail line in the Agents view is a plain
+  block now, sentence then button, instead of a button crowded inside the
+  sentence. A Japanese spacing slip and a tooltip that said cost where the
+  figure beside it says spend are both fixed. The Audit now reloads in
+  place when the popover reopens or a rescan finishes while it is open, the
+  same way the Agents view already did, and a rescan no longer triggers a
+  second full scan for either view when it is left open.
 
 ### Fixed
 
