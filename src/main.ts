@@ -1,6 +1,6 @@
 import { rerender as rerenderInventory, setupViews, showView } from "./inventory";
-import { maybeFirstRunAudit, openAudit, rerender as rerenderAudit, setupAudit } from "./audit";
-import { openAgents, reloadAgents, rerender as rerenderAgents, setupAgents } from "./agents";
+import { maybeFirstRunAudit, openAudit, reloadAudit, rerender as rerenderAudit, setupAudit } from "./audit";
+import { applyRescan, openAgents, reloadAgents, rerender as rerenderAgents, setupAgents } from "./agents";
 import { rerender as rerenderAbout, setupAbout } from "./about";
 import { rerender as rerenderLedger, setupLedger } from "./ledger";
 import { applySavedWide, cardExtras, refreshDetail, rerender as rerenderDetail, setupDetail } from "./detail";
@@ -4750,10 +4750,17 @@ window.addEventListener("DOMContentLoaded", () => {
   setupViews({
     trustLookup: () => config.trustLookup === true,
     setTrustLookup: (trustLookup) => patchConfig({ trustLookup }),
-    // A no-op unless the Agents view happens to still be open over this
-    // rescan (see reloadAgents()'s own comment) -- the Audit's own behaviour
-    // is deliberately untouched here.
-    rescanned: () => reloadAgents(),
+    // A no-op unless the Agents view or the Audit happens to still be open
+    // over this rescan. Agents gets the rescan's own data handed straight in
+    // (applyRescan(), see its own comment) rather than re-invoking the three
+    // commands src/inventory.ts's load() just called; the Audit has nothing
+    // of its own to reuse from a rescan (its report comes from get_audit
+    // alone), so it always re-fetches, unconditionally -- see
+    // reloadAudit()'s own comment on its `force` parameter.
+    rescanned: (data) => {
+      applyRescan(data);
+      reloadAudit(true);
+    },
   });
   setupAbout();
   setupAudit({
@@ -5059,10 +5066,12 @@ window.addEventListener("DOMContentLoaded", () => {
     setSettings(false);
     dismissConfirm?.();
     resetsPopover.dismiss();
-    // A no-op while the Agents view is closed; refreshes its data in place,
-    // keeping scroll and focus, when it happens to still be open (the Audit's
-    // own behaviour is untouched here).
+    // A no-op while the Agents view (or the Audit) is closed, or while its
+    // data is still fresh (shouldReload()'s 60s window in each module):
+    // refreshes in place, keeping scroll and focus, only once it has gone
+    // stale while open.
     reloadAgents();
+    reloadAudit();
     // Replay any renders skipped while hidden, before the reveal plays.
     if (pendingRender) {
       pendingRender = false;

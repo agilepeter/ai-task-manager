@@ -147,6 +147,78 @@ test("describeAgent() falls back through folder -> area -> client in en", async 
 // This calls the module's own t() with the fully-qualified key, the same way
 // renderAgents() reaches it through its local T() alias, so a missing key or
 // a var-name typo in any locale's register fails here.
+// renderRunningRows() (src/inventory.ts) is the MCP-server "Running now"
+// rows -- pulled out of the module's own renderRunning() so it can be
+// exercised here without this module's own DOM state (`running`/`ending`) or
+// a Tauri invoke(), the same way describeAgent() above already can be. The
+// End task button used to sit under its own always-reserved line
+// (`.run-actions`, one full row, opacity 0 until hover) -- an empty gap
+// present under every server, always. It now shares the row's sub line
+// (where/uptime/process count) instead, so this checks the button's markup
+// actually lands inside that same `.run-sub-row` as the sub text, and that
+// the confirmation markup -- which only exists for the one row being
+// confirmed -- appears for that row alone.
+const RUNNING_SERVER = {
+  name: "chrome-devtools", configured: true, client: "Claude Code", package: "chrome-devtools-mcp",
+  instances: 1, rssBytes: 120 * 1048576, elapsedSecs: 129600, pids: [4242, 4243, 4244, 4245, 4246, 4247],
+};
+const OTHER_SERVER = {
+  name: "filesystem", configured: true, client: "Claude Desktop", package: "filesystem-mcp",
+  instances: 1, rssBytes: 40 * 1048576, elapsedSecs: 3600, pids: [5001],
+};
+
+test("renderRunningRows(): the End task button sits inside the sub line's row", async () => {
+  const { renderRunningRows, setActiveLocale } = await loadInventoryModule();
+  setActiveLocale("en");
+  const html = renderRunningRows([RUNNING_SERVER], "");
+  assert.match(
+    html,
+    /<div class="run-sub-row">\s*<div class="inv-row-sub">[^]*?<\/div>\s*<div class="run-actions"><button class="mini-btn run-end" data-end="chrome-devtools"[^]*?<\/button><\/div>\s*<\/div>/,
+    "the End task button must be inside .run-sub-row, alongside the sub line, not in a separate reserved row",
+  );
+  assert.ok(!html.includes("run-confirm"), "no row is being confirmed, so no confirm markup should render at all");
+});
+
+test("renderRunningRows(): confirm markup appears only for the row being confirmed", async () => {
+  const { renderRunningRows, setActiveLocale } = await loadInventoryModule();
+  setActiveLocale("en");
+  const html = renderRunningRows([RUNNING_SERVER, OTHER_SERVER], "chrome-devtools");
+
+  // The confirming row: no End task button, but a confirm line of its own.
+  assert.ok(!html.includes('data-end="chrome-devtools"'), "the row being confirmed must not still show its plain End task button");
+  assert.match(html, /data-end-yes="chrome-devtools"/, "the row being confirmed must show its own Yes button");
+  assert.match(html, /<div class="run-confirm-row"><span class="run-confirm">/, "the confirmation must sit in its own row, under the row being confirmed");
+
+  // The other row: untouched, still just its plain End task button, no confirm markup at all for it.
+  assert.match(html, /data-end="filesystem"/, "a row that is not being confirmed must keep its plain End task button");
+  assert.ok(!html.includes('data-end-yes="filesystem"'), "a row that is not being confirmed must show no confirm markup of its own");
+});
+
+// load()'s host.rescanned() call (src/inventory.ts) used to take no
+// arguments, which is why the Agents view had to re-fetch get_inventory /
+// get_running_agents / get_agent_spend all over again on every rescan just to
+// find out what changed -- a full second scan for a view that was already
+// open. It now hands the rescan's own results over directly. Checked at the
+// source level (this suite has no Tauri bridge to spy on real invoke()
+// calls): the call site passes an object literal, and it happens only after
+// the running-agents and agent-spend promises have resolved, not right after
+// get_inventory alone.
+test("load()'s host.rescanned() call carries the rescan's own data, and waits for it first", async () => {
+  const source = await readFile(new URL("../src/inventory.ts", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /host\?\.rescanned\(\{\s*inventory,\s*loadError,\s*runningAgents,\s*runningAgentsError,\s*agentSpend\s*\}\);/,
+    "host.rescanned() must be called with the rescan's own data, not with no arguments",
+  );
+  const loadFn = source.match(/async function load\(\): Promise<void> \{[\s\S]*?\n\}/);
+  assert.ok(loadFn, "load() not found, or its source shape moved under this test");
+  assert.match(
+    loadFn[0],
+    /await Promise\.all\(\[[^\]]*\]\);\s*\n\s*host\?\.rescanned\(/,
+    "host.rescanned() must be called only after this rescan's own bonus loads have resolved, not immediately after get_inventory",
+  );
+});
+
 test("empty.runningAgentsError carries the error message with no leftover {error} in every locale", async () => {
   const { t: translate, setActiveLocale, LOCALES: locales } = await loadInventoryModule();
   for (const locale of locales) {

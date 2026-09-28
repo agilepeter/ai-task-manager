@@ -3974,15 +3974,22 @@ body.wide:not(.agents-open) #agents {
 /* Three labelled facts, not one sentence that joins a count of the user's
    own agents with a cost that is mostly built-ins' (the old ".ag-summary"
    single line this replaced read "2 agents, 2 running, $17 in the last 30
-   days", which is exactly the finding this stats row fixed). A plain flex
-   row, no card-inside-card: it wraps onto two lines rather than clipping
-   when a label runs long (German's "Ausgaben für Subagenten, 30 Tage" at
-   380px), and every stat can shrink or wrap its own label independently of
-   its neighbours via `min-width: 0`. */
+   days", which is exactly the finding this stats row fixed). A three-column
+   grid of equal columns, not a wrapping flex row: a flex row let the third
+   figure drop to a lonely second row in French, Portuguese and Russian,
+   while the first two shared the first -- the grid keeps all three on one
+   row in every language, each number aligned on the same baseline, with its
+   own label wrapping inside its own column. `overflow-wrap: break-word`
+   (never breaking mid-word) plus `hyphens: auto` is the fallback for a
+   label whose longest word still does not fit a column at 380px; it can
+   hyphenate because index.html's <html lang> is kept current per locale
+   (src/i18n.ts's applyLocale() sets document.documentElement.lang on every
+   switch), so the browser always knows which language's hyphenation rules
+   to use for it (src/i18n.ts's applyStaticI18n()). */
 .ag-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 20px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 12px;
   margin: 2px 0 4px;
 }
 .ag-stat {
@@ -4002,7 +4009,17 @@ body.wide:not(.agents-open) #agents {
   font-size: 10.5px;
   line-height: 1.3;
   color: var(--muted-foreground);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  -webkit-hyphens: auto;
+  hyphens: auto;
+}
+/* The failing-guardrail line: the sentence on its own line(s), the "Open
+   Audit" button on its own line under it, left aligned -- never a button
+   inside the <p>, which is what wrapped unpredictably per language. The
+   7px gap under the sentence matches .inv-opp-detail's own margin-bottom,
+   the same gap a "Learn more" button has under its text. */
+.ag-guardrail .dt-caption {
+  margin-bottom: 7px;
 }
 
 /* -------------------------------------------------------------------- about */
@@ -4263,10 +4280,30 @@ body.wide #detail {
   margin-bottom: 6px;
 }
 
-/* End task: the ask sits under the row, never inline with the numbers, so a
-   stray click on a busy list cannot reach it. */
+/* End task shares the sub line (where/uptime/process count) instead of
+   reserving an empty line under every server, always -- that reserved blank
+   line, present even at rest, was the bug this fixed. It still never sits
+   inline with the numbers above (.inv-row-main's name and memory figure):
+   that is the actual stray-click risk this row has always guarded against,
+   so the button's line is always the sub text's line, never the numbers'.
+   The sub text itself wraps normally (no white-space: nowrap), so flex-wrap
+   here is a fallback for the rare case there is truly no room beside it --
+   in practice the button stays at the line's right while the text wraps
+   around it. */
+.run-sub-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.run-sub-row .inv-row-sub {
+  flex: 1;
+  min-width: 0;
+}
 .run-actions {
   display: flex;
+  flex: none;
   justify-content: flex-end;
 }
 .run-end {
@@ -4276,6 +4313,19 @@ body.wide #detail {
 .run-row:hover .run-end,
 .run-end:focus-visible {
   opacity: 1;
+}
+/* A touch device has no hover state to reveal the button with -- without
+   this it would stay opacity: 0 forever there. */
+@media (hover: none) {
+  .run-end {
+    opacity: 1;
+  }
+}
+/* The confirmation only exists for the one row being confirmed, so it gets
+   its own line under the row rather than crowding the sub line. */
+.run-confirm-row {
+  display: flex;
+  justify-content: flex-end;
 }
 .run-confirm {
   display: flex;

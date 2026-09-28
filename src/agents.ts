@@ -23,6 +23,7 @@ import {
   renderOpportunityRows,
   type AgentSpend,
   type Inventory,
+  type RescanResult,
   type RunningAgent,
 } from "./inventory";
 
@@ -195,9 +196,16 @@ export function renderAgentsView(
   const findingsBody = findings.length
     ? renderOpportunityRows(findings)
     : `<p class="inv-empty">${esc(T("empty.nothingToFlag"))}</p>`;
+  // A block, not a button inside a sentence: the sentence sits on its own
+  // line(s) and the button sits under it, left aligned, same gap as the
+  // "Learn more" buttons above have under their own text (.ag-guardrail's
+  // rule in styles.css). A button inside a <p> wrapped differently in every
+  // language -- beside the text in English, under it and indented in German
+  // and Russian, crowded against the last word in Portuguese -- which is
+  // exactly what this fixed.
   const guardrailLine =
     failing > 0
-      ? `<p class="dt-caption">${esc(plural("agents.guardrailFailing", failing))} <button class="inv-learn" id="agents-open-audit">${esc(T("openAudit"))}</button></p>`
+      ? `<div class="ag-guardrail"><p class="dt-caption">${esc(plural("agents.guardrailFailing", failing))}</p><button class="inv-learn" id="agents-open-audit">${esc(T("openAudit"))}</button></div>`
       : "";
 
   // One shape for all four section titles -- a name with its count beside
@@ -233,7 +241,41 @@ export function renderLoadError(error: string): string {
   return `<p class="dt-empty">${esc(T("loadError", { error }))}</p>`;
 }
 
+/// How long a load stays "fresh" -- reloadAgents() (called every time the
+/// popover is shown again) skips its own re-fetch inside this window, since
+/// reopening the popover happens far more often than this view's underlying
+/// data actually changes. A rescan (applyRescan() below) is a different
+/// event -- the setup genuinely changed -- so it never checks this and
+/// always applies what it is handed.
+export const RELOAD_FRESHNESS_MS = 60_000;
+
+/// When the popover-shown path should actually reload: never for a closed
+/// view (nothing to refresh); never for one whose data is still fresh; always
+/// once it has gone stale; and always when the clock has moved backwards
+/// (`now < lastLoadedAt`, e.g. a system clock change) -- a negative age is
+/// not a trustworthy "fresh", so that case reloads rather than trusting it.
+/// Pure and exported so it can be tested without a DOM (see its own test).
+export function shouldReload(lastLoadedAt: number, now: number, open: boolean): boolean {
+  if (!open) return false;
+  if (now < lastLoadedAt) return true;
+  return now - lastLoadedAt >= RELOAD_FRESHNESS_MS;
+}
+
+/// Stamped every time this view's data is (re)loaded, by whichever path did
+/// it -- loadData() or applyRescan() -- so reloadAgents() can tell how old
+/// what is currently shown is.
+let lastLoadedAt = 0;
+
+function isOpen(): boolean {
+  return document.body.classList.contains("agents-open");
+}
+
+/// Guards against a load that was in flight finishing after the panel has
+/// since closed -- without this, a slow invoke() landing late would still
+/// overwrite #agents-body's content (and reset its scroll) underneath a view
+/// the user is no longer looking at.
 function render(): void {
+  if (!isOpen()) return;
   const el = document.querySelector<HTMLElement>("#agents-body");
   if (!el) return;
   if (loadError) {
@@ -263,14 +305,18 @@ async function loadFailingGuardrails(): Promise<number> {
 }
 
 /// The four invoke() calls this view's data comes from, fired together --
-/// shared by openAgents() (the first load) and reloadAgents() (every later
-/// refresh while the panel is already open). Deliberately does not touch
+/// used by openAgents() (the first load, always fresh) and reloadAgents()
+/// (every later popover-shown refresh, once shouldReload() above says the
+/// current data has actually gone stale). Deliberately does not touch
 /// `loadError` on the way in and does not reset any of the four pieces of
-/// state before the calls resolve: reloadAgents() must never flash a
-/// "loading" page over content the panel is already showing (see its own
-/// comment), so the previous render stays up until fresh data actually
-/// lands, one piece at a time, same as it always has.
+/// state before the calls resolve: this must never flash a "loading" page
+/// over content the panel is already showing, so the previous render stays
+/// up until fresh data actually lands, one piece at a time, same as it
+/// always has. A rescan does NOT come through here any more -- see
+/// applyRescan() below, which is handed three of these four pieces directly
+/// instead of re-invoking them.
 function loadData(): void {
+  lastLoadedAt = Date.now();
   void invoke<Inventory>("get_inventory").then(
     (inv) => { inventory = inv; loadError = ""; render(); },
     (err) => { loadError = String(err); render(); },
@@ -322,16 +368,48 @@ export function openAgents(opener_: HTMLElement | null = null): void {
 
 /// Refreshes this view's own data in place, without opening the panel,
 /// capturing a new opener, or moving focus -- called when the popover is
-/// shown again or an inventory rescan finishes while this view happens to
-/// still be open (main.ts wires both). A no-op while the panel is closed.
-/// loadData() never clears the current render before the new data lands, so
+/// shown again while this view happens to still be open (main.ts wires this
+/// into "popover-shown"). Gated by shouldReload(): reopening the popover
+/// happens far more often than the underlying data changes, so this skips
+/// its own get_inventory / get_running_agents / get_agent_spend / get_audit
+/// calls entirely when the last load is still within RELOAD_FRESHNESS_MS.
+/// A rescan finishing is a SEPARATE event, handled by applyRescan() below,
+/// not by this function -- a rescan always applies (the setup genuinely just
+/// changed), where this is purely "is it worth asking again". loadData()
+/// never clears the current render before the new data lands, so
 /// #agents-body's content only changes once, in place -- #agents itself
 /// (not #agents-body) is the scrollable element, and replacing a child's
 /// innerHTML does not reset its parent's scrollTop, so the panel's scroll
 /// position survives a reload on its own, with nothing here to manage.
 export function reloadAgents(): void {
-  if (!document.body.classList.contains("agents-open")) return;
+  if (!shouldReload(lastLoadedAt, Date.now(), isOpen())) return;
   loadData();
+}
+
+/// Applies a rescan's results directly -- called from the `rescanned`
+/// callback src/inventory.ts's own load() fires once a rescan has settled,
+/// carrying exactly the three pieces of this view's data that a rescan also
+/// produces (get_inventory, get_running_agents, get_agent_spend). Unlike
+/// reloadAgents() above, this never re-invokes those three commands itself:
+/// that would be the same redundant second full scan this function exists to
+/// remove. It still fetches the failing-guardrail count fresh
+/// (loadFailingGuardrails(), i.e. get_audit) because a rescan's own data
+/// carries nothing about the Audit's checks -- those are computed by a
+/// separate command a rescan never touches, so there is nothing to reuse for
+/// it. Always applies when the panel is open (a rescan is a real change, not
+/// a "maybe" like reloadAgents()'s freshness check); a no-op while closed,
+/// same as every other refresh path here -- openAgents() reloads everything
+/// fresh on its own the next time this view opens regardless.
+export function applyRescan(data: RescanResult): void {
+  if (!isOpen()) return;
+  inventory = data.inventory;
+  loadError = data.loadError;
+  runningAgents = data.runningAgents;
+  runningAgentsError = data.runningAgentsError;
+  agentSpend = data.agentSpend;
+  lastLoadedAt = Date.now();
+  render();
+  void loadFailingGuardrails().then((n) => { failingGuardrails = n; render(); });
 }
 
 /// Redraws the Agents panel in place, e.g. after a locale switch. A no-op

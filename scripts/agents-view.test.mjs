@@ -69,6 +69,7 @@ async function buildAgentsModule() {
   renderOpportunityRows,
   type AgentSpend,
   type Inventory,
+  type RescanResult,
   type RunningAgent,
 } from "./inventory";`,
       "",
@@ -403,4 +404,74 @@ test("an agent's spend line carries inv-sub-wrap, so it wraps instead of ending 
 
   const builtIn = builtInAgentRows([], [agentSpendRow({ name: "general-purpose" })], NOW_MS);
   assert.match(builtIn, /class="inv-sub inv-sub-wrap"/, "a built-in agent's row does not wrap its spend line");
+});
+
+// The failing-guardrail sentence and its Open Audit button used to share one
+// <p>, which wrapped a different way in every language (beside the text in
+// English, under it and indented in German and Russian, crowded against the
+// last word in Portuguese). They are now two siblings in one wrapper: the
+// sentence its own <p>, the button its own element after it -- never a
+// button inside a paragraph -- so the button always starts its own line
+// regardless of how long the sentence wraps.
+test("the failing-guardrail line is a block, not a button inside a sentence", async () => {
+  const { renderAgentsView, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  const oneFailing = renderAgentsView(inventory(), [], "", [], 1, NOW_MS);
+  assert.match(
+    oneFailing,
+    /<div class="ag-guardrail"><p class="dt-caption">[^<]*<\/p><button class="inv-learn" id="agents-open-audit">/,
+    "the sentence must close its own <p> before the Open Audit button starts -- no button inside the paragraph",
+  );
+});
+
+// shouldReload() (src/agents.ts) is the pure decision reloadAgents() makes on
+// every "popover-shown" -- reopening the popover happens far more often than
+// this view's data actually changes, so a fresh load should not be re-fetched
+// just because the popover closed and reopened a second later. Exercised
+// directly, with no DOM, exactly the way this suite's other pure functions
+// are (closeFocusTarget() above).
+test("shouldReload(): closed never reloads, open+fresh does not, open+stale does, a backwards clock reloads", async () => {
+  const { shouldReload, RELOAD_FRESHNESS_MS } = await loadAgentsModule();
+  const now = 1_790_000_000_000;
+
+  assert.equal(shouldReload(now - 1, now, false), false, "a closed view must never reload, no matter how stale");
+  assert.equal(shouldReload(now, now, true), false, "just loaded (age 0) must not reload");
+  assert.equal(shouldReload(now - (RELOAD_FRESHNESS_MS - 1), now, true), false, "one millisecond inside the freshness window must not reload");
+  assert.equal(shouldReload(now - RELOAD_FRESHNESS_MS, now, true), true, "exactly at the freshness window must reload");
+  assert.equal(shouldReload(now - RELOAD_FRESHNESS_MS - 1, now, true), true, "past the freshness window must reload");
+  assert.equal(shouldReload(now + 1, now, true), true, "a clock that moved backwards must reload rather than trust the (negative) age");
+});
+
+// applyRescan() (src/agents.ts) exists so a rescan hands this view the data
+// src/inventory.ts's load() already fetched, instead of this view
+// re-invoking get_inventory / get_running_agents / get_agent_spend a second
+// time for the same event -- the actual bug this fixes (a view left open
+// used to cause a full second scan on every rescan). This suite has no real
+// Tauri bridge to spy on, so it checks the same thing at the source level:
+// applyRescan()'s own body names get_audit (still needed -- a rescan's data
+// carries nothing about the Audit's checks) but none of the three commands
+// the rescan's data already covers.
+test("applyRescan() re-invokes only get_audit, never get_inventory/get_running_agents/get_agent_spend", async () => {
+  const source = await readFile(new URL("../src/agents.ts", import.meta.url), "utf8");
+  const match = source.match(/export function applyRescan\([^)]*\): void \{[\s\S]*?\n\}/);
+  assert.ok(match, "applyRescan() not found, or its source shape moved under this test");
+  const body = match[0];
+  assert.ok(!/invoke</.test(body), "applyRescan() must not call invoke() itself -- it should read loadFailingGuardrails() only, and take its other three fields from its argument");
+  assert.match(body, /loadFailingGuardrails\(\)/, "applyRescan() must still refresh the failing-guardrail count (get_audit), which a rescan's own data never carries");
+  assert.match(body, /data\.inventory/, "applyRescan() must take `inventory` from its argument, not re-fetch it");
+  assert.match(body, /data\.runningAgents/, "applyRescan() must take `runningAgents` from its argument, not re-fetch it");
+  assert.match(body, /data\.agentSpend/, "applyRescan() must take `agentSpend` from its argument, not re-fetch it");
+});
+
+// render() (src/agents.ts) must not write into #agents-body once the panel
+// has closed -- a load that was in flight when the panel closed must not
+// still paint over it when it lands late. No DOM exists in this harness to
+// prove that behaviourally, so this checks the guard is the first thing the
+// function does, at the source level (the same kind of source-shape check
+// the Open Audit id-agreement test above already relies on).
+test("render() bails out before touching the DOM when the panel is closed", async () => {
+  const source = await readFile(new URL("../src/agents.ts", import.meta.url), "utf8");
+  const match = source.match(/function render\(\): void \{\n( {2}.*\n)+?\}/);
+  assert.ok(match, "render() not found, or its source shape moved under this test");
+  assert.match(match[0].split("\n")[1], /^\s*if \(!isOpen\(\)\) return;/, "render()'s first statement must bail out when the panel is not open");
 });

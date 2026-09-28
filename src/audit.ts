@@ -42,6 +42,24 @@ let firstRun = false;
 /** The button that opened this view (see openAudit()), restored on close. */
 let opener: HTMLElement | null = null;
 
+/// Same rule as src/agents.ts's own RELOAD_FRESHNESS_MS/shouldReload() --
+/// duplicated rather than imported, the same convention this file already
+/// follows for esc() and closeFocusTarget() (each view keeps its own tiny
+/// copy rather than share one across independent views). See that file's
+/// comment for why the window is 60s and why a backwards clock reloads.
+export const RELOAD_FRESHNESS_MS = 60_000;
+export function shouldReload(lastLoadedAt: number, now: number, open: boolean): boolean {
+  if (!open) return false;
+  if (now < lastLoadedAt) return true;
+  return now - lastLoadedAt >= RELOAD_FRESHNESS_MS;
+}
+/** Stamped every time get_audit resolves, by whichever path asked for it. */
+let lastLoadedAt = 0;
+
+function isOpen(): boolean {
+  return document.body.classList.contains("audit-open");
+}
+
 /** Which tab (or the Agents view) fixes a check, when one does. The three
  *  agent guardrail checks (agent-tools, agent-model, deny-shell) and
  *  agents-none used to point at Inventory, back when Inventory itself
@@ -95,7 +113,13 @@ function gotoLabel(where: "inventory" | "ledger" | "usage" | "agents"): string {
   return T("goto.inventory");
 }
 
+/// Guards against a get_audit() call that was in flight finishing after the
+/// panel has since closed -- without this, a slow response landing late
+/// would still overwrite #audit-body's content (and reset its scroll)
+/// underneath a view the user is no longer looking at (same fix as
+/// src/agents.ts's own render()).
 function render(): void {
+  if (!isOpen()) return;
   const el = document.querySelector<HTMLElement>("#audit-body");
   if (!el) return;
   if (!report) {
@@ -184,6 +208,7 @@ export function openAudit(opener_: HTMLElement | null = null): void {
   document.body.classList.add("audit-open");
   note = "";
   render();
+  lastLoadedAt = Date.now();
   void invoke<AuditReport>("get_audit").then(
     (r) => { report = r; render(); },
     (err) => { note = String(err); report = report ?? { generatedAt: 0, passed: 0, attention: 0, score: null, sections: [] }; render(); },
@@ -202,6 +227,41 @@ export function maybeFirstRunAudit(): void {
 /// this into the locale-change handler). A no-op while the panel is closed.
 export function rerender(): void {
   if (document.body.classList.contains("audit-open")) render();
+}
+
+/// Refreshes the audit's own data in place, without opening the panel,
+/// capturing a new opener, or moving focus -- called from two different
+/// events in main.ts, which is what `force` distinguishes:
+///
+/// - `force: false` (the default), on "popover-shown" -- reopening the
+///   popover happens far more often than the setup actually changes, so this
+///   is gated by shouldReload() the same way src/agents.ts's reloadAgents()
+///   gates its own popover-shown refresh: skip while the last get_audit is
+///   still within RELOAD_FRESHNESS_MS.
+/// - `force: true`, after a rescan -- the setup genuinely just changed, so
+///   this always re-fetches. There is nothing of a rescan's own data to
+///   reuse here the way src/agents.ts's applyRescan() reuses three of
+///   src/inventory.ts's four rescan calls: the Audit's report is computed
+///   entirely by its own `get_audit` command from the just-rescanned setup,
+///   which a rescan never calls on its own, so get_audit is the one call a
+///   rescan-driven reload has no way to avoid.
+///
+/// Either way, a no-op while the panel is closed. Deliberately does not
+/// clear `report` before the call resolves, so the previous render stays up
+/// until fresh data actually lands -- #audit-body's content only changes
+/// once, in place, the same reasoning as reloadAgents(). #audit itself (not
+/// #audit-body) is the scrollable element, so replacing a child's innerHTML
+/// does not reset scrollTop: the panel's scroll position survives a reload
+/// on its own.
+export function reloadAudit(force = false): void {
+  const open = isOpen();
+  if (!force && !shouldReload(lastLoadedAt, Date.now(), open)) return;
+  if (!open) return;
+  lastLoadedAt = Date.now();
+  void invoke<AuditReport>("get_audit").then(
+    (r) => { report = r; note = ""; render(); },
+    (err) => { note = String(err); render(); },
+  );
 }
 
 export function setupAudit(h: AuditHost): void {

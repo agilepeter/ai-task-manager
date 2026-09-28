@@ -26,7 +26,7 @@ interface McpServer {
 }
 
 /** One MCP server as it exists in memory right now. Never a command line. */
-interface RunningServer {
+export interface RunningServer {
   name: string;
   configured: boolean;
   client: string | null;
@@ -156,16 +156,36 @@ interface TrustView {
   errorMsg?: Msg | null;
 }
 
+/// Everything a rescan (load() below) ends up holding that the Agents view
+/// also needs -- handed over as-is so that view never has to re-invoke
+/// get_inventory / get_running_agents / get_agent_spend for data this tab
+/// just fetched a moment ago. `inventory` and `runningAgents` are `null`/`[]`
+/// only in the sense their own error string explains: a rescan does not blank
+/// out a still-good previous value on a fresh failure (see load()'s own
+/// comment), so this mirrors exactly what this module is showing right now,
+/// not a fresh always-successful read.
+export interface RescanResult {
+  inventory: Inventory | null;
+  loadError: string;
+  runningAgents: RunningAgent[];
+  runningAgentsError: string;
+  agentSpend: AgentSpend[];
+}
+
 /// Config lives in main.ts; the Inventory tab only needs this one switch,
 /// plus a way to tell another open view a rescan just landed.
 export interface InventoryHost {
   trustLookup(): boolean;
   setTrustLookup(on: boolean): Promise<void>;
-  /** Called once a rescan's primary get_inventory() call has settled, success
-   *  or failure -- lets the Agents view (src/agents.ts's reloadAgents()), if
-   *  it happens to still be open, refresh its own copy of the same data
-   *  instead of going stale underneath it. A no-op the rest of the time. */
-  rescanned(): void;
+  /** Called once a rescan has settled -- get_inventory plus the three bonus
+   *  reads load() also always makes (get_running (MCP servers, unrelated to
+   *  this), get_running_agents and get_agent_spend). Carries the data those
+   *  last two calls (and get_inventory) produced, so the Agents view
+   *  (src/agents.ts's applyRescan()), if it happens to still be open, can
+   *  redraw from it directly instead of re-invoking the same three commands
+   *  a second time for the same event -- which is exactly what it used to
+   *  do. A no-op the rest of the time. */
+  rescanned(data: RescanResult): void;
 }
 
 type View = "usage" | "inventory" | "ledger";
@@ -564,19 +584,34 @@ export function renderAgents(list: RunningAgent[]): string {
   return rows;
 }
 
-/// The Task Manager view: what is in memory right now, heaviest first. The
-/// backend matches processes to configured servers and never hands over a
-/// command line, so there is nothing here to redact.
-function renderRunning(): string {
-  const total = running.reduce((sum, r) => sum + r.rssBytes, 0);
-  const procCount = running.reduce((sum, r) => sum + r.pids.length, 0);
-  const bar = total > 0 ? running.map((r) => r.rssBytes / total) : [];
-  const rows = running
+/// The per-server "Running now" rows -- pulled out of renderRunning() below
+/// so a test can exercise the markup directly, the same way renderAgents()
+/// above already lets one, without needing this module's own DOM state
+/// (`running`/`ending`) or a Tauri invoke(). `endingName` is this module's
+/// own `ending` (the server currently mid-confirm, at most one at a time),
+/// passed in rather than read directly so the function stays pure.
+///
+/// End task sits on the SAME line as the row's sub line (where/uptime/process
+/// count), at its right, rather than reserving an empty line under every
+/// server always -- an always-reserved blank line was the bug this fixed.
+/// It is still never inline with `.inv-row-main` (the name and memory
+/// figure): that is the actual stray-click risk this row has always guarded
+/// against (see the old comment on `.run-actions`, kept in styles.css), so
+/// the button only ever shares a line with the sub text, never the numbers
+/// above it. While confirming, the button itself disappears (there is
+/// nothing to click twice in the same place) and the confirmation gets its
+/// own line below, since it only exists for the one row being confirmed.
+export function renderRunningRows(list: RunningServer[], endingName: string): string {
+  const total = list.reduce((sum, r) => sum + r.rssBytes, 0);
+  const bar = total > 0 ? list.map((r) => r.rssBytes / total) : [];
+  return list
     .map((r, i) => {
       const copies = r.instances > 1 ? `<span class="inv-chip run-dupe" title="${esc(T("running.copiesTip"))}">&times;${r.instances}</span>` : "";
-      const end = ending === r.name
-        ? `<span class="run-confirm">${esc(T("running.endConfirm", { name: r.name }))} <button class="mini-btn run-yes" data-end-yes="${esc(r.name)}">${esc(T("running.endTask"))}</button><button class="mini-btn" data-end-no="1">${esc(t("dialog.cancel"))}</button></span>`
-        : `<button class="mini-btn run-end" data-end="${esc(r.name)}" title="${esc(T("running.endTip"))}">${esc(T("running.endTask"))}</button>`;
+      const confirming = endingName === r.name;
+      const endBtn = `<button class="mini-btn run-end" data-end="${esc(r.name)}" title="${esc(T("running.endTip"))}">${esc(T("running.endTask"))}</button>`;
+      const confirmRow = confirming
+        ? `<div class="run-confirm-row"><span class="run-confirm">${esc(T("running.endConfirm", { name: r.name }))} <button class="mini-btn run-yes" data-end-yes="${esc(r.name)}">${esc(T("running.endTask"))}</button><button class="mini-btn" data-end-no="1">${esc(t("dialog.cancel"))}</button></span></div>`
+        : "";
       const where = r.configured
         ? esc(r.client ?? "")
         : `<span class="inv-chip run-unknown" title="${esc(T("running.notInConfigTip"))}">${esc(T("running.notInConfig"))}</span>`;
@@ -593,11 +628,23 @@ function renderRunning(): string {
           <span class="run-mem">${mbLabel(r.rssBytes)}</span>
         </div>
         <div class="run-meter"><i style="--w:${(bar[i] * 100).toFixed(1)}%"></i></div>
-        <div class="inv-row-sub">${rowSub}</div>
-        <div class="run-actions">${end}</div>
+        <div class="run-sub-row">
+          <div class="inv-row-sub">${rowSub}</div>
+          ${confirming ? "" : `<div class="run-actions">${endBtn}</div>`}
+        </div>
+        ${confirmRow}
       </div>`;
     })
     .join("");
+}
+
+/// The Task Manager view: what is in memory right now, heaviest first. The
+/// backend matches processes to configured servers and never hands over a
+/// command line, so there is nothing here to redact.
+function renderRunning(): string {
+  const total = running.reduce((sum, r) => sum + r.rssBytes, 0);
+  const procCount = running.reduce((sum, r) => sum + r.pids.length, 0);
+  const rows = renderRunningRows(running, ending);
   const serverLead = running.length
     ? `<p class="inv-note run-lead">${esc(T("running.summary", { mem: mbLabel(total), processes: plural("inventory.running.processCount", procCount) }))}</p>`
     : "";
@@ -1014,15 +1061,22 @@ async function load(): Promise<void> {
     loadError = String(err);
   }
   render();
-  host?.rescanned();
   void loadTrust();
-  void loadRunning().then(render);
-  void loadAgents().then(render);
-  void loadAgentSpend().then((rows) => {
+  // Awaited (unlike loadTrust()/loadSetupChanges() above and below, which
+  // stay fire-and-forget) so host.rescanned() below can hand the Agents view
+  // this data once it is actually fresh, rather than firing the moment
+  // get_inventory alone settles -- render() still repaints this tab as each
+  // one lands, same as before, so Inventory's own progressive fill is
+  // unchanged.
+  const runningAgentsLoaded = loadAgents().then(render);
+  const agentSpendLoaded = loadAgentSpend().then((rows) => {
     agentSpend = rows;
     render();
   });
+  void loadRunning().then(render);
   void loadSetupChanges().then(render);
+  await Promise.all([runningAgentsLoaded, agentSpendLoaded]);
+  host?.rescanned({ inventory, loadError, runningAgents, runningAgentsError, agentSpend });
 }
 
 function show(view: View): void {
