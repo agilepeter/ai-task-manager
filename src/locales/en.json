@@ -556,9 +556,6 @@
   "inventory.running.processCount.one": "{n} process",
   "inventory.running.processCount.other": "{n} processes",
   "inventory.running.summary": "{mem} of memory across {processes}. Servers start when a client asks for one and stay for the session.",
-  "inventory.running.agentsTitle": "Agents",
-  "inventory.running.agentCount.one": "{count} agent running",
-  "inventory.running.agentCount.other": "{count} agents running",
   "inventory.running.agentRow": "{tool} · {elapsed}",
   "inventory.running.agentFolderOnly": "{folder}",
   "inventory.running.agentFolderArea": "{folder} · {area}",
@@ -643,11 +640,6 @@
   "inventory.rescan.tip": "Read the local setup again",
   "inventory.tab": "Inventory",
   "agents.panel.title": "Agents",
-  "agents.summary.line": "{defined}, {running}, {cost} in the last 30 days",
-  "agents.summary.defined.one": "{count} agent",
-  "agents.summary.defined.other": "{count} agents",
-  "agents.summary.running.one": "{count} running",
-  "agents.summary.running.other": "{count} running",
   "agents.section.running": "Running now",
   "agents.section.yours": "Your agents",
   "agents.section.worthALook": "Worth a look",
@@ -1001,5 +993,9 @@
   "error.trust.empty": "trust index: nothing usable in the response",
   "error.export.unsupported": "that table cannot be exported",
   "error.export.downloadsDir": "find the Downloads folder: {error}",
-  "error.export.write": "write {path}: {error}"
+  "error.export.write": "write {path}: {error}",
+  "agents.stat.yours": "Your agents",
+  "agents.stat.running": "Running now",
+  "agents.stat.spend": "Subagent spend, 30 days",
+  "inventory.agents.doorLine": "Your agents: {yours} · Running now: {running} · Subagent spend, 30 days: {spend}"
 }

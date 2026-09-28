@@ -546,8 +546,6 @@
   "inventory.running.rowSub": "{where} · 已运行 {time} · {processes}",
   "inventory.running.processCount.other": "{n} 个进程",
   "inventory.running.summary": "共占用 {mem} 内存，涉及 {processes}。服务器会在客户端请求时启动，并在本次会话中保持运行。",
-  "inventory.running.agentsTitle": "智能体",
-  "inventory.running.agentCount.other": "{count} 个智能体正在运行",
   "inventory.running.agentRow": "{tool} · {elapsed}",
   "inventory.running.agentFolderOnly": "{folder}",
   "inventory.running.agentFolderArea": "{folder} · {area}",
@@ -627,9 +625,6 @@
   "inventory.rescan.tip": "重新读取本机配置",
   "inventory.tab": "清单",
   "agents.panel.title": "智能体",
-  "agents.summary.line": "{defined}，{running}，最近 30 天 {cost}",
-  "agents.summary.defined.other": "{count} 个智能体",
-  "agents.summary.running.other": "{count} 个正在运行",
   "agents.section.running": "正在运行",
   "agents.section.yours": "你的智能体",
   "agents.section.worthALook": "值得关注",
@@ -943,5 +938,9 @@
   "error.trust.empty": "信任指数：响应内容不可用",
   "error.export.unsupported": "这个表格无法导出",
   "error.export.downloadsDir": "找不到下载文件夹：{error}",
-  "error.export.write": "写入 {path}：{error}"
+  "error.export.write": "写入 {path}：{error}",
+  "agents.stat.yours": "你的智能体",
+  "agents.stat.running": "正在运行",
+  "agents.stat.spend": "子智能体花费，30 天",
+  "inventory.agents.doorLine": "你的智能体：{yours} · 正在运行：{running} · 子智能体花费，30 天：{spend}"
 }

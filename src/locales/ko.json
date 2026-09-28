@@ -546,8 +546,6 @@
   "inventory.running.rowSub": "{where} · {time} 동안 실행 · {processes}",
   "inventory.running.processCount.other": "프로세스 {n}개",
   "inventory.running.summary": "{processes}에 걸쳐 메모리 {mem} 사용 중입니다. 서버는 클라이언트가 요청할 때 시작되어 세션 동안 유지됩니다.",
-  "inventory.running.agentsTitle": "에이전트",
-  "inventory.running.agentCount.other": "에이전트 {count}개 실행 중",
   "inventory.running.agentRow": "{tool} · {elapsed}",
   "inventory.running.agentFolderOnly": "{folder}",
   "inventory.running.agentFolderArea": "{folder} · {area}",
@@ -627,9 +625,6 @@
   "inventory.rescan.tip": "로컬 구성을 다시 읽습니다",
   "inventory.tab": "인벤토리",
   "agents.panel.title": "에이전트",
-  "agents.summary.line": "{defined}, {running}, 최근 30일 {cost}",
-  "agents.summary.defined.other": "에이전트 {count}개",
-  "agents.summary.running.other": "{count}개 실행 중",
   "agents.section.running": "지금 실행 중",
   "agents.section.yours": "내 에이전트",
   "agents.section.worthALook": "살펴볼 항목",
@@ -943,5 +938,9 @@
   "error.trust.empty": "신뢰 지표: 응답에 사용할 수 있는 내용이 없음",
   "error.export.unsupported": "그 표는 내보낼 수 없음",
   "error.export.downloadsDir": "다운로드 폴더 찾기: {error}",
-  "error.export.write": "{path} 쓰기: {error}"
+  "error.export.write": "{path} 쓰기: {error}",
+  "agents.stat.yours": "내 에이전트",
+  "agents.stat.running": "지금 실행 중",
+  "agents.stat.spend": "서브에이전트 지출, 30일",
+  "inventory.agents.doorLine": "내 에이전트: {yours} · 지금 실행 중: {running} · 서브에이전트 지출, 30일: {spend}"
 }

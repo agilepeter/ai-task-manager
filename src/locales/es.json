@@ -556,9 +556,6 @@
   "inventory.running.processCount.one": "{n} proceso",
   "inventory.running.processCount.other": "{n} procesos",
   "inventory.running.summary": "{mem} de memoria repartidos en {processes}. Los servidores se inician cuando un cliente los solicita y permanecen durante la sesión.",
-  "inventory.running.agentsTitle": "Agentes",
-  "inventory.running.agentCount.one": "{count} agente en ejecución",
-  "inventory.running.agentCount.other": "{count} agentes en ejecución",
   "inventory.running.agentRow": "{tool} · {elapsed}",
   "inventory.running.agentFolderOnly": "{folder}",
   "inventory.running.agentFolderArea": "{folder} · {area}",
@@ -643,11 +640,6 @@
   "inventory.rescan.tip": "Volver a leer la configuración local",
   "inventory.tab": "Inventario",
   "agents.panel.title": "Agentes",
-  "agents.summary.line": "{defined}, {running}, {cost} en los últimos 30 días",
-  "agents.summary.defined.one": "{count} agente",
-  "agents.summary.defined.other": "{count} agentes",
-  "agents.summary.running.one": "{count} en ejecución",
-  "agents.summary.running.other": "{count} en ejecución",
   "agents.section.running": "En ejecución ahora",
   "agents.section.yours": "Tus agentes",
   "agents.section.worthALook": "Vale la pena revisar",
@@ -1001,5 +993,9 @@
   "error.trust.empty": "índice de confianza: nada aprovechable en la respuesta",
   "error.export.unsupported": "esa tabla no se puede exportar",
   "error.export.downloadsDir": "encontrar la carpeta de Descargas: {error}",
-  "error.export.write": "escribir {path}: {error}"
+  "error.export.write": "escribir {path}: {error}",
+  "agents.stat.yours": "Tus agentes",
+  "agents.stat.running": "En ejecución ahora",
+  "agents.stat.spend": "Gasto en subagentes, 30 días",
+  "inventory.agents.doorLine": "Tus agentes: {yours} · En ejecución ahora: {running} · Gasto en subagentes, 30 días: {spend}"
 }

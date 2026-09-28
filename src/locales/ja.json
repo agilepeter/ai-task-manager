@@ -546,8 +546,6 @@
   "inventory.running.rowSub": "{where} · 稼働時間 {time} · {processes}",
   "inventory.running.processCount.other": "{n} 個のプロセス",
   "inventory.running.summary": "{processes}で合計 {mem} のメモリを使用しています。サーバーはクライアントが要求したときに起動し、セッション中は動作し続けます。",
-  "inventory.running.agentsTitle": "エージェント",
-  "inventory.running.agentCount.other": "{count} 個のエージェントが実行中",
   "inventory.running.agentRow": "{tool} · {elapsed}",
   "inventory.running.agentFolderOnly": "{folder}",
   "inventory.running.agentFolderArea": "{folder} · {area}",
@@ -627,9 +625,6 @@
   "inventory.rescan.tip": "ローカル構成を再度読み取ります",
   "inventory.tab": "インベントリ",
   "agents.panel.title": "エージェント",
-  "agents.summary.line": "{defined}、{running}、直近30日間で{cost}",
-  "agents.summary.defined.other": "{count} 個のエージェント",
-  "agents.summary.running.other": "{count} 個実行中",
   "agents.section.running": "実行中",
   "agents.section.yours": "自分のエージェント",
   "agents.section.worthALook": "確認する価値あり",
@@ -943,5 +938,9 @@
   "error.trust.empty": "信頼度リスト：応答に有効なデータがありません",
   "error.export.unsupported": "この表は書き出せません",
   "error.export.downloadsDir": "ダウンロードフォルダーの検索：{error}",
-  "error.export.write": "{path} の書き込み：{error}"
+  "error.export.write": "{path} の書き込み：{error}",
+  "agents.stat.yours": "自分のエージェント",
+  "agents.stat.running": "実行中",
+  "agents.stat.spend": "サブエージェントの支出、30日間",
+  "inventory.agents.doorLine": "自分のエージェント：{yours} · 実行中：{running} · サブエージェントの支出、30日間：{spend}"
 }

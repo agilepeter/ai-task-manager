@@ -370,6 +370,23 @@ test("no value is empty or whitespace-only", () => {
   assert.deepEqual(violations, []);
 });
 
+// The Agents view's stats row (src/agents.ts) shows "Your agents"/"Running
+// now" as bare labels beside a number; the door row's summary line
+// (src/inventory.ts's agentsDoorLine()) bakes the same two words into its own
+// template. Both are meant to read exactly like the section headings
+// (agents.section.yours/running) rather than drift into a second translation
+// of the same phrase -- this pins that by value, in every locale, so a future
+// edit to one and not the others fails here instead of shipping three
+// slightly different phrasings for "Your agents".
+test("agents.stat.yours/running reuse agents.section.yours/running verbatim, in every locale", () => {
+  const mismatches = [];
+  for (const [locale, dict] of Object.entries(dicts)) {
+    if (dict["agents.stat.yours"] !== dict["agents.section.yours"]) mismatches.push(`${locale}.agents.stat.yours`);
+    if (dict["agents.stat.running"] !== dict["agents.section.running"]) mismatches.push(`${locale}.agents.stat.running`);
+  }
+  assert.deepEqual(mismatches, [], `these stat labels no longer match their section heading verbatim: ${mismatches.join(", ")}`);
+});
+
 test("language endonyms are identical across locales", () => {
   const locales = Object.keys(dicts);
   for (const locale of locales) {

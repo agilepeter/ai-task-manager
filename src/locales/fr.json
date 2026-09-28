@@ -556,9 +556,6 @@
   "inventory.running.processCount.one": "{n} processus",
   "inventory.running.processCount.other": "{n} processus",
   "inventory.running.summary": "{mem} de mémoire répartis sur {processes}. Les serveurs démarrent quand un client en demande un et restent actifs pour la session.",
-  "inventory.running.agentsTitle": "Agents",
-  "inventory.running.agentCount.one": "{count} agent actif",
-  "inventory.running.agentCount.other": "{count} agents actifs",
   "inventory.running.agentRow": "{tool} · {elapsed}",
   "inventory.running.agentFolderOnly": "{folder}",
   "inventory.running.agentFolderArea": "{folder} · {area}",
@@ -643,11 +640,6 @@
   "inventory.rescan.tip": "Relire la configuration locale",
   "inventory.tab": "Inventaire",
   "agents.panel.title": "Agents",
-  "agents.summary.line": "{defined}, {running}, {cost} sur les 30 derniers jours",
-  "agents.summary.defined.one": "{count} agent",
-  "agents.summary.defined.other": "{count} agents",
-  "agents.summary.running.one": "{count} actif",
-  "agents.summary.running.other": "{count} actifs",
   "agents.section.running": "Actifs maintenant",
   "agents.section.yours": "Vos agents",
   "agents.section.worthALook": "À examiner",
@@ -1001,5 +993,9 @@
   "error.trust.empty": "indice de confiance : rien d'utilisable dans la réponse",
   "error.export.unsupported": "ce tableau ne peut pas être exporté",
   "error.export.downloadsDir": "trouver le dossier Téléchargements : {error}",
-  "error.export.write": "écrire {path} : {error}"
+  "error.export.write": "écrire {path} : {error}",
+  "agents.stat.yours": "Vos agents",
+  "agents.stat.running": "Actifs maintenant",
+  "agents.stat.spend": "Dépenses des sous-agents, 30 jours",
+  "inventory.agents.doorLine": "Vos agents : {yours} · Actifs maintenant : {running} · Dépenses des sous-agents, 30 jours : {spend}"
 }

@@ -556,9 +556,6 @@
   "inventory.running.processCount.one": "{n} Prozess",
   "inventory.running.processCount.other": "{n} Prozesse",
   "inventory.running.summary": "{mem} Speicher auf {processes} verteilt. Server starten, wenn ein Client einen anfordert, und bleiben für die Sitzung aktiv.",
-  "inventory.running.agentsTitle": "Agenten",
-  "inventory.running.agentCount.one": "{count} Agent aktiv",
-  "inventory.running.agentCount.other": "{count} Agenten aktiv",
   "inventory.running.agentRow": "{tool} · {elapsed}",
   "inventory.running.agentFolderOnly": "{folder}",
   "inventory.running.agentFolderArea": "{folder} · {area}",
@@ -643,11 +640,6 @@
   "inventory.rescan.tip": "Lokale Einrichtung erneut lesen",
   "inventory.tab": "Inventar",
   "agents.panel.title": "Agenten",
-  "agents.summary.line": "{defined}, {running}, {cost} in den letzten 30 Tagen",
-  "agents.summary.defined.one": "{count} Agent",
-  "agents.summary.defined.other": "{count} Agenten",
-  "agents.summary.running.one": "{count} aktiv",
-  "agents.summary.running.other": "{count} aktiv",
   "agents.section.running": "Läuft gerade",
   "agents.section.yours": "Ihre Agenten",
   "agents.section.worthALook": "Einen Blick wert",
@@ -1001,5 +993,9 @@
   "error.trust.empty": "Vertrauensindex: nichts Verwertbares in der Antwort",
   "error.export.unsupported": "diese Tabelle kann nicht exportiert werden",
   "error.export.downloadsDir": "Downloads-Ordner finden: {error}",
-  "error.export.write": "{path} schreiben: {error}"
+  "error.export.write": "{path} schreiben: {error}",
+  "agents.stat.yours": "Ihre Agenten",
+  "agents.stat.running": "Läuft gerade",
+  "agents.stat.spend": "Ausgaben für Subagenten, 30 Tage",
+  "inventory.agents.doorLine": "Ihre Agenten: {yours} · Läuft gerade: {running} · Ausgaben für Subagenten, 30 Tage: {spend}"
 }
