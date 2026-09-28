@@ -724,6 +724,7 @@ mod tests {
             .chain(crate::procs::FINDING_IDS)
             .chain(crate::drift::FINDING_IDS)
             .chain(crate::changes::FINDING_IDS)
+            .chain(crate::mcp_usage::FINDING_IDS)
             .map(|id| format!("finding.{id}"))
             .collect();
         prefixes.extend(crate::audit::CHECK_KEYS.iter().map(|k| k.to_string()));
@@ -803,6 +804,7 @@ mod tests {
             .chain(crate::procs::FINDING_IDS)
             .chain(crate::drift::FINDING_IDS)
             .chain(crate::changes::FINDING_IDS)
+            .chain(crate::mcp_usage::FINDING_IDS)
             .map(|id| format!("finding.{id}."))
             .collect();
         let check_prefixes: Vec<String> = crate::audit::CHECK_KEYS.iter().map(|k| format!("{k}.")).collect();

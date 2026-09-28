@@ -255,6 +255,7 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
             inv.tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "),
         )
     }];
+    setup.extend(only_if_present(inv, "mcp-context-heavy"));
     if inv.mcp_servers.is_empty() {
         setup.push(check(
             "mcp",
@@ -581,6 +582,7 @@ mod tests {
         McpServer {
             name: name.into(), client: "Claude Code".into(), scope: "user".into(), project: None, transport: "stdio".into(),
             target: "npx".into(), package: package.map(str::to_string), env_count: 0, pin_to: None, source_file: None,
+            usage: None,
         }
     }
 
@@ -869,6 +871,11 @@ mod tests {
             &crate::spend::claude_sessions(None, None, 500),
             &agent_spend,
         ));
+        // Same MCP context-cost step enriched_inventory() (src-tauri/src/lib.rs)
+        // takes before building the real audit, so the demo fixture this
+        // test backs (scripts/make-demo-fixture.py) scores it the same way.
+        crate::mcp_usage::attach(&mut inv.mcp_servers, &crate::spend::mcp_usage_30d());
+        inv.opportunities.extend(crate::mcp_usage::opportunities(&inv.mcp_servers));
         let l = view(&crate::ledger::load_from(&crate::ledger::path()), crate::spend::today_naive_date(), &HashMap::new());
         let areas: std::collections::HashSet<&str> = spend.iter().flat_map(|p| p.projects.iter())
             .flat_map(|pr| pr.areas.iter()).map(|a| crate::spend::area_top(&a.area)).filter(|a| !a.starts_with('(')).collect();

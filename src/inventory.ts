@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { showLedger } from "./ledger";
 import { localeTag, plural, t, tm, type Msg } from "./i18n";
-import { money, relativeDay, tokens } from "./format";
+import { byteSize, money, relativeDay, tokens } from "./format";
 
 const T = (k: string, v?: Record<string, string | number>) => t(`inventory.${k}`, v);
 
@@ -20,6 +20,9 @@ interface McpServer {
   envCount: number;
   /** What a one-click pin would write, when the package is unpinned and a version is cached locally. */
   pinTo: string | null;
+  /** 30-day tool-call count and result-byte total, measured for Claude Code
+   *  only -- absent for every other client. */
+  usage?: { calls: number; resultBytes: number };
 }
 
 /** One MCP server as it exists in memory right now. Never a command line. */
@@ -348,13 +351,18 @@ function pinPanel(s: McpServer): string {
     </div>`;
 }
 
-function renderMcp(list: McpServer[]): string {
+export function renderMcp(list: McpServer[]): string {
   const rows = list
     .map((s) => {
       const what = s.package ?? s.target;
+      // byteSize() returns "" for a count it cannot honestly size (not
+      // finite, or negative) -- that is the signal to leave this whole chip
+      // off the row rather than splice a blank size into the sentence.
+      const usageSize = s.usage ? byteSize(s.usage.resultBytes) : "";
       const facts = [
         s.transport === "stdio" ? T("mcp.runsLocally") : T("mcp.remote", { transport: s.transport }),
         s.envCount > 0 ? plural("inventory.mcp.credentials", s.envCount) : "",
+        s.usage && usageSize ? plural("inventory.mcp.usage30d", s.usage.calls, { size: usageSize }) : "",
       ].filter(Boolean);
       return `
         <div class="inv-row">
@@ -391,6 +399,10 @@ function renderMcp(list: McpServer[]): string {
       </select>
       <button class="lg-link" data-link="https://staas.fund/mcp/">${esc(T("trust.aboutIndex"))}</button>
     </label><p class="dt-caption inv-trust-note">${esc(status)}</p>`;
+  // The coverage note only means something once a server actually has a
+  // figure to show it about -- with none, it would be a caveat about a
+  // measurement nobody on screen carries.
+  const hasUsage = list.some((s) => s.usage);
   const lead =
     trustLead +
     (apps.length > 1
@@ -400,7 +412,8 @@ function renderMcp(list: McpServer[]): string {
             ${apps.map((a) => `<option value="${esc(a)}"${appFilter === a ? " selected" : ""}>${esc(a)}</option>`).join("")}
           </select>
         </label>`
-      : "");
+      : "") +
+    (hasUsage ? `<p class="dt-caption inv-mcp-usage-note">${esc(T("mcp.usageNote"))}</p>` : "");
   return section("mcp", T("section.mcp"), list.length, rows, T("empty.mcp"), { lead });
 }
 

@@ -356,6 +356,7 @@ mod tests {
                 env_count: 2,
                 pin_to: None,
                 source_file: Some("/Users/dana/work/acme-portal/.mcp.json".into()),
+                usage: None,
             }],
             tools: vec![AiTool { name: "Claude Code".into(), kind: "app".into(), mcp_servers: 1 }],
             hooks: vec![HookEvent { event: "SessionEnd".into(), count: 2 }],

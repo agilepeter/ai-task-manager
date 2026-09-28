@@ -548,6 +548,7 @@ mod tests {
                 env_count: 0,
                 pin_to: None,
                 source_file: None,
+                usage: None,
             }],
             agents: vec![crate::inventory::Definition { name: "reviewer".into(), scope: "user".into(), project: None, model: None, tools: None }],
             skills: vec![crate::inventory::Definition { name: "deploy".into(), scope: "user".into(), project: None, model: None, tools: None }],

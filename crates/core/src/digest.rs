@@ -314,7 +314,7 @@ mod tests {
         let quiet = provider(&[0.0; 14], &[]);
         // No spend and no renewal: on its own this week sends nothing at all
         // (covered above). Three setup changes are reason enough by themselves.
-        let got = build(&[quiet.clone()], &ledger(None, "2026-09-21"), 3, Some("2026-09-14")).unwrap();
+        let got = build(std::slice::from_ref(&quiet), &ledger(None, "2026-09-21"), 3, Some("2026-09-14")).unwrap();
         assert_eq!(en_body(&got.body), "3 things changed in your setup since 2026-09-14.");
         assert!(build(&[quiet], &ledger(None, "2026-09-21"), 0, None).is_none(), "still nothing to say with zero changes");
 

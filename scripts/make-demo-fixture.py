@@ -252,6 +252,67 @@ write(sub_dir / "explore.jsonl", subagent_transcript("Explore", host_start + dat
 write(sub_dir / "general-purpose-migration.jsonl", subagent_transcript(
     "general-purpose", host_start + datetime.timedelta(minutes=40), 60, "claude-sonnet-5"))
 
+# --- MCP context cost: real tool_use / tool_result pairs --------------------
+# Four of the five configured Claude Code servers (context7, playwright,
+# github, figma) place calls in this window; postgres never does, so it
+# stays without a figure -- the same "logs never mention it" shape a real
+# unused server has. context7 alone crosses both MIN_CALLS and
+# HEAVY_RESULT_BYTES (crates/core/src/mcp_usage.rs), so it is the one row
+# the "mcp-context-heavy" finding names; the other three sit above the call
+# floor but well under the byte one, and github sits under the call floor
+# too -- three different reasons a server can still show its own fact chip
+# without ever earning the finding.
+def filler_text(n_bytes):
+    """Cheap placeholder result text of exactly n_bytes: the byte count is
+    all the engine ever measures, never the words themselves."""
+    unit = "demo mcp result content "
+    return (unit * (n_bytes // len(unit) + 1))[:n_bytes]
+
+def mcp_activity_file(sid, start, calls):
+    """One session file of alternating tool_use / tool_result lines, one
+    pair per (server, tool, area, result_bytes) tuple in `calls`. Same shape
+    claude_line (crates/core/src/spend.rs) expects: an assistant line's
+    message.content carries the tool_use block, the immediately following
+    user line's message.content carries the matching tool_result. The first
+    line sits at the project root, same convention every other session file
+    here follows, so claude_area has a real root to compute later lines
+    against instead of each one computing relative to itself."""
+    lines = []
+    t = start
+    for i, (server, tool, area, result_bytes) in enumerate(calls):
+        t += datetime.timedelta(seconds=random.uniform(20, 90))
+        cwd = str(work) if i == 0 else str(work / area)
+        tool_use_id = f"toolu_{seeded_uuid4().hex[:16]}"
+        lines.append(compact({
+            "type": "assistant", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": sid,
+            "cwd": cwd, "requestId": f"req_{seeded_uuid4().hex[:12]}", "costUSD": round(random.uniform(0.02, 0.1), 4),
+            "message": {"id": f"msg_{seeded_uuid4().hex[:16]}", "model": "claude-sonnet-5",
+                        "content": [{"type": "tool_use", "id": tool_use_id, "name": f"mcp__{server}__{tool}",
+                                     "input": {"query": "demo"}}],
+                        "usage": {"input_tokens": random.randint(300, 1200), "output_tokens": random.randint(50, 300),
+                                  "cache_read_input_tokens": random.randint(2000, 20000)}},
+        }))
+        t += datetime.timedelta(seconds=random.uniform(1, 5))
+        lines.append(compact({
+            "type": "user", "timestamp": t.isoformat().replace("+00:00", "Z"), "sessionId": sid, "cwd": cwd,
+            "message": {"content": [{"type": "tool_result", "tool_use_id": tool_use_id,
+                                      "content": filler_text(result_bytes)}]},
+        }))
+    return "\n".join(lines) + "\n"
+
+mcp_calls = (
+    # context7: 45 calls x ~57 KB each, ~2.4 MB total -- crosses both floors.
+    [("context7", "get-library-docs", "acme-portal/web", 57_000) for _ in range(45)]
+    # playwright: 22 calls, small results -- past MIN_CALLS, nowhere near HEAVY_RESULT_BYTES.
+    + [("playwright", "browser_snapshot", "acme-portal/web", 3_000) for _ in range(22)]
+    # figma: 14 calls, small results -- under MIN_CALLS too.
+    + [("figma", "get_design_context", "acme-portal/web", 4_000) for _ in range(14)]
+    # github: 9 calls, tiny results -- the fewest of the four, well under MIN_CALLS.
+    + [("github", "search_issues", "northwind-api", 1_000) for _ in range(9)]
+)
+random.shuffle(mcp_calls)
+write(project_dir / f"{seeded_uuid4()}.jsonl", mcp_activity_file(str(seeded_uuid4()), now - datetime.timedelta(days=6), mcp_calls))
+
 # --- curated PATH for the fictional machine ---------------------------------
 # Every read so far is already hermetic: dirs::home_dir() and friends honour
 # the HOME override below, so the config folders and logs above only ever
