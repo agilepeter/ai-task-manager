@@ -997,6 +997,6 @@
   "error.export.write": "escribir {path}: {error}",
   "agents.stat.yours": "Tus agentes",
   "agents.stat.running": "En ejecución ahora",
-  "agents.stat.spend": "Gasto en subagentes, 30 días",
+  "agents.stat.spend": "Gasto en subagentes, 30 días",
   "inventory.agents.doorLine": "Tus agentes: {yours} · En ejecución ahora: {running} · Gasto en subagentes, 30 días: {spend}"
 }

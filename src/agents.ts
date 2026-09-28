@@ -194,9 +194,11 @@ export function renderAgentsView(
   const totalRuns = spend.reduce((sum, s) => sum + s.runs, 0);
   const builtInCount = builtInAgentCount(inv.agents, spend);
   const builtInsBody = builtInAgentRows(inv.agents, spend, nowMs);
-  const builtInHead = (count: number) => `<h3>${esc(t("inventory.agents.builtIn"))} <span class="plan">${count}</span></h3><p class="inv-note">${esc(t("inventory.agents.builtInHint"))}</p>`;
+  // No count beside the title when the read failed: how many ran is exactly
+  // what is not known, and a 0 there would be one more figure stated as fact.
+  const builtInHead = (count: number | null) => `<h3>${esc(t("inventory.agents.builtIn"))}${count === null ? "" : ` <span class="plan">${count}</span>`}</h3><p class="inv-note">${esc(t("inventory.agents.builtInHint"))}</p>`;
   const builtInSection = spendError
-    ? `<section class="dt-section">${builtInHead(0)}<p class="inv-empty">${esc(T("spendError", { error: spendError }))}</p></section>`
+    ? `<section class="dt-section">${builtInHead(null)}<p class="inv-empty">${esc(T("spendError", { error: spendError }))}</p></section>`
     : builtInsBody
       ? `<section class="dt-section">${builtInHead(builtInCount)}${builtInsBody}</section>`
       : totalRuns === 0

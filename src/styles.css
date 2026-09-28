@@ -3992,7 +3992,8 @@ body.wide:not(.agents-open) #agents {
    to use for it (src/i18n.ts's applyStaticI18n()). */
 .ag-stats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* The third label is the long one in every language, so it gets the room. */
+  grid-template-columns: repeat(2, minmax(0, 0.8fr)) minmax(0, 1.4fr);
   gap: 10px 12px;
   margin: 2px 0 4px;
 }
