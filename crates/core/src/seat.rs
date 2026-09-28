@@ -208,6 +208,19 @@ pub fn build(
     inv: &Inventory,
     spend: &[ProviderSpend],
 ) -> SeatReport {
+    build_with(seat_id, label, now, inv, spend, &crate::spend::agent_spend(30))
+}
+
+/// `build`, with the agent spend handed in instead of read from this
+/// machine's scan cache, so what goes into a report can be stated in full.
+pub fn build_with(
+    seat_id: &str,
+    label: &str,
+    now: i64,
+    inv: &Inventory,
+    spend: &[ProviderSpend],
+    agents: &[AgentSpend],
+) -> SeatReport {
     SeatReport {
         schema: SCHEMA,
         seat_id: seat_id.to_string(),
@@ -264,7 +277,7 @@ pub fn build(
         agents_model_unset: inv.agents.iter().filter(|a| a.model.is_none()).count(),
         deny_covers_shell: inv.permissions.deny_covers_shell,
         hook_events: hook_event_names(&inv.hooks),
-        agent_spend: seat_agent_spend(&crate::spend::agent_spend(30)),
+        agent_spend: seat_agent_spend(agents),
     }
 }
 
@@ -326,6 +339,20 @@ pub fn seat_id_in(dir: &std::path::Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every test here builds from what it states and nothing else. The
+    /// real `build` adds this machine's own agent spend, which made a
+    /// report differ from one machine, and one day, to the next.
+    fn build(seat_id: &str, label: &str, now: i64, inv: &Inventory, spend: &[ProviderSpend]) -> SeatReport {
+        build_with(seat_id, label, now, inv, spend, &[])
+    }
+
+    #[test]
+    fn a_report_holds_only_what_it_was_built_from() {
+        let (inv, spend) = inputs();
+        assert!(build("seat-abcdefgh", "Dana", 42, &inv, &spend).agent_spend.is_empty());
+    }
+
     use crate::inventory::{AiTool, Definition, HookEvent, McpServer, Opportunity, Permissions};
     use crate::spend::{AreaSpend, ModelSpend, ProjectSpend, Window};
     use serde_json::json;
