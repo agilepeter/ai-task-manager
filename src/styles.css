@@ -4014,12 +4014,23 @@ body.wide:not(.agents-open) #agents {
    to use for it (src/i18n.ts's applyStaticI18n()). */
 .ag-stats {
   display: grid;
-  /* The third label used to carry its own "…, 30 days" period and needed
-     extra room in every language; now that the period is a second, smaller
-     line of its own (.ag-stat-period), the three noun-only labels are close
-     enough in length that even columns fit -- verified across all nine
-     locales' screenshots at 380px. */
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Measured in Playwright WebKit against all nine locales (see the report):
+     no single FIXED 3-way split works. Russian's second label alone needs
+     108px and French's third needs 137px -- together with a third column
+     that also has to fit German's 131px and Portuguese's 116px, the three
+     labels' worst-case widths sum past the 328px actually available (352px
+     minus the two 12px gaps), even though no ONE locale ever needs all three
+     worst cases at once (Russian's own three widths total 298px, the worst
+     of any single locale, comfortably under 328px). Equal thirds (this
+     column's previous value) wrapped Russian, French, German and
+     Portuguese's third label to two lines. `max-content` columns instead
+     size each one to what THAT locale's own three labels actually need, so
+     every locale gets exactly the room its own text needs and none wraps;
+     `justify-content: space-between` then spreads the three (now
+     content-sized) stats back out across the row the same way the fixed
+     columns used to, first flush left and last flush right. */
+  grid-template-columns: repeat(3, max-content);
+  justify-content: space-between;
   gap: 10px 12px;
   margin: 2px 0 4px;
 }
