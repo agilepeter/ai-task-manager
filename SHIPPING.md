@@ -39,6 +39,13 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
   feed redirect and every installer URL. Confirmed by hand afterwards as intended: the release
   page read correctly, and the downloaded dmg mounted as the 0.1.2 bundle.
 
+- **v0.1.3 was published on 2026-09-28** from tag `v0.1.3` (commit 714997a, run 36442432786)
+  by the `publish` job, after CI passed on the same commit. Checked afterwards: the three
+  installers and the update feed answer, the feed names version 0.1.3 with all seven platform
+  entries signed, and the product page, its demo and its changelog page show 0.1.3. The
+  product page's Version cell and its two download links are not written by
+  `scripts/sync-demo-to-site.sh` and were brought to 0.1.3 by hand.
+
 ## Not yet on, and why
 
 1. **Update checks are opt-in and off by default.** A Settings toggle (`updateChecks`) turns them
