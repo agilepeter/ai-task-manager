@@ -40,7 +40,7 @@ account and no admin rights. Everything below is written for both paths.
 
 | | State today |
 |---|---|
-| Downloadable release | [v0.1.4](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.4), 2026-09-28 (earlier: v0.1.3 on 2026-09-28, v0.1.2 on 2026-09-26, v0.1.1 on 2026-09-25, v0.1.0 on 2026-09-24), built and published by `release.yml` from the tagged commit. |
+| Downloadable release | [v0.1.5](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.5), 2026-09-28 (earlier: v0.1.4 on 2026-09-28, v0.1.3 on 2026-09-28, v0.1.2 on 2026-09-26, v0.1.1 on 2026-09-25, v0.1.0 on 2026-09-24), built and published by `release.yml` from the tagged commit. |
 | macOS signing | None yet. Open it once, then allow it under System Settings > Privacy & Security > Open Anyway (macOS 14 or earlier: right-click the app > Open). Or `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`. |
 | Windows signing | None yet. SmartScreen warns: More info, then Run anyway. |
 | Auto-update | **Opt-in, off by default.** See [Updates](#updates). |
@@ -168,7 +168,7 @@ files and `latest.json`, to a **draft** release. A final job then checks the dra
 signatures and dated changelog section, and publishes it only if every check
 passes; a failed check leaves the draft untouched. The first release was
 [v0.1.0](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.0); the latest is
-[v0.1.4](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.4).
+[v0.1.5](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.5), dated 2026-09-28.
 [v0.1.2](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.2) was the first one the
 workflow published by itself. The
 artifacts are not signed, so building from source above remains the better

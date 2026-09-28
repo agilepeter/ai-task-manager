@@ -6,6 +6,25 @@ numbering at 0.1.0, so the numbers here do not continue upstream's. Pane's own
 release history is kept verbatim in
 [docs/upstream-changelog.md](docs/upstream-changelog.md).
 
+## 0.1.5 — 2026-09-28
+
+A small release: keyboard access and a wrapping label, nothing more.
+
+### Fixed
+
+- **Only the Agents view and the Audit returned focus to what opened them.**
+  About, Settings, Customize, the Detail page, the client-rules editor, the
+  MCP pin preview, the Subscriptions add/edit form and the confirm dialog now
+  all do the same: focus moves into the panel on open, and back to whatever
+  opened it on close.
+- **Plain Tab could not reach most buttons and links in the macOS webview.**
+  Every button, link and tab is now reachable with Tab alone, in order.
+  Closed panels and their controls stay out of the way while off screen, and
+  a keyboard focus now shows a visible ring on controls that had none.
+- **The Agents view's third figure wrapped to two lines in Russian, French,
+  Portuguese and German.** Its label is now a short noun on its own line,
+  with "Last 30 days" underneath in a smaller line, in every language.
+
 ## 0.1.4 — 2026-09-28
 
 ### Added
