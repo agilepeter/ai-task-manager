@@ -10,7 +10,7 @@
 use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -177,6 +177,9 @@ pub fn provider_spend_has_data(sp: &ProviderSpend) -> bool {
 
 /// (local calendar day, model) → (cost, tokens). Day = days since CE.
 type DayMap = HashMap<(i32, String), (f64, f64)>;
+/// Same shape as `DayMap` but for whole-number MCP figures: (calls, result
+/// bytes) per (day, server key).
+type McpDayMap = HashMap<(i32, String), (u64, u64)>;
 
 /// Longest model string admitted as a days/unpriced key. Same bound as
 /// catalog canonicals (MAX_PROBE_KEY), which every real model fits;
@@ -195,6 +198,14 @@ const MAX_AREAS_PER_FILE: usize = 96;
 const OTHER_AREA: &str = "(other)";
 /// Spend before the session has been anywhere but its starting folder.
 const UNSORTED_AREA: &str = "(unsorted)";
+
+/// Distinct MCP server names one file may admit before extras fold into one
+/// "other" bucket -- same cap and reasoning as MAX_AREAS_PER_FILE. A real
+/// server name is already bounded to 64 characters by
+/// `mcp_usage::server_of`'s own refusal, so only the *count* of distinct
+/// servers needs a cap here, not the length of each one.
+const MAX_MCP_SERVERS_PER_FILE: usize = MAX_AREAS_PER_FILE;
+const OTHER_MCP_SERVER: &str = "(other)";
 
 /// Fixed bucket for model names refused by the two caps above. Spend and
 /// token totals stay exact — only the per-model attribution merges.
@@ -234,6 +245,10 @@ struct FileData {
     /// parser never touches this, so it stays empty for every card but
     /// Claude's.
     cache_read_days: HashMap<i32, f64>,
+    /// Claude Code only: per-day, per-server MCP tool-call counts and
+    /// result-byte totals -- see `claude_mcp_calls` / `claude_mcp_result`.
+    /// Bounded the same way `areas` is (see `MAX_MCP_SERVERS_PER_FILE`).
+    mcp: McpDayMap,
 }
 
 impl FileData {
@@ -429,8 +444,14 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, FileEntry>> {
 /// the cache-read-share usage finding needs for a real 30-day figure. A
 /// cache written under 10 has none of that data; without the bump it would
 /// go on trusting that cache forever (`cache_unchanged` only looks at mtime
-/// and size) instead of taking the one rescan that back-fills it.
-const PERSIST_VERSION: u32 = 11;
+/// and size) instead of taking the one rescan that back-fills it. 12:
+/// entries now also carry `FileData::mcp` (per-server MCP call counts and
+/// result-byte totals) and `ClaudeFileState::pending_mcp` (tool_use ids
+/// waiting for their result), which the MCP context-cost finding needs. A
+/// cache written under 11 has neither; without the bump it would go on
+/// reporting zero context cost for every server forever instead of taking
+/// the one rescan that back-fills it.
+const PERSIST_VERSION: u32 = 12;
 
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -461,6 +482,11 @@ struct PersistEntry {
     /// PERSIST_VERSION 11, which that bump discards anyway.
     #[serde(default)]
     cache_read_days: Vec<(i32, f64)>,
+    /// `FileData::mcp`: per-server MCP call counts and result-byte totals.
+    /// Absent in caches written before PERSIST_VERSION 12, which that bump
+    /// discards anyway.
+    #[serde(default)]
+    mcp: Vec<(i32, String, u64, u64)>,
     unpriced: Vec<(String, u64)>,
     /// Pricing questions this file's parse asked (see `PriceProbe`).
     /// Older caches without the field deserialize as empty — safe, because
@@ -553,6 +579,9 @@ fn load_persisted_cache_from(path: &Path) {
         for (day, cache_read) in e.cache_read_days {
             data.cache_read_days.insert(day, cache_read);
         }
+        for (day, server, calls, bytes) in e.mcp {
+            data.mcp.insert((day, server), (calls, bytes));
+        }
         data.unpriced = e.unpriced.into_iter().collect();
         data.parent_session = e.parent_session;
         data.agent = e.agent;
@@ -618,6 +647,7 @@ fn save_persisted_cache() {
                     .map(|((day, area), (cost, tokens))| (*day, area.clone(), *cost, *tokens))
                     .collect(),
                 cache_read_days: e.data.cache_read_days.iter().map(|(day, cache_read)| (*day, *cache_read)).collect(),
+                mcp: e.data.mcp.iter().map(|((day, server), (calls, bytes))| (*day, server.clone(), *calls, *bytes)).collect(),
                 unpriced: e.data.unpriced.iter().map(|(m, c)| (m.clone(), *c)).collect(),
                 probes: e.probes.clone(),
                 prefix_head: e.prefix_head.clone(),
@@ -696,6 +726,11 @@ fn merge_data(target: &mut FileData, source: FileData) {
     }
     for (day, cache_read) in source.cache_read_days {
         *target.cache_read_days.entry(day).or_insert(0.0) += cache_read;
+    }
+    for (key, (calls, bytes)) in source.mcp {
+        let entry = target.mcp.entry(key).or_insert((0, 0));
+        entry.0 += calls;
+        entry.1 += bytes;
     }
     target.models.extend(source.models);
 }
@@ -980,9 +1015,15 @@ fn clip_grok_models(map: HashMap<i64, String>) -> HashMap<i64, String> {
 /// we drop the checkpoint so the next tail warms 1 MB instead.
 const MAX_DEDUP_IDS: usize = 8192;
 
+/// Waiting tool_use ids one session may hold at once before the oldest is
+/// dropped. A conversation rarely has more than a handful of MCP calls
+/// outstanding; this only guards a session that never gets a result back
+/// (or a hostile log) from growing the checkpoint without bound.
+const MAX_PENDING_MCP: usize = 256;
+
 fn clip_claude_ckpt(st: Option<ClaudeFileState>) -> Option<ClaudeFileState> {
     let st = st?;
-    if st.seen.len() > MAX_DEDUP_IDS || st.seen_mids.len() > MAX_DEDUP_IDS {
+    if st.seen.len() > MAX_DEDUP_IDS || st.seen_mids.len() > MAX_DEDUP_IDS || st.pending_mcp.len() > MAX_PENDING_MCP {
         None
     } else {
         Some(st)
@@ -1689,6 +1730,15 @@ struct ClaudeFileState {
     /// `clip_claude_ckpt` wipes the rest of this state for being oversized.
     #[serde(skip)]
     parent_session: Option<String>,
+    /// Tool_use id -> the (already bounded) MCP server key it was counted
+    /// under, waiting for the matching `tool_result` line so its byte count
+    /// can be charged to the right server. Bounded to `MAX_PENDING_MCP`
+    /// entries, oldest dropped first, so a session whose calls never get a
+    /// result back (or a hostile log) cannot grow this without limit.
+    /// Persisted so a tail resume mid-conversation still has the ids its
+    /// still-open calls need.
+    #[serde(default)]
+    pending_mcp: VecDeque<(String, String)>,
 }
 
 /// Parse one Claude Code session-log line into spend events. Persisted
@@ -1821,8 +1871,105 @@ fn sidechain_parent(path: &Path) -> Option<String> {
     None
 }
 
+/// The server key an MCP call books to: the real, normalized server name
+/// while this file still has room for it, or the shared "other" bucket once
+/// `MAX_MCP_SERVERS_PER_FILE` distinct servers have already been seen.
+/// Mirrors `claude_area`'s own bounding of `data.areas` exactly, minus the
+/// length check that area names need and server names don't (`server_of`
+/// already refuses anything over 64 characters before this is ever called).
+fn mcp_key_for(data: &FileData, server: String) -> String {
+    let distinct: HashSet<&String> = data.mcp.keys().map(|(_, s)| s).collect();
+    if !distinct.contains(&server) && distinct.len() >= MAX_MCP_SERVERS_PER_FILE {
+        OTHER_MCP_SERVER.to_string()
+    } else {
+        server
+    }
+}
+
+/// Counts each `tool_use` block addressed to an MCP server, once per id.
+/// Runs on every assistant line the same way `claude_area` does -- ahead of
+/// the message/request dedup below -- because a tool_use block earns its
+/// count even on a line the cost accounting will go on to treat as a
+/// duplicate. The tool_use id itself is the de-dup key here, not
+/// `{message.id}:{requestId}`: a block already remembered in `pending_mcp`
+/// is a replay of a call already counted, so it is skipped rather than
+/// counted again. The id is then kept in `pending_mcp` so the matching
+/// `tool_result` -- which arrives later, on a "user" line -- knows which
+/// server to charge its bytes to.
+fn claude_mcp_calls(st: &mut ClaudeFileState, v: &Value, ts: DateTime<Utc>, data: &mut FileData) {
+    let Some(blocks) = v.pointer("/message/content").and_then(Value::as_array) else { return };
+    for block in blocks {
+        if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+            continue;
+        }
+        let (Some(id), Some(name)) =
+            (block.get("id").and_then(Value::as_str), block.get("name").and_then(Value::as_str))
+        else {
+            continue;
+        };
+        let Some(server) = crate::mcp_usage::server_of(name) else { continue };
+        if st.pending_mcp.iter().any(|(pid, _)| pid == id) {
+            continue; // a replay of a call already counted
+        }
+        let key = mcp_key_for(data, server);
+        let entry = data.mcp.entry((day_of_utc(ts), key.clone())).or_insert((0, 0));
+        entry.0 += 1;
+        if st.pending_mcp.len() >= MAX_PENDING_MCP {
+            st.pending_mcp.pop_front();
+        }
+        st.pending_mcp.push_back((id.to_string(), key));
+    }
+}
+
+/// A `tool_result` block's `content`, measured and never kept: a plain
+/// string counts its own bytes; an array of blocks sums each block's own
+/// `text` string when it has one, or the byte length of its whole
+/// serialised form otherwise. Only the length this returns ever reaches
+/// `FileData` -- the content itself is dropped the moment this call returns.
+fn mcp_result_bytes(content: &Value) -> u64 {
+    match content {
+        Value::String(s) => s.len() as u64,
+        Value::Array(blocks) => blocks
+            .iter()
+            .map(|b| match b.get("text").and_then(Value::as_str) {
+                Some(t) => t.len() as u64,
+                None => serde_json::to_vec(b).map(|v| v.len() as u64).unwrap_or(0),
+            })
+            .sum(),
+        _ => 0,
+    }
+}
+
+/// The other half of `claude_mcp_calls`: a "user" line's `tool_result`
+/// block, matched back by `tool_use_id` to the server its call was booked
+/// to and charged that result's byte size. An id with nothing pending (an
+/// unknown call, or one already resolved) is left alone.
+fn claude_mcp_result(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Some(blocks) = v.pointer("/message/content").and_then(Value::as_array) else { return };
+    let Some(ts) = parse_ts(v.get("timestamp")) else { return };
+    for block in blocks {
+        if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+            continue;
+        }
+        let Some(tool_use_id) = block.get("tool_use_id").and_then(Value::as_str) else { continue };
+        let Some(pos) = st.pending_mcp.iter().position(|(id, _)| id == tool_use_id) else { continue };
+        let Some((_, server)) = st.pending_mcp.remove(pos) else { continue };
+        let bytes = mcp_result_bytes(block.get("content").unwrap_or(&Value::Null));
+        let entry = data.mcp.entry((day_of_utc(ts), server)).or_insert((0, 0));
+        entry.1 += bytes;
+    }
+}
+
 fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
     if !line.contains("\"type\":\"assistant\"") {
+        // A tool_result lives on a "user" line, never an assistant one. Only
+        // bother parsing one when a call is actually waiting on a result --
+        // most user lines carry a human prompt, not a tool_result block, and
+        // the substring check keeps those cheap.
+        if !st.pending_mcp.is_empty() && line.contains("tool_result") {
+            claude_mcp_result(st, line, data);
+        }
         return;
     }
     let Ok(v) = serde_json::from_str::<Value>(line) else { return };
@@ -1860,6 +2007,11 @@ fn claude_line(st: &mut ClaudeFileState, line: &str, data: &mut FileData) {
     let ms = ts.timestamp_millis();
     st.first_ms = Some(st.first_ms.map_or(ms, |f| f.min(ms)));
     st.last_ms = Some(st.last_ms.map_or(ms, |l| l.max(ms)));
+    // Same reasoning as claude_area above: a tool_use block must be counted
+    // even on a line that turns out to carry no usage at all (claude_tokens
+    // returns early just below) or that the mid:rid dedup further down would
+    // otherwise treat as a duplicate.
+    claude_mcp_calls(st, &v, ts, data);
     let usage = v.pointer("/message/usage").cloned().unwrap_or(Value::Null);
     let Some(t) = claude_tokens(&usage) else { return };
 
@@ -2428,6 +2580,30 @@ pub fn agent_spend(days: u32) -> Vec<AgentSpend> {
     };
     let rules = clients::load_from(&clients::path());
     agent_spend_from(entries.iter(), days, today, &rules)
+}
+
+/// Every MCP server's rolling 30-day figures, read from the same scan cache
+/// `agent_spend` and `claude_sessions` already read -- never a fresh scan.
+/// Same day arithmetic as `windows_by_key`'s last-30-days window: a day
+/// counts when it is after `today - TREND_DAYS` and no later than `today`.
+/// Keyed exactly as `claude_mcp_calls` folded it -- a normalized server
+/// name, or the shared "other" overflow bucket -- `mcp_usage::attach` is the
+/// one place that turns this into a figure on a configured server.
+pub fn mcp_usage_30d() -> HashMap<String, crate::mcp_usage::McpUsage> {
+    load_persisted_cache();
+    let today = today_days_from_ce();
+    let mut out: HashMap<String, crate::mcp_usage::McpUsage> = HashMap::new();
+    let Ok(map) = cache().lock() else { return out };
+    for entry in map.values() {
+        for ((day, server), (calls, bytes)) in &entry.data.mcp {
+            if *day > today - TREND_DAYS as i32 && *day <= today {
+                let u = out.entry(server.clone()).or_default();
+                u.calls += calls;
+                u.result_bytes += bytes;
+            }
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -4890,6 +5066,7 @@ mod tests {
                 days: vec![(739_000, "claude-fable-5".into(), 1.25, 40_000.0)],
                 areas: vec![(739_000, "acme".into(), 1.25, 40_000.0)],
                 cache_read_days: vec![(739_000, 12_345.0)],
+                mcp: vec![(739_000, "acme".into(), 5, 24_601)],
                 unpriced: vec![("mystery-model".into(), 3)],
                 probes: vec![
                     PriceProbe::Lookup {
@@ -4911,6 +5088,7 @@ mod tests {
                     first_ms: Some(1_790_000_000_000),
                     last_ms: Some(1_790_000_900_000),
                     parent_session: None, // #[serde(skip)]: never persisted, recomputed from the path instead
+                    pending_mcp: [("toolu_1".to_string(), "acme".to_string())].into_iter().collect(),
                 }),
                 pi_seen: vec!["pi-msg-1".into()],
                 parent_session: Some("11111111-1111-1111-1111-111111111111".into()),
@@ -4928,6 +5106,7 @@ mod tests {
         assert_eq!(a.days, b.days);
         assert_eq!(a.areas, b.areas);
         assert_eq!(a.cache_read_days, b.cache_read_days);
+        assert_eq!(a.mcp, b.mcp);
         assert_eq!(a.unpriced, b.unpriced);
         assert_eq!(a.probes, b.probes);
         assert_eq!(a.prefix_head, b.prefix_head);
@@ -4946,6 +5125,30 @@ mod tests {
         let (sa, sb) = (a.claude.as_ref().unwrap(), b.claude.as_ref().unwrap());
         assert_eq!((&sa.root, &sa.area), (&sb.root, &sb.area));
         assert_eq!((sa.first_ms, sa.last_ms), (sb.first_ms, sb.last_ms));
+        assert_eq!(sa.pending_mcp, sb.pending_mcp, "a still-open call must survive to match its result later");
+    }
+
+    /// `PersistEntry::mcp` and `ClaudeFileState::pending_mcp` specifically --
+    /// the two fields PERSIST_VERSION 12 added -- round-trip through JSON
+    /// exactly, including a pending id that has not been resolved yet.
+    #[test]
+    fn the_cache_round_trips_the_new_fields() {
+        let entry = PersistEntry {
+            path: PathBuf::from("/pane-test-fixture/mcp-roundtrip/uuid.jsonl"),
+            mcp: vec![(739_100, "acme-search".into(), 12, 3_145_728), (739_101, OTHER_MCP_SERVER.into(), 1, 10)],
+            claude: Some(ClaudeFileState {
+                pending_mcp: [("toolu_open".to_string(), "acme-search".to_string())].into_iter().collect(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: PersistEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.mcp, entry.mcp);
+        assert_eq!(
+            back.claude.as_ref().unwrap().pending_mcp,
+            entry.claude.as_ref().unwrap().pending_mcp
+        );
     }
 
     /// A v2 cache (no probes/corrections fields) must not load as v3 —
@@ -5002,9 +5205,12 @@ mod tests {
     /// rescanned once. Exercises the real decision
     /// (`load_persisted_cache_from`) rather than just comparing version
     /// numbers: a version-10 doc's own entry must never reach the live map.
+    /// The live PERSIST_VERSION has since moved past 11 (see the test right
+    /// below this one) -- what this regression pins is that a version-10 doc
+    /// specifically never loads, which holds regardless of how far the
+    /// constant has moved since.
     #[test]
     fn persist_version_11_discards_a_version_10_cache() {
-        assert_eq!(PERSIST_VERSION, 11, "the cache-format version this fix shipped under");
         let fake_path = PathBuf::from("/pane-test-fixture/persist-version-11-discard/uuid.jsonl");
         let v10 = PersistFile {
             version: 10,
@@ -5022,6 +5228,36 @@ mod tests {
         let _ = fs::remove_file(&tmp);
         let map = cache().lock().unwrap_or_else(|e| e.into_inner());
         assert!(!map.contains_key(&fake_path), "a version-10 cache's entries must never reach the live map");
+    }
+
+    /// The cache format moved from 11 to 12 when persisted entries started
+    /// carrying `FileData::mcp` (per-server MCP call counts and result-byte
+    /// totals) and `ClaudeFileState::pending_mcp`, for the MCP context-cost
+    /// finding: a cache an older build wrote has neither, and every server
+    /// would read a permanent zero if such a cache were trusted instead of
+    /// rescanned once. An old cache is discarded outright rather than
+    /// misread as "no MCP usage" -- exercises the real decision
+    /// (`load_persisted_cache_from`), not just a comparison of version
+    /// numbers: a version-11 doc's own entry must never reach the live map.
+    #[test]
+    fn an_old_cache_is_discarded_not_misread() {
+        let fake_path = PathBuf::from("/pane-test-fixture/persist-version-12-discard/uuid.jsonl");
+        let v11 = PersistFile {
+            version: 11,
+            pricing_stamp: "x".to_string(),
+            corrections: pricing::corrections_rev(),
+            entries: vec![PersistEntry {
+                path: fake_path.clone(),
+                days: vec![(19_000, "claude-haiku-4-5".to_string(), 1.0, 10.0)],
+                ..Default::default()
+            }],
+        };
+        let tmp = std::env::temp_dir().join(format!("pane-persist-v11-discard-{}.json", std::process::id()));
+        fs::write(&tmp, serde_json::to_string(&v11).unwrap()).unwrap();
+        load_persisted_cache_from(&tmp);
+        let _ = fs::remove_file(&tmp);
+        let map = cache().lock().unwrap_or_else(|e| e.into_inner());
+        assert!(!map.contains_key(&fake_path), "a version-11 cache's entries must never reach the live map");
     }
 
     /// SWE/Penguin + V4.1 Flash baked rates bumped CORRECTIONS_REV. A
@@ -6640,6 +6876,179 @@ mod tests {
         assert_eq!(data.cache_read_days.len(), 1, "one calendar day");
         let total_cache_read: f64 = data.cache_read_days.values().sum();
         assert_eq!(total_cache_read, 1_004.0, "parent's 1000 plus the advisor's 4");
+    }
+
+    // ---- Claude: MCP context cost -----------------------------------------
+
+    fn mcp_tool_use_line(ts: &str, mid: &str, rid: &str, tool_use_id: &str, tool_name: &str) -> String {
+        json!({"type": "assistant", "timestamp": ts, "requestId": rid,
+            "message": {"id": mid, "model": "claude-sonnet-5",
+                "usage": {"input_tokens": 1.0, "output_tokens": 1.0},
+                "content": [{"type": "tool_use", "id": tool_use_id, "name": tool_name,
+                             "input": {"query": "PLANTED_TOOL_USE_INPUT_TEXT"}}]}})
+        .to_string()
+    }
+
+    fn mcp_tool_result_line(ts: &str, tool_use_id: &str, content: Value) -> String {
+        json!({"type": "user", "timestamp": ts,
+            "message": {"content": [{"type": "tool_result", "tool_use_id": tool_use_id, "content": content}]}})
+        .to_string()
+    }
+
+    #[test]
+    fn counts_an_mcp_call_once_across_duplicate_lines() {
+        let line = mcp_tool_use_line("2026-07-10T10:00:00Z", "msg_1", "req_1", "toolu_1", "mcp__acme__search");
+        let mut st = ClaudeFileState::default();
+        let mut data = FileData::default();
+        claude_line(&mut st, &line, &mut data);
+        claude_line(&mut st, &line, &mut data); // the exact same line, replayed
+        let total_calls: u64 = data.mcp.values().map(|(calls, _)| *calls).sum();
+        assert_eq!(total_calls, 1, "the same tool_use id must not be counted twice");
+        assert_eq!(st.pending_mcp.len(), 1, "one id, remembered once");
+    }
+
+    #[test]
+    fn sizes_a_result_and_keeps_none_of_it() {
+        const PLANTED_INPUT: &str = "PLANTED_TOOL_USE_INPUT_TEXT";
+        const PLANTED_RESULT: &str = "PLANTED_SECRET_RESULT_TEXT_0f3e";
+        const PLANTED_PROMPT: &str = "PLANTED_USER_PROMPT_TEXT";
+        let call = mcp_tool_use_line("2026-07-10T10:00:00Z", "msg_1", "req_1", "toolu_1", "mcp__acme__search");
+        let result = mcp_tool_result_line("2026-07-10T10:00:01Z", "toolu_1", json!(PLANTED_RESULT));
+        // A real prompt line planted on the same fixture: it must never be
+        // read at all (claude_line only looks at "user" lines for a pending
+        // tool_result, never for their prompt text).
+        let prompt = json!({"type": "user", "timestamp": "2026-07-10T10:00:02Z",
+            "message": {"content": [{"type": "text", "text": PLANTED_PROMPT}]}})
+        .to_string();
+
+        let mut st = ClaudeFileState::default();
+        let mut data = FileData::default();
+        claude_line(&mut st, &call, &mut data);
+        claude_line(&mut st, &result, &mut data);
+        claude_line(&mut st, &prompt, &mut data);
+
+        let ((_, server), (calls, bytes)) = data.mcp.iter().next().map(|(k, v)| (k.clone(), *v)).expect("one server, one day");
+        assert_eq!(server, "acme");
+        assert_eq!(calls, 1);
+        assert_eq!(bytes, PLANTED_RESULT.len() as u64);
+
+        // Everything the scan returns for this file...
+        let scanned = serde_json::to_string(&data.mcp.iter().collect::<Vec<_>>()).unwrap();
+        assert!(scanned.contains("acme"), "the server name must still be there");
+        assert!(!scanned.contains(PLANTED_RESULT), "the scan output must not carry the result text");
+        assert!(!scanned.contains(PLANTED_INPUT), "the scan output must not carry the call's input");
+        assert!(!scanned.contains(PLANTED_PROMPT), "the scan output must not carry a user prompt");
+
+        // ...and everything it persists.
+        let entry = PersistEntry {
+            mcp: data.mcp.iter().map(|((d, s), (c, b))| (*d, s.clone(), *c, *b)).collect(),
+            claude: Some(st.clone()),
+            ..Default::default()
+        };
+        let persisted = serde_json::to_string(&entry).unwrap();
+        assert!(!persisted.contains(PLANTED_RESULT), "the persisted cache must not carry the result text");
+        assert!(!persisted.contains(PLANTED_INPUT), "the persisted cache must not carry the call's input");
+        assert!(!persisted.contains(PLANTED_PROMPT), "the persisted cache must not carry a user prompt");
+    }
+
+    #[test]
+    fn a_result_for_an_unknown_id_is_ignored() {
+        let call = mcp_tool_use_line("2026-07-10T10:00:00Z", "msg_1", "req_1", "toolu_1", "mcp__acme__search");
+        let stray = mcp_tool_result_line("2026-07-10T10:00:01Z", "toolu_never_called", json!("stray result"));
+        let mut st = ClaudeFileState::default();
+        let mut data = FileData::default();
+        claude_line(&mut st, &call, &mut data);
+        claude_line(&mut st, &stray, &mut data);
+        let total_bytes: u64 = data.mcp.values().map(|(_, bytes)| *bytes).sum();
+        assert_eq!(total_bytes, 0, "a result for an id nobody called must add no bytes");
+        assert_eq!(st.pending_mcp.len(), 1, "the real pending call is still waiting");
+    }
+
+    #[test]
+    fn a_user_line_is_not_parsed_when_nothing_is_pending() {
+        let result = mcp_tool_result_line("2026-07-10T10:00:01Z", "toolu_ghost", json!("stray result"));
+        let mut st = ClaudeFileState::default();
+        let mut data = FileData::default();
+        claude_line(&mut st, &result, &mut data);
+        assert!(data.mcp.is_empty(), "nothing was pending, so nothing should be booked");
+        assert!(st.pending_mcp.is_empty());
+    }
+
+    #[test]
+    fn pending_ids_are_bounded() {
+        let mut st = ClaudeFileState::default();
+        let mut data = FileData::default();
+        for i in 0..(MAX_PENDING_MCP + 10) {
+            let line = mcp_tool_use_line(
+                "2026-07-10T10:00:00Z",
+                &format!("msg_{i}"),
+                &format!("req_{i}"),
+                &format!("toolu_{i}"),
+                "mcp__acme__search",
+            );
+            claude_line(&mut st, &line, &mut data);
+        }
+        assert_eq!(st.pending_mcp.len(), MAX_PENDING_MCP, "bounded even after many more calls");
+
+        // The oldest id (toolu_0) was already dropped -- its result matches nothing.
+        let stale = mcp_tool_result_line("2026-07-10T10:05:00Z", "toolu_0", json!("late"));
+        claude_line(&mut st, &stale, &mut data);
+        let total_bytes: u64 = data.mcp.values().map(|(_, bytes)| *bytes).sum();
+        assert_eq!(total_bytes, 0, "the oldest id was already evicted");
+
+        // The most recently seen id is still pending and does match.
+        let last_id = MAX_PENDING_MCP + 9;
+        let fresh = mcp_tool_result_line("2026-07-10T10:05:01Z", &format!("toolu_{last_id}"), json!("fresh"));
+        claude_line(&mut st, &fresh, &mut data);
+        let total_bytes: u64 = data.mcp.values().map(|(_, bytes)| *bytes).sum();
+        assert_eq!(total_bytes, "fresh".len() as u64);
+    }
+
+    #[test]
+    fn server_keys_are_bounded() {
+        let mut st = ClaudeFileState::default();
+        let mut data = FileData::default();
+        for i in 0..(MAX_MCP_SERVERS_PER_FILE + 10) {
+            let line = mcp_tool_use_line(
+                "2026-07-10T10:00:00Z",
+                &format!("msg_{i}"),
+                &format!("req_{i}"),
+                &format!("toolu_{i}"),
+                &format!("mcp__server{i}__search"),
+            );
+            claude_line(&mut st, &line, &mut data);
+        }
+        let distinct_servers: HashSet<&String> = data.mcp.keys().map(|(_, s)| s).collect();
+        assert!(
+            distinct_servers.len() <= MAX_MCP_SERVERS_PER_FILE + 1,
+            "extras beyond the cap must fold into one bucket, got {} distinct servers",
+            distinct_servers.len()
+        );
+        assert!(distinct_servers.contains(&OTHER_MCP_SERVER.to_string()), "overflow must land in the other bucket");
+    }
+
+    #[test]
+    fn survives_an_incremental_scan() {
+        let dir = std::env::temp_dir().join(format!("pane-mcp-incremental-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("session.jsonl");
+        let call = mcp_tool_use_line("2026-07-10T10:00:00Z", "msg_1", "req_1", "toolu_1", "mcp__acme__search");
+        fs::write(&path, format!("{call}\n")).unwrap();
+        let first = claude_file(&path);
+        assert_eq!(first.mcp.values().map(|(calls, _)| *calls).sum::<u64>(), 1, "the call is counted on the first scan");
+
+        let result = mcp_tool_result_line("2026-07-10T10:00:05Z", "toolu_1", json!("0123456789"));
+        let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        use std::io::Write;
+        writeln!(f, "{result}").unwrap();
+        drop(f);
+
+        let second = claude_file(&path);
+        let _ = fs::remove_dir_all(&dir);
+        let total_calls: u64 = second.mcp.values().map(|(calls, _)| *calls).sum();
+        let total_bytes: u64 = second.mcp.values().map(|(_, bytes)| *bytes).sum();
+        assert_eq!(total_calls, 1, "still one call, not double-counted across scans");
+        assert_eq!(total_bytes, 10, "the result appended on a later scan still finds its call's id");
     }
 
     #[test]

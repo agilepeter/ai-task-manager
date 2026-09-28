@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, audit, clients, coaching, diagnose, digest, drift, effort, forecast, history, httpapi, i18n, inventory, ledger, pin, pricing, procs, providers, spend, trust};
+pub(crate) use aitm_core::{alerts, audit, clients, coaching, diagnose, digest, drift, effort, forecast, history, httpapi, i18n, inventory, ledger, mcp_usage, pin, pricing, procs, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -448,6 +448,8 @@ fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     let any_subagent_runs = !agent_spend.is_empty();
     let used_agents: HashSet<String> = agent_spend.into_iter().map(|a| a.name).collect();
     inv.opportunities.extend(inventory::agent_usage_opportunities(&inv.agents, &used_agents, any_subagent_runs));
+    mcp_usage::attach(&mut inv.mcp_servers, &spend::mcp_usage_30d());
+    inv.opportunities.extend(mcp_usage::opportunities(&inv.mcp_servers));
     // Gaps first, then things to learn, each in the order found.
     inv.opportunities.sort_by_key(|o| o.kind != "tighten");
     (inv, spend)

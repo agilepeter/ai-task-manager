@@ -23,6 +23,17 @@ export function tokens(n: number): string {
   return String(Math.round(n));
 }
 
+/// KB under 1 MB, then MB, then GB from 1024 MB -- the general-purpose byte
+/// formatter, for anything that isn't a file (detail.ts keeps its own
+/// fileSize() for that). MB/KB stay English, like money()'s $ and tokens()'s
+/// B/M/K.
+export function byteSize(bytes: number): string {
+  const mb = bytes / 1_048_576;
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+  if (mb >= 1) return `${mb.toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 /// Whole days between an earlier instant and now, floor-divided so any
 /// time-of-day within the same calendar span still lands in bucket 0
 /// ("today"). The one place that arithmetic lives, so relativeActivity()'s

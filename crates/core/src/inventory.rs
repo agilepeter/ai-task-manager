@@ -45,6 +45,12 @@ pub struct McpServer {
     /// (the pin command needs it); never serialized to the UI or a report.
     #[serde(skip)]
     pub source_file: Option<String>,
+    /// 30 days of tool-call counts and result bytes, read from Claude Code's
+    /// own session logs and stamped on by `mcp_usage::attach`. Only ever set
+    /// for a `client == "Claude Code"` server -- every other client's
+    /// inventory row carries no figure because nothing here reads its logs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::mcp_usage::McpUsage>,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -312,6 +318,7 @@ fn mcp_from_map_for(map: &Value, client: &str, scope: &str, project: Option<&str
                 env_count: cfg.get("env").and_then(Value::as_object).map_or(0, |e| e.len()),
                 pin_to: None,
                 source_file: None,
+                usage: None,
             }
         })
         .collect();
@@ -1116,6 +1123,7 @@ mod tests {
             env_count,
             pin_to: None,
             source_file: None,
+            usage: None,
         }
     }
 
@@ -1359,6 +1367,12 @@ mod tests {
         let any_runs = !agent_spend.is_empty();
         let used: HashSet<String> = agent_spend.into_iter().map(|a| a.name).collect();
         inv.opportunities.extend(agent_usage_opportunities(&inv.agents, &used, any_runs));
+        // Same MCP context-cost step enriched_inventory() (src-tauri/src/lib.rs)
+        // takes for the real app's Inventory tab, so the demo fixture this
+        // test backs shows a server's usage figure and, when one crosses the
+        // thresholds, the "mcp-context-heavy" finding too.
+        crate::mcp_usage::attach(&mut inv.mcp_servers, &crate::spend::mcp_usage_30d());
+        inv.opportunities.extend(crate::mcp_usage::opportunities(&inv.mcp_servers));
         println!("{}", serde_json::to_string_pretty(&inv).unwrap());
     }
 

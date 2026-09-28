@@ -10,7 +10,11 @@
     "target": "npx",
     "package": "@upstash/context7-mcp@1",
     "envCount": 0,
-    "pinTo": null
+    "pinTo": null,
+    "usage": {
+     "calls": 45,
+     "resultBytes": 2565000
+    }
    },
    {
     "name": "github",
@@ -21,7 +25,11 @@
     "target": "api.githubcopilot.com",
     "package": null,
     "envCount": 0,
-    "pinTo": null
+    "pinTo": null,
+    "usage": {
+     "calls": 9,
+     "resultBytes": 9000
+    }
    },
    {
     "name": "playwright",
@@ -32,7 +40,11 @@
     "target": "npx",
     "package": "@playwright/mcp@latest",
     "envCount": 0,
-    "pinTo": null
+    "pinTo": null,
+    "usage": {
+     "calls": 22,
+     "resultBytes": 66000
+    }
    },
    {
     "name": "postgres",
@@ -54,7 +66,11 @@
     "target": "npx",
     "package": "figma-context-mcp@2",
     "envCount": 1,
-    "pinTo": null
+    "pinTo": null,
+    "usage": {
+     "calls": 14,
+     "resultBytes": 56000
+    }
    },
    {
     "name": "notes",
@@ -238,6 +254,25 @@
      "count": null
     },
     "learnUrl": null
+   },
+   {
+    "id": "mcp-context-heavy",
+    "kind": "learn",
+    "title": "1 MCP server is heavy on context",
+    "detail": "context7 (2.4 MB) sent back that much tool-result data in the last 30 days, measured for Claude Code only. Every result goes straight back into the conversation, so it can burn through your context window fast; a narrower query or the server's own summarized mode, if it offers one, brings that down.",
+    "titleMsg": {
+     "key": "finding.mcp-context-heavy.title",
+     "vars": {},
+     "count": 1
+    },
+    "detailMsg": {
+     "key": "finding.mcp-context-heavy.detail",
+     "vars": {
+      "names": "context7 (2.4 MB)"
+     },
+     "count": 1
+    },
+    "learnUrl": "https://staas.fund/mcp/"
    }
   ]
  },
@@ -280,9 +315,9 @@
     ]
    },
    "last30": {
-    "cost": 1596.6834,
-    "tokens": 161565478.0,
-    "cache_read": 152085008.0,
+    "cost": 1602.2919,
+    "tokens": 162586611.0,
+    "cache_read": 153022498.0,
     "models": [
      {
       "model": "claude-opus-5",
@@ -291,8 +326,8 @@
      },
      {
       "model": "claude-sonnet-5",
-      "cost": 317.7623,
-      "tokens": 62427440.0
+      "cost": 323.3708,
+      "tokens": 63448573.0
      },
      {
       "model": "Other",
@@ -325,7 +360,7 @@
     3391668.0,
     4591040.0,
     7939414.0,
-    8365844.0,
+    9386977.0,
     11677944.0,
     7788237.0,
     2848750.0,
@@ -359,7 +394,7 @@
     31.8112,
     49.4952,
     69.4296,
-    86.2152,
+    91.8237,
     122.5065,
     72.6604,
     27.6527,
@@ -383,8 +418,8 @@
       "models": []
      },
      "last30": {
-      "cost": 1596.6834,
-      "tokens": 161565478.0,
+      "cost": 1602.2919,
+      "tokens": 162586611.0,
       "cache_read": 0.0,
       "models": []
      },
@@ -404,8 +439,8 @@
         "models": []
        },
        "last30": {
-        "cost": 537.7619,
-        "tokens": 53435958.0,
+        "cost": 542.6657,
+        "tokens": 54335294.0,
         "cache_read": 0.0,
         "models": []
        },
@@ -433,7 +468,7 @@
         2.1175,
         7.223,
         14.8699,
-        29.5814,
+        34.4852,
         50.4288,
         13.3302,
         14.6176,
@@ -442,9 +477,9 @@
         0.0
        ],
        "week": {
-        "thisWeek": 151.7027,
+        "thisWeek": 156.6065,
         "lastWeek": 93.2977,
-        "changePercent": 62.600686
+        "changePercent": 67.856764
        }
       },
       {
@@ -462,8 +497,8 @@
         "models": []
        },
        "last30": {
-        "cost": 494.5701,
-        "tokens": 54438846.0,
+        "cost": 495.1803,
+        "tokens": 54552545.0,
         "cache_read": 0.0,
         "models": []
        },
@@ -491,7 +526,7 @@
         28.9242,
         20.3864,
         17.7717,
-        19.8445,
+        20.4547,
         11.2238,
         45.498,
         5.3334,
@@ -500,9 +535,9 @@
         0.1702
        ],
        "week": {
-        "thisWeek": 136.742,
+        "thisWeek": 137.3522,
         "lastWeek": 92.1979,
-        "changePercent": 48.313573
+        "changePercent": 48.975411
        }
       },
       {
@@ -636,8 +671,8 @@
         "models": []
        },
        "last30": {
-        "cost": 156.4431,
-        "tokens": 13877260.0,
+        "cost": 156.5376,
+        "tokens": 13885358.0,
         "cache_read": 0.0,
         "models": []
        },
@@ -665,7 +700,7 @@
         0.7695,
         2.1867,
         9.1013,
-        8.1602,
+        8.2547,
         2.79,
         4.2379,
         0.3265,
@@ -674,9 +709,9 @@
         0.1714
        ],
        "week": {
-        "thisWeek": 51.125,
+        "thisWeek": 51.2195,
         "lastWeek": 15.5781,
-        "changePercent": 228.18508
+        "changePercent": 228.791701
        }
       },
       {
@@ -741,9 +776,9 @@
     }
    ],
    "week": {
-    "thisWeek": 472.4495,
+    "thisWeek": 478.058,
     "lastWeek": 259.3926,
-    "changePercent": 82.136846
+    "changePercent": 84.299012
    }
   }
  ],
@@ -3036,6 +3071,24 @@
       "detailMsg": null
      },
      {
+      "id": "mcp-context-heavy",
+      "status": "consider",
+      "title": "1 MCP server is heavy on context",
+      "detail": "context7 (2.4 MB) sent back that much tool-result data in the last 30 days, measured for Claude Code only. Every result goes straight back into the conversation, so it can burn through your context window fast; a narrower query or the server's own summarized mode, if it offers one, brings that down.",
+      "titleMsg": {
+       "key": "finding.mcp-context-heavy.title",
+       "vars": {},
+       "count": 1
+      },
+      "detailMsg": {
+       "key": "finding.mcp-context-heavy.detail",
+       "vars": {
+        "names": "context7 (2.4 MB)"
+       },
+       "count": 1
+      }
+     },
+     {
       "id": "mcp",
       "status": "info",
       "title": "6 MCP servers configured",
@@ -3285,7 +3338,7 @@
       "id": "mix-top-heavy",
       "status": "consider",
       "title": "80% of spend is on the largest models",
-      "detail": "$1270 of $1588 in 30 days went to the top tier. Searching files, reading logs and summarising do as well a tier down; giving those jobs to subagents on a lighter model is the usual way to cut this without touching the hard work.",
+      "detail": "$1270 of $1593 in 30 days went to the top tier. Searching files, reading logs and summarising do as well a tier down; giving those jobs to subagents on a lighter model is the usual way to cut this without touching the hard work.",
       "titleMsg": {
        "key": "finding.mix-top-heavy.title",
        "vars": {
@@ -3296,7 +3349,7 @@
       "detailMsg": {
        "key": "finding.mix-top-heavy.detail",
        "vars": {
-        "known": "$1588",
+        "known": "$1593",
         "top": "$1270"
        },
        "count": null
