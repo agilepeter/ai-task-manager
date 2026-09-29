@@ -8,29 +8,38 @@ release history is kept verbatim in
 
 ## 0.1.5 — 2026-09-28
 
-A small release: keyboard access and a wrapping label, nothing more.
+A small release for people who use the keyboard.
 
 ### Fixed
 
-- **Only the Agents view and the Audit returned focus to what opened them.**
-  About, Settings, Customize, the Detail page, the client-rules editor, the
-  MCP pin preview, the Subscriptions add/edit form and the confirm dialog now
-  all do the same: focus moves into the panel on open, and back to whatever
-  opened it on close.
-- **Plain Tab could not reach most buttons and links in the macOS webview.**
-  Every button, link and tab is now reachable with Tab alone, in order.
-  Closed panels and their controls stay out of the way while off screen, and
-  a keyboard focus now shows a visible ring on controls that had none.
-- **The Agents view's third figure wrapped to two lines in Russian, French,
-  Portuguese and German.** Its label is now a short noun on its own line,
-  with "Last 30 days" underneath in a smaller line, in every language.
-- **Tab could reach the tab bar and the cards behind an open panel, and two
-  open panels disagreed on which one was in front.** A keyboard user
-  tabbing through Settings no longer lands in Usage or Inventory underneath
-  it. When a second panel opens over a first, such as Settings from the
-  rail while Agents is open, only the front one answers Tab and Escape now,
-  and a mouse click always reaches its close button first. Closing it
-  brings the other panel back to the front, exactly as it was.
+- **Every control can be reached with the Tab key.** In the macOS webview
+  Tab used to skip buttons and links. It reaches them all, in order, with a
+  ring around the one in focus. A provider's name on the Usage tab is a
+  control too: Enter or Space opens its page. The three view tabs are one
+  stop, and the arrow keys, Home and End move between them.
+- **A panel returns focus to what opened it.** About, Settings, Customize,
+  a provider's page, the client rules editor, the pin preview, the
+  Subscriptions form and the confirm dialog all move focus in when they
+  open and back when they close. A provider's page finds its card again
+  after the cards have been redrawn.
+- **A redraw keeps a keyboard user's place.** The cards redraw on a timer
+  and Inventory redraws after a rescan. Focus stays on the control in the
+  same place.
+- **A mouse click leaves nothing armed.** After a click, Space and Enter do
+  not activate the control that was clicked, or the button that opened a
+  panel the click closed.
+- **Only the panel in front answers.** With a panel open, Tab stays inside
+  it and the rail. When a second panel opens over a first, Tab, Escape and
+  a click on the close button go to the one in front, and closing it brings
+  the other back. Escape in a confirm dialog closes the dialog and leaves
+  the panel beneath.
+- **The three figures in the Agents view read on one line each** in every
+  language. The period has its own smaller line under the third.
+- **The image at the top of the README showed version 0.1.0.** It is
+  retaken from the demo, and the release steps name it.
+
+On macOS before 12.3 a closed panel's controls stay in the Tab order, as
+they were before this release. Everything else here works the same.
 
 ## 0.1.4 — 2026-09-28
 

@@ -64,14 +64,14 @@
     <main class="popover">
       <div class="main-col">
         <div id="view-tabs" class="tabs view-tabs" role="tablist" aria-label="Views" data-i18n-aria="usage.views">
-          <button class="tab active" role="tab" aria-selected="true" data-view="usage" data-i18n="usage.tab">Usage</button>
-          <button class="tab" role="tab" aria-selected="false" data-view="inventory" data-i18n="inventory.tab">Inventory</button>
-          <button class="tab" role="tab" aria-selected="false" data-view="ledger" data-i18n="ledger.tab">Subscriptions</button>
+          <button class="tab active" role="tab" id="tab-usage" aria-controls="providers" aria-selected="true" data-view="usage" data-i18n="usage.tab">Usage</button>
+          <button class="tab" role="tab" id="tab-inventory" aria-controls="inventory" aria-selected="false" data-view="inventory" data-i18n="inventory.tab">Inventory</button>
+          <button class="tab" role="tab" id="tab-ledger" aria-controls="ledger" aria-selected="false" data-view="ledger" data-i18n="ledger.tab">Subscriptions</button>
         </div>
         <div class="content">
-          <section id="inventory" hidden></section>
-          <section id="ledger" hidden></section>
-          <section id="providers">
+          <section id="inventory" role="tabpanel" aria-labelledby="tab-inventory" hidden></section>
+          <section id="ledger" role="tabpanel" aria-labelledby="tab-ledger" hidden></section>
+          <section id="providers" role="tabpanel" aria-labelledby="tab-usage">
             <div class="skeleton-card">
               <div class="skeleton-line title"></div>
               <div class="skeleton-line bar"></div>

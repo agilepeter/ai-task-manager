@@ -96,3 +96,43 @@ test("focusOrFallback: with no fallback argument, defaults to document.body", as
     delete globalThis.document;
   }
 });
+
+// --- keeping a keyboard user's place across a redraw -------------------------
+
+test("an anchor is found again by its id, else its provider, else its section", async () => {
+  const { anchorSelector } = await loadFocusModule();
+  assert.equal(anchorSelector("inv-rescan", undefined, undefined), '[id="inv-rescan"]');
+  assert.equal(anchorSelector("", "claude", undefined), '[data-provider="claude"]');
+  assert.equal(anchorSelector("", undefined, "running"), '[data-section="running"]');
+  assert.equal(anchorSelector("x", "claude", "running"), '[id="x"]', "the id is the surest");
+  assert.equal(anchorSelector("", undefined, undefined), null);
+  assert.equal(anchorSelector("", "", undefined), '[data-provider=""]', "an empty value is still a value");
+});
+
+test("a value with a quote or a backslash in it cannot break out of the selector", async () => {
+  const { anchorSelector, insideSelector } = await loadFocusModule();
+  assert.equal(anchorSelector("", 'a"b', undefined), '[data-provider="a\\"b"]');
+  assert.equal(anchorSelector("", "a\\b", undefined), '[data-provider="a\\\\b"]');
+  assert.equal(insideSelector("BUTTON", "mini-btn", { end: 'x"]' }), 'button.mini-btn[data-end="x\\"]"]');
+});
+
+test("a control is described by its tag, first class and data, never by this app's own marker", async () => {
+  const { insideSelector } = await loadFocusModule();
+  assert.equal(insideSelector("SPAN", "provider-name", { tabAdded: "" }), "span.provider-name");
+  assert.equal(insideSelector("BUTTON", "", {}), "button");
+  assert.equal(insideSelector("BUTTON", "mini-btn", { end: "notes", tabAdded: "" }), 'button.mini-btn[data-end="notes"]');
+  assert.equal(insideSelector("SPAN", "clickable", { flip: "reset" }), 'span.clickable[data-flip="reset"]');
+  assert.equal(
+    insideSelector("DIV", "row", { drillLabel: "Mon", drillDay: "2026-09-01" }),
+    'div.row[data-drill-day="2026-09-01"][data-drill-label="Mon"]',
+    "camelCase back to the attribute's own spelling, in a fixed order",
+  );
+});
+
+test("focus is handed back only to a keyboard user whose control is gone and whose focus fell to nothing", async () => {
+  const { handsFocusBack } = await loadFocusModule();
+  assert.equal(handsFocusBack(true, true, true), true);
+  assert.equal(handsFocusBack(false, true, true), false, "a pointer user has no place to keep");
+  assert.equal(handsFocusBack(true, false, true), false, "the control is still there: focus left it on purpose");
+  assert.equal(handsFocusBack(true, true, false), false, "a handler already put focus somewhere");
+});

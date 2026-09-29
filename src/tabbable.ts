@@ -29,43 +29,94 @@
 // audit.ts, about.ts, detail.ts, ledger.ts), each with its own internal call
 // sites -- calling this by hand after every one of them would be one more
 // thing every future render forgets. A MutationObserver watches the whole
-// document instead: the browser already coalesces every synchronous DOM
-// change within one microtask checkpoint into a single callback invocation
-// (confirmed: a render() that replaces several containers' innerHTML in a
-// row still fires this callback once, not once per container), and the
-// observer is registered with only `childList`/`subtree` -- never
-// `attributes` -- so the tabindex attributes this callback itself sets can
-// never re-trigger it. No extra debouncing needed, and no loop is possible.
+// document instead, registered with only `childList`/`subtree` -- never
+// `attributes` -- so the attributes this callback itself sets can never
+// re-trigger it. It looks only at what a mutation ADDED, and never asks the
+// browser for layout, so a large render costs one pass over its own nodes.
+//
+// Two consequences of giving a button a tabindex, both handled here:
+//
+// 1. WebKit focuses a clicked element only when it carries an explicit
+//    tabindex. Before this module a clicked button never took focus; with
+//    it, every one would, and the next Space or Enter would activate it
+//    again, with no ring to show where focus sat (a ring is drawn for
+//    keyboard focus only). So after a POINTER click, focus does not stay
+//    on a control this module made tabbable. Keyboard activation keeps it.
+//
+// 2. An element that is a button by role only (a provider card's name, a
+//    figure that flips when clicked) is reachable now, so Enter and Space
+//    have to activate it as they would a real button.
 
 const TABBABLE_SELECTOR = 'button:not([tabindex]), a[href]:not([tabindex]), summary:not([tabindex]), [role="button"]:not([tabindex]), [role="tab"]:not([tabindex])';
 
-/** Gives every matching, live, enabled control in `root` an explicit
- *  tabindex="0". Exported so a test (and the timing measurement in
- *  scripts/layout-check.mjs's own family) can call it directly without
- *  waiting on the MutationObserver. */
+/** Set on every element this module gave its tabindex, so the two listeners
+ *  below can tell it from a tabindex a template wrote on purpose. */
+export const ADDED = "data-tab-added";
+
+/** Gives every matching, enabled control in `root`, and `root` itself when
+ *  it matches, an explicit tabindex="0". A control that is not displayed
+ *  gets one too: it is not a Tab stop while hidden, and needs no second
+ *  visit when a class change shows it. A closed panel's controls are kept
+ *  out of the Tab order by `inert` on the panel (src/panels.ts), not here. */
 export function makeTabbable(root: ParentNode = document): void {
-  root.querySelectorAll<HTMLElement>(TABBABLE_SELECTOR).forEach((el) => {
+  const mark = (el: HTMLElement) => {
     if ((el as HTMLButtonElement).disabled) return;
-    // Not `offsetParent === null`: every slide-in panel here is
-    // `position: fixed`, which reads offsetParent as null even while OPEN --
-    // that would skip every button inside an open panel, the opposite of
-    // what this needs. getClientRects() (the same check
-    // scripts/layout-check.mjs's own scanOverflow() already uses for "is
-    // this actually rendered") stays non-empty for a fixed panel regardless
-    // of its transform, and empty for a real `display:none`/zero-size
-    // control -- an off-screen CLOSED panel's controls still get tabindex="0"
-    // here, which is fine: `inert` on the panel itself (see index.html and
-    // each panel's own open()/close()) is what actually keeps them out of
-    // the Tab order while closed, not this function.
-    if (el.getClientRects().length === 0) return;
     el.tabIndex = 0;
-  });
+    el.setAttribute(ADDED, "");
+  };
+  const self = root as Partial<HTMLElement>;
+  if (typeof self.matches === "function" && self.matches(TABBABLE_SELECTOR)) mark(root as HTMLElement);
+  root.querySelectorAll<HTMLElement>(TABBABLE_SELECTOR).forEach(mark);
 }
 
-/** Runs makeTabbable() once immediately (for whatever is already in the DOM
- *  when this is called) and then on every future DOM change. Call once, at
- *  boot. */
+/** Pure: whether focus is given up after a click. Only when the pointer
+ *  made the click and focus now rests on a control this module made
+ *  tabbable. That is the control clicked, or another one the click's
+ *  handlers sent focus to: closing a panel returns focus to the button that
+ *  opened it, and Space would open the panel again. Focus a handler put
+ *  anywhere else (a panel's heading, a form's first field) stays. */
+export function releasesFocus(pointerClick: boolean, focusIsOnAControlThisModuleMarked: boolean): boolean {
+  return pointerClick && focusIsOnAControlThisModuleMarked;
+}
+
+/** Pure: whether a key press activates an element that is a button by role
+ *  only. Native controls answer Enter and Space themselves. */
+export function activatesByKey(key: string, roleButton: boolean, native: boolean, alreadyHandled: boolean): boolean {
+  return roleButton && !native && !alreadyHandled && (key === "Enter" || key === " ");
+}
+
+const NATIVE = "button, a[href], summary, input, select, textarea";
+
+/** Runs makeTabbable() once for what is already in the DOM, then for every
+ *  subtree a later change adds, and installs the two listeners described at
+ *  the top of this file. Call once, at boot. */
 export function watchTabbable(): void {
   makeTabbable(document);
-  new MutationObserver(() => makeTabbable(document)).observe(document.body, { childList: true, subtree: true });
+  new MutationObserver((records) => {
+    for (const record of records) {
+      record.addedNodes.forEach((node) => {
+        if (node instanceof HTMLElement) makeTabbable(node);
+      });
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+
+  // On the document, in the bubble phase: every handler of the click itself
+  // has run by now and has put focus where it wants it.
+  document.addEventListener("click", (e) => {
+    const focused = document.activeElement as HTMLElement | null;
+    // `detail` counts pointer clicks. A click made by Enter, Space or
+    // element.click() reports 0.
+    if (!releasesFocus(e.detail > 0, focused?.hasAttribute?.(ADDED) === true)) return;
+    // To <body>, which carries tabindex="-1" for this (src/focus.ts): focus
+    // sent nowhere leaves Tab dead in this WebKit.
+    document.body.focus({ preventScroll: true });
+  });
+
+  document.addEventListener("keydown", (e) => {
+    const el = e.target as HTMLElement | null;
+    if (!el?.matches) return;
+    if (!activatesByKey(e.key, el.matches('[role="button"]'), el.matches(NATIVE), e.defaultPrevented)) return;
+    e.preventDefault(); // Space would scroll the view
+    el.click();
+  });
 }

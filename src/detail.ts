@@ -1250,23 +1250,24 @@ function open(id: string, opener_: HTMLElement | null = null): void {
 function close(): void {
   // In wide mode the column is permanent: there is nothing to go back to.
   if (wide) return;
+  const closedId = openId;
   openId = null;
   document.body.classList.remove("detail-open");
   // src/panels.ts is the sole writer of `inert` on panels and the
   // background now -- see that module's own header for why this is called
   // synchronously rather than left to its MutationObserver alone.
   syncPanels();
-  // No single fixed fallback: dozens of cards can open this page, so a
-  // detached opener (the card was reordered out, or Customize hid it while
-  // this page was open) falls back to nowhere rather than guessing which
-  // other card is "right".
+  // The cards are redrawn on a timer, so the name that opened this page is
+  // often gone by now. Its card is found again by the provider it shows; a
+  // card that was hidden meanwhile leaves nothing to return to.
   const stillThere = opener != null && document.contains(opener);
-  // focusOrFallback(), not a bare `?.focus()`: the opener here can be a
-  // plain, non-focusable card element (Detail opened by clicking a card's
-  // text name rather than its "Details" button) -- calling .focus() on that
-  // is a silent no-op, which left Tab just as stuck as no target at all.
-  // See src/focus.ts for the full story.
-  const candidate = closeFocusTarget(opener, stillThere, null);
+  const sameCard = closedId
+    ? [...document.querySelectorAll<HTMLElement>("#providers [data-provider]")].find((c) => c.dataset.provider === closedId)
+    : undefined;
+  const again = sameCard?.querySelector<HTMLElement>(".provider-name") ?? null;
+  // focusOrFallback(), not a bare `?.focus()`: a target that will not take
+  // focus leaves Tab as stuck as no target at all. See src/focus.ts.
+  const candidate = closeFocusTarget(opener, stillThere, again);
   focusOrFallback(focusAfterClose(candidate));
   opener = null;
 }
@@ -1332,7 +1333,8 @@ export function applySavedWide(): void {
 
 export function setupDetail(src: DetailSource): void {
   source = src;
-  // A card's name is the way in. Keyboard users get the same through Enter.
+  // A card's name is the way in. It is a button by role, so Tab reaches it
+  // and Enter or Space opens the page (src/tabbable.ts).
   document.querySelector("#providers")?.addEventListener("click", (e) => {
     const more = (e.target as HTMLElement).closest<HTMLElement>("[data-detail]");
     if (more?.dataset.detail) {
@@ -1341,7 +1343,7 @@ export function setupDetail(src: DetailSource): void {
     }
     const name = (e.target as HTMLElement).closest<HTMLElement>(".provider-name");
     const card = name?.closest<HTMLElement>("[data-provider]");
-    if (card?.dataset.provider) open(card.dataset.provider, card);
+    if (name && card?.dataset.provider) open(card.dataset.provider, name);
   });
   document.querySelector("#detail-close")?.addEventListener("click", close);
   document.querySelector("#detail-wide")?.addEventListener("click", () => void setWide(!wide, true));

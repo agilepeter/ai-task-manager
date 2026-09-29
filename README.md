@@ -44,6 +44,7 @@ account and no admin rights. Everything below is written for both paths.
 | macOS signing | None yet. Open it once, then allow it under System Settings > Privacy & Security > Open Anyway (macOS 14 or earlier: right-click the app > Open). Or `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`. |
 | Windows signing | None yet. SmartScreen warns: More info, then Run anyway. |
 | Auto-update | **Opt-in, off by default.** See [Updates](#updates). |
+| Keyboard | Every control is reachable with Tab, the view tabs move with the arrow keys, and Escape closes the panel in front. On macOS before 12.3 a closed panel's controls stay in the Tab order. |
 
 ### macOS
 

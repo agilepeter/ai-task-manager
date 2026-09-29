@@ -202,6 +202,17 @@ and computed Opportunities). Usage stays the default view.
   in the tab but scored nothing for a day because of this. `enriched_inventory()` in
   `src-tauri/src/lib.rs` is now the single place both the tab and the audit get their findings
   from, so the two lists cannot drift apart again.
+- **Keyboard** (`src/tabbable.ts`, `src/tablist.ts`, `src/focus.ts`): the macOS webview skips
+  buttons on Tab unless they carry a tabindex, so `tabbable.ts` gives every button, link,
+  summary and `role="button"` one and marks it `data-tab-added`. Three rules follow. After a
+  POINTER click focus never stays on a marked control (or Space would activate it again, with
+  no ring to show it). A tab list is ONE stop with a roving tabindex and arrow keys
+  (`tablist.ts`); a tabindex a template writes, -1 included, is never overridden. A redraw
+  hands focus back to the control in the same place for a keyboard user
+  (`keepFocusAcrossRedraws`), so a new control that can be redrawn needs an id, or a
+  `data-provider` or `data-section` ancestor, to be found again. A clickable thing that is not
+  a real button takes `role="button"`; when many of them do the same thing, one is the Tab
+  stop and the rest get `tabindex="-1"`. Check keyboard work in WebKit, by pressing keys.
 - **Panels** (`src/panels.ts`): the one module that decides which slide-in panel (Customize,
   About, Audit, Agents, Detail, Settings) is on top. It is the only writer of `inert` and
   `data-top-panel` on a panel and on the background (`.main-col`); a panel's own open()/close()

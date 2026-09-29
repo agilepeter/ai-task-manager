@@ -5,7 +5,8 @@ import { rerender as rerenderAbout, setupAbout } from "./about";
 import { rerender as rerenderLedger, setupLedger } from "./ledger";
 import { applySavedWide, cardExtras, refreshDetail, rerender as rerenderDetail, setupDetail } from "./detail";
 import { watchTabbable } from "./tabbable";
-import { focusOrFallback } from "./focus";
+import { wireTabList } from "./tablist";
+import { focusOrFallback, keepFocusAcrossRedraws } from "./focus";
 import { beginModal, endModal, focusAfterClose, initPanels, isTopPanel, syncPanels } from "./panels";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -1185,7 +1186,7 @@ function renderMetric(m: Metric, providerId: string): string {
         const countdown = remain < 60_000 ? t("card.resetsSoon") : t("card.resetsIn", { time: fmtDuration(remain) });
         const exact = t("card.resetsAt", { when: fmtExact(m.resets_at) });
         const [text, alt] = config.resetExact ? [exact, countdown] : [countdown, exact];
-        resetHtml = `<span class="clickable" data-flip="reset" title="${escapeHtml(alt)}">${escapeHtml(text)}</span>`;
+        resetHtml = `<span class="clickable" data-flip="reset" role="button" title="${escapeHtml(alt)}">${escapeHtml(text)}</span>`;
       }
     }
     const detailHtml = [m.detail ? escapeHtml(displayMetricDetail(m.detail)) : "", resetHtml].filter(Boolean).join(" · ");
@@ -1200,7 +1201,7 @@ function renderMetric(m: Metric, providerId: string): string {
           ${tick}
         </div>
         <div class="metric-foot">
-          <span class="left-val clickable" data-flip="usage" title="${escapeHtml(headlineAlt)}">${headline}</span>
+          <span class="left-val clickable" data-flip="usage" role="button" title="${escapeHtml(headlineAlt)}">${headline}</span>
           <span class="detail">${detailHtml}</span>
         </div>
       </div>`;
@@ -1413,7 +1414,7 @@ function renderCard(s: Snapshot): string {
     <article class="provider${muted}" data-provider="${escapeHtml(s.id)}">
       <div class="provider-head">
         <span class="provider-icon drag-handle" title="${escapeHtml(t("card.drag"))}">${icon || '<span class="grip-glyph">⠿</span>'}</span>
-        <span class="provider-name">${escapeHtml(s.name)}</span>
+        <span class="provider-name" role="button" aria-label="${escapeHtml(`${t("detail.panel.label")}: ${s.name}`)}">${escapeHtml(s.name)}</span>
         ${planChip}
         ${stale}
         <span class="spacer"></span>
@@ -2352,6 +2353,13 @@ function renderAll(): void {
   const el = document.querySelector("#providers")!;
   el.innerHTML =
     renderWelcome() + renderTotalSpend() + orderedSnapshots().map(renderCard).join("");
+  // Flipping a figure changes how EVERY figure of its kind reads, so one of
+  // each kind is enough of a Tab stop. The rest still answer a click.
+  for (const kind of ["usage", "reset"]) {
+    el.querySelectorAll<HTMLElement>(`[data-flip="${kind}"]`).forEach((flip, i) => {
+      if (i > 0) flip.tabIndex = -1;
+    });
+  }
   syncApiKeysGroup();
   resetsPopover.onRender();
   if (customizeOpen) renderDrawerBody();
@@ -4850,7 +4858,13 @@ window.addEventListener("DOMContentLoaded", () => {
   // See src/tabbable.ts's own header for what this fixes and how it was
   // measured. Started once, here, before the first render -- it also covers
   // every panel's static markup already in index.html at boot.
+  // Before watchTabbable(): the view tabs get their own tabindex first (one
+  // Tab stop for the list, arrows between the tabs), which that module then
+  // leaves alone.
+  const viewTabs = document.querySelector<HTMLElement>("#view-tabs");
+  if (viewTabs) wireTabList(viewTabs);
   watchTabbable();
+  keepFocusAcrossRedraws();
   // See src/panels.ts's own header for what this owns. index.html already
   // starts every panel `inert`, so this has nothing to undo at boot -- it
   // just starts watching for the first one to open.

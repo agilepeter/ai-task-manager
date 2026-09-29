@@ -1,77 +1,86 @@
-// src/tabbable.ts's makeTabbable(): the pure per-element decision (skip
-// disabled, skip genuinely unrendered, else tabIndex = 0), exercised against
-// a fake root whose querySelectorAll() ignores the selector string and just
-// returns a fixed list of fake elements -- the CSS selector itself (which
-// tags/roles actually match) is a real-DOM question, checked directly
-// against the live app in Playwright WebKit (see the report), not here.
-// src/tabbable.ts has no imports of its own, so it needs none of the
-// combined-module inlining this suite's other tests use for i18n-dependent
-// modules -- straight import from the compiled source.
+// src/tabbable.ts: which controls become Tab stops, which give focus up
+// after a pointer click, and which answer Enter and Space. The selector
+// itself (which tags and roles match) is a question for a real DOM and is
+// checked against the running demo in WebKit, not here.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import ts from "typescript";
 
-async function loadTabbableModule() {
+async function load() {
   const source = await readFile(new URL("../src/tabbable.ts", import.meta.url), "utf8");
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 
-/** A fake element carrying only what makeTabbable() reads or writes:
- *  `.disabled`, `.getClientRects()` and `.tabIndex`. `rects` defaults to one
- *  non-empty rect (a normally-rendered control); pass `[]` for one that is
- *  not actually rendered (display:none, zero-size, or -- the real case this
- *  matters for -- simply not present in this fake's own list). */
-function fakeEl({ disabled = false, rects = [{}] } = {}) {
-  return { disabled, getClientRects: () => rects, tabIndex: -1 };
+function fakeEl({ disabled = false } = {}) {
+  const attrs = new Map();
+  return { disabled, tabIndex: -1, attrs, setAttribute: (k, v) => attrs.set(k, v) };
 }
+const fakeRoot = (elements, self = null) => ({
+  querySelectorAll: () => elements,
+  ...(self ? { matches: () => true, ...self } : {}),
+});
 
-function fakeRoot(elements) {
-  return { querySelectorAll: () => elements };
-}
-
-test("makeTabbable: sets tabIndex=0 on a normal, enabled, rendered element", async () => {
-  const { makeTabbable } = await loadTabbableModule();
+test("an enabled control becomes a Tab stop and is marked as this module's", async () => {
+  const { makeTabbable, ADDED } = await load();
   const el = fakeEl();
   makeTabbable(fakeRoot([el]));
   assert.equal(el.tabIndex, 0);
+  assert.ok(el.attrs.has(ADDED), "unmarked, it could not be told from a tabindex a template wrote");
 });
 
-test("makeTabbable: skips a disabled element, leaving its tabIndex untouched", async () => {
-  const { makeTabbable } = await loadTabbableModule();
+test("a disabled control is left alone", async () => {
+  const { makeTabbable, ADDED } = await load();
   const el = fakeEl({ disabled: true });
   makeTabbable(fakeRoot([el]));
-  assert.equal(el.tabIndex, -1, "a disabled control must not become tabbable");
+  assert.equal(el.tabIndex, -1);
+  assert.ok(!el.attrs.has(ADDED));
 });
 
-test("makeTabbable: skips an element with no client rects (not actually rendered)", async () => {
-  const { makeTabbable } = await loadTabbableModule();
-  const el = fakeEl({ rects: [] });
-  makeTabbable(fakeRoot([el]));
-  assert.equal(el.tabIndex, -1, "an unrendered control (display:none, zero-size) must not become tabbable");
+test("a subtree's own root is a control too", async () => {
+  const { makeTabbable } = await load();
+  const self = fakeEl();
+  makeTabbable(fakeRoot([], self));
+  // The mark lands on the object handed in, which is the root itself.
+  const root = { querySelectorAll: () => [], matches: () => true, ...fakeEl() };
+  makeTabbable(root);
+  assert.equal(root.tabIndex, 0, "a button added on its own, not inside a wrapper, must not be missed");
 });
 
-test("makeTabbable: a fixed-position, off-screen-via-transform element (an open OR closed slide-in panel) still gets tabIndex=0 -- inert, not this function, is what keeps a closed one out of the Tab order", async () => {
-  const { makeTabbable } = await loadTabbableModule();
-  // getClientRects() stays non-empty for a `position: fixed` element pushed
-  // off-screen by `transform` (confirmed against the real CSS): only
-  // display:none/zero-size empties it, which is exactly why this function
-  // cannot be the mechanism that hides a closed panel's controls.
-  const el = fakeEl({ rects: [{ x: -9999, y: -9999, width: 380, height: 600 }] });
+test("every control in the list is decided on its own", async () => {
+  const { makeTabbable } = await load();
+  const [a, off, b] = [fakeEl(), fakeEl({ disabled: true }), fakeEl()];
+  makeTabbable(fakeRoot([a, off, b]));
+  assert.deepEqual([a.tabIndex, off.tabIndex, b.tabIndex], [0, -1, 0]);
+});
+
+test("the module never asks for layout", async () => {
+  const { makeTabbable } = await load();
+  const el = {
+    ...fakeEl(),
+    getClientRects() { throw new Error("asked for layout"); },
+    getBoundingClientRect() { throw new Error("asked for layout"); },
+    get offsetParent() { throw new Error("asked for layout"); },
+  };
   makeTabbable(fakeRoot([el]));
   assert.equal(el.tabIndex, 0);
 });
 
-test("makeTabbable: processes every element the selector returns, independently", async () => {
-  const { makeTabbable } = await loadTabbableModule();
-  const ok1 = fakeEl();
-  const disabled = fakeEl({ disabled: true });
-  const hidden = fakeEl({ rects: [] });
-  const ok2 = fakeEl();
-  makeTabbable(fakeRoot([ok1, disabled, hidden, ok2]));
-  assert.equal(ok1.tabIndex, 0);
-  assert.equal(disabled.tabIndex, -1);
-  assert.equal(hidden.tabIndex, -1);
-  assert.equal(ok2.tabIndex, 0);
+test("focus is given up only after a pointer click, and only from a control this module marked", async () => {
+  const { releasesFocus } = await load();
+  assert.equal(releasesFocus(true, true), true, "the control clicked, or the opener a closing panel returned focus to");
+  assert.equal(releasesFocus(false, true), false, "Enter or Space made the click: a keyboard user keeps their place");
+  assert.equal(releasesFocus(true, false), false, "a handler put focus on a heading or a field: it stays");
+  assert.equal(releasesFocus(false, false), false);
+});
+
+test("Enter and Space activate a button by role, and nothing else", async () => {
+  const { activatesByKey } = await load();
+  assert.equal(activatesByKey("Enter", true, false, false), true);
+  assert.equal(activatesByKey(" ", true, false, false), true);
+  assert.equal(activatesByKey("Enter", true, true, false), false, "a real button answers the key itself: twice would be once too many");
+  assert.equal(activatesByKey("Enter", false, false, false), false);
+  assert.equal(activatesByKey("Enter", true, false, true), false, "something nearer already handled the key");
+  for (const key of ["Tab", "Escape", "a", "ArrowRight", "Spacebar"]) assert.equal(activatesByKey(key, true, false, false), false, key);
 });
