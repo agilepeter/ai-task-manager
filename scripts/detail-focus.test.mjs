@@ -154,3 +154,13 @@ test("in wide mode Escape takes focus from the page back to the list, only when 
   assert.equal(escapeReturnsToList(true, true, false, false), false, "focus is already on the list: Escape does its usual job");
   assert.equal(escapeReturnsToList(true, true, true, true), false, "a panel makes the list inert, and Escape closes the panel");
 });
+
+test("drilling into a bar and back keeps a keyboard user's place, and arms nothing for a pointer user", async () => {
+  const { drillFocus } = await loadDetailModule();
+  assert.deepEqual(drillFocus("in", { area: "acme/web" }, true), ["#dt-drill-back"]);
+  assert.deepEqual(drillFocus("back", { area: "acme/web" }, true), ['[data-drill-area="acme/web"]', "#dt-group"]);
+  assert.deepEqual(drillFocus("back", { day: "2026-09-01" }, true), ['[data-drill-day="2026-09-01"]', "#dt-group"]);
+  assert.deepEqual(drillFocus("back", null, true), ["#dt-group"], "nothing remembered: the grouping control");
+  assert.deepEqual(drillFocus("back", { area: 'a"b' }, true)[0], '[data-drill-area="a\\"b"]', "a folder name cannot break out of the selector");
+  for (const step of ["in", "back"]) assert.deepEqual(drillFocus(step, { area: "x" }, false), [], step);
+});
