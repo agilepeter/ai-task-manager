@@ -11,6 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { focusOrFallback } from "./focus";
 import { displayMetricDetail, displayMetricLabel, localeTag, plural, t } from "./i18n";
 import { money, relativeActivity, tokens } from "./format";
+import { focusAfterClose, isTopPanel, syncPanels } from "./panels";
 
 interface Metric {
   label: string;
@@ -1203,7 +1204,7 @@ function open(id: string, opener_: HTMLElement | null = null): void {
   opener = opener_;
   if (historyFor !== id) history = [];
   document.body.classList.add("detail-open");
-  document.querySelector("#detail")?.removeAttribute("inert");
+  syncPanels();
   markSelected();
   render();
   void loadHistory();
@@ -1220,7 +1221,10 @@ function close(): void {
   if (wide) return;
   openId = null;
   document.body.classList.remove("detail-open");
-  document.querySelector("#detail")?.setAttribute("inert", "");
+  // src/panels.ts is the sole writer of `inert` on panels and the
+  // background now -- see that module's own header for why this is called
+  // synchronously rather than left to its MutationObserver alone.
+  syncPanels();
   // No single fixed fallback: dozens of cards can open this page, so a
   // detached opener (the card was reordered out, or Customize hid it while
   // this page was open) falls back to nowhere rather than guessing which
@@ -1231,7 +1235,8 @@ function close(): void {
   // text name rather than its "Details" button) -- calling .focus() on that
   // is a silent no-op, which left Tab just as stuck as no target at all.
   // See src/focus.ts for the full story.
-  focusOrFallback(closeFocusTarget(opener, stillThere, null));
+  const candidate = closeFocusTarget(opener, stillThere, null);
+  focusOrFallback(focusAfterClose(candidate));
   opener = null;
 }
 
@@ -1245,6 +1250,11 @@ async function setWide(next: boolean, save: boolean): Promise<void> {
   }
   wide = next;
   document.body.classList.toggle("wide", wide);
+  // src/panels.ts excludes Detail from the overlay stack while wide (it
+  // becomes a docked second column instead) -- re-synced here because
+  // entering/leaving wide mode can flip that on its own, even on a tick
+  // where open()/close() below is not also called.
+  syncPanels();
   const btn = document.querySelector<HTMLElement>("#detail-wide");
   if (btn) {
     btn.textContent = wide ? t("detail.panel.narrow") : t("detail.panel.wide");
@@ -1310,7 +1320,9 @@ export function setupDetail(src: DetailSource): void {
     "keydown",
     (e) => {
       // Wide mode has no page to back out of, so Esc keeps its usual job.
-      if (e.key === "Escape" && openId && !wide) {
+      // isTopPanel(): if another panel covers Detail, that panel's own
+      // Escape handler already claimed this keypress.
+      if (e.key === "Escape" && openId && !wide && isTopPanel("detail")) {
         e.stopImmediatePropagation();
         e.preventDefault();
         close();

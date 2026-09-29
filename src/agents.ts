@@ -16,6 +16,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { money } from "./format";
 import { focusOrFallback } from "./focus";
 import { plural, t } from "./i18n";
+import { focusAfterClose, isTopPanel, syncPanels } from "./panels";
 import {
   agentRows,
   builtInAgentCount,
@@ -402,10 +403,14 @@ function loadData(): void {
 
 function close(): void {
   document.body.classList.remove("agents-open");
-  document.querySelector("#agents")?.setAttribute("inert", "");
+  // src/panels.ts is the sole writer of `inert` on panels and the
+  // background now -- see that module's own header for why this is called
+  // synchronously rather than left to its MutationObserver alone.
+  syncPanels();
   const fallback = document.querySelector<HTMLElement>("#agents-open-btn");
   const stillThere = opener != null && document.contains(opener);
-  focusOrFallback(closeFocusTarget(opener, stillThere, fallback));
+  const candidate = closeFocusTarget(opener, stillThere, fallback);
+  focusOrFallback(focusAfterClose(candidate));
   opener = null;
 }
 
@@ -427,7 +432,7 @@ function close(): void {
 export function openAgents(opener_: HTMLElement | null = null): void {
   opener = opener_;
   document.body.classList.add("agents-open");
-  document.querySelector("#agents")?.removeAttribute("inert");
+  syncPanels();
   loadError = "";
   render();
   loadData();
@@ -524,7 +529,7 @@ export function setupAgents(h: AgentsHost): void {
   document.addEventListener(
     "keydown",
     (e) => {
-      if (e.key === "Escape" && document.body.classList.contains("agents-open")) {
+      if (e.key === "Escape" && isTopPanel("agents")) {
         e.stopImmediatePropagation();
         e.preventDefault();
         close();

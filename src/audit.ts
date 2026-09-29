@@ -6,6 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { focusOrFallback } from "./focus";
 import { plural, t, tm, type Msg } from "./i18n";
+import { focusAfterClose, isTopPanel, syncPanels } from "./panels";
 
 const T = (k: string, v?: Record<string, string | number>) => t(`audit.${k}`, v);
 
@@ -205,10 +206,14 @@ export function closeFocusTarget(
 
 function close(): void {
   document.body.classList.remove("audit-open");
-  document.querySelector("#audit")?.setAttribute("inert", "");
+  // src/panels.ts is the sole writer of `inert` on panels and the
+  // background now -- see that module's own header for why this is called
+  // synchronously rather than left to its MutationObserver alone.
+  syncPanels();
   const fallback = document.querySelector<HTMLElement>("#audit-open-btn");
   const stillThere = opener != null && document.contains(opener);
-  focusOrFallback(closeFocusTarget(opener, stillThere, fallback));
+  const candidate = closeFocusTarget(opener, stillThere, fallback);
+  focusOrFallback(focusAfterClose(candidate));
   opener = null;
   if (firstRun) {
     firstRun = false;
@@ -229,7 +234,7 @@ function close(): void {
 export function openAudit(opener_: HTMLElement | null = null): void {
   opener = opener_;
   document.body.classList.add("audit-open");
-  document.querySelector("#audit")?.removeAttribute("inert");
+  syncPanels();
   note = "";
   render();
   // The heading lives in the static panel head (index.html), so it is
@@ -324,7 +329,7 @@ export function setupAudit(h: AuditHost): void {
   document.addEventListener(
     "keydown",
     (e) => {
-      if (e.key === "Escape" && document.body.classList.contains("audit-open")) {
+      if (e.key === "Escape" && isTopPanel("audit")) {
         e.stopImmediatePropagation();
         e.preventDefault();
         close();
