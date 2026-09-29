@@ -33,6 +33,13 @@ async function buildAboutModule() {
   // below, since this one copy already puts it in scope.
   const focusSource = await readFile(new URL("../src/focus.ts", import.meta.url), "utf8");
 
+  // src/panels.ts has no imports of its own either -- about.ts's own
+  // `import { focusAfterClose, isTopPanel, syncPanels } from "./panels";` is
+  // dropped below for the same reason. The real module is used, not a stub:
+  // openAbout()'s own test further down asserts the panel's `inert`
+  // attribute is actually cleared, which is now panels.ts's job.
+  const panelsSource = await readFile(new URL("../src/panels.ts", import.meta.url), "utf8");
+
   const aboutSource = await readFile(new URL("../src/about.ts", import.meta.url), "utf8");
   const strippedAbout = aboutSource
     .replace(
@@ -42,6 +49,7 @@ async function buildAboutModule() {
     .replace('import { getVersion } from "@tauri-apps/api/app";', 'const getVersion = async () => "0.0.0-test";')
     .replace('import { BRAND, CREDITS } from "./brand";', "")
     .replace('import { focusOrFallback } from "./focus";', "")
+    .replace('import { focusAfterClose, isTopPanel, syncPanels } from "./panels";', "")
     .replace('import { t } from "./i18n";', "")
     // src/i18n.ts exports its own top-level `render(locale, msg)`; about.ts's
     // own private `render(version)` would otherwise collide with it once the
@@ -52,7 +60,7 @@ async function buildAboutModule() {
     .replace(/\brender\b/g, "__aboutRender");
   if (strippedAbout === aboutSource) throw new Error("no substitution matched -- src/about.ts's source shape moved under this test");
 
-  const code = ts.transpileModule(`${inlinedI18n}\n${brandSource}\n${focusSource}\n${strippedAbout}`, {
+  const code = ts.transpileModule(`${inlinedI18n}\n${brandSource}\n${focusSource}\n${panelsSource}\n${strippedAbout}`, {
     compilerOptions: { module: ts.ModuleKind.ESNext },
   }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);

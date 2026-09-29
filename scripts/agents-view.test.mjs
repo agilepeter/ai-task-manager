@@ -52,6 +52,12 @@ async function buildAgentsModule() {
   // in scope for both.
   const focusSource = await readFile(new URL("../src/focus.ts", import.meta.url), "utf8");
 
+  // src/panels.ts has no imports of its own either -- agents.ts's own
+  // `import { focusAfterClose, isTopPanel, syncPanels } from "./panels";` is
+  // dropped below for the same reason, and the real module (not a stub) is
+  // used: it is what now applies `inert` on openAgents()/close().
+  const panelsSource = await readFile(new URL("../src/panels.ts", import.meta.url), "utf8");
+
   const inventorySource = await readFile(new URL("../src/inventory.ts", import.meta.url), "utf8");
   const strippedInventory = inventorySource
     .replace('import { invoke } from "@tauri-apps/api/core";', "")
@@ -81,6 +87,7 @@ async function buildAgentsModule() {
     .replace('import { invoke } from "@tauri-apps/api/core";', "")
     .replace('import { money } from "./format";', "")
     .replace('import { focusOrFallback } from "./focus";', "")
+    .replace('import { focusAfterClose, isTopPanel, syncPanels } from "./panels";', "")
     .replace('import { plural, t } from "./i18n";', "")
     .replace(
       `import {
@@ -116,7 +123,7 @@ async function buildAgentsModule() {
     .replace(/\bT\b/g, "__agentsT");
   if (strippedAgents === agentsSource) throw new Error("no substitution matched -- src/agents.ts's source shape moved under this test");
 
-  const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${focusSource}\n${strippedInventory}\n${strippedAgents}`, {
+  const code = ts.transpileModule(`${inlinedI18n}\n${strippedFormat}\n${focusSource}\n${panelsSource}\n${strippedInventory}\n${strippedAgents}`, {
     compilerOptions: { module: ts.ModuleKind.ESNext },
   }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
