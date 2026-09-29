@@ -212,7 +212,15 @@ and computed Opportunities). Usage stays the default view.
   (`keepFocusAcrossRedraws`), so a new control that can be redrawn needs an id, or a
   `data-provider` or `data-section` ancestor, to be found again. A clickable thing that is not
   a real button takes `role="button"`; when many of them do the same thing, one is the Tab
-  stop and the rest get `tabindex="-1"`. Check keyboard work in WebKit, by pressing keys.
+  stop and the rest get `tabindex="-1"`. The release rule runs on `click`, `auxclick` and
+  `contextmenu` and asks which input came last (pointerdown or keydown), so a right-click arms
+  nothing either. A held key's repeats never press a control again (`blocksRepeat`). A dialog
+  holds focus however it opened: give its buttons their own tabindex. Anything that cannot be
+  undone opens on Cancel (the confirm dialog with `danger`, End task). A step that redraws the
+  control a keyboard user pressed decides where focus goes next itself, only when the click came
+  from the keyboard (`detail === 0`), as End task does (`endTaskFocus`). Check keyboard work in
+  WebKit, by pressing keys, and when you mutate code to prove a check, confirm the build
+  succeeded (an unused parameter fails `tsc`, and the old build is then what gets tested).
 - **Panels** (`src/panels.ts`): the one module that decides which slide-in panel (Customize,
   About, Audit, Agents, Detail, Settings) is on top. It is the only writer of `inert` and
   `data-top-panel` on a panel and on the background (`.main-col`); a panel's own open()/close()

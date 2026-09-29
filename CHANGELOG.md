@@ -20,19 +20,23 @@ A small release for people who use the keyboard.
 - **A panel returns focus to what opened it.** About, Settings, Customize,
   a provider's page, the client rules editor, the pin preview, the
   Subscriptions form and the confirm dialog all move focus in when they
-  open and back when they close. A provider's page finds its card again
-  after the cards have been redrawn.
+  open and back when they close. In wide mode, where a provider's page
+  stays open beside the list, Escape takes focus from the page back to its
+  card.
 - **A redraw keeps a keyboard user's place.** The cards redraw on a timer
   and Inventory redraws after a rescan. Focus stays on the control in the
-  same place.
-- **A mouse click leaves nothing armed.** After a click, Space and Enter do
-  not activate the control that was clicked, or the button that opened a
-  panel the click closed.
+  same place, and End task keeps it through each of its steps.
+- **Nothing is left armed.** After a click or a right-click, Space and
+  Enter do not press the control that was clicked, or the button that
+  opened a panel the click closed. A held Enter presses a control once.
 - **Only the panel in front answers.** With a panel open, Tab stays inside
   it and the rail. When a second panel opens over a first, Tab, Escape and
   a click on the close button go to the one in front, and closing it brings
   the other back. Escape in a confirm dialog closes the dialog and leaves
   the panel beneath.
+- **A confirmation for something that cannot be undone opens on Cancel.**
+  That holds for the confirm dialog and for End task, so Return pressed
+  without reading loses nothing.
 - **The three figures in the Agents view read on one line each** in every
   language. The period has its own smaller line under the third.
 - **The image at the top of the README showed version 0.1.0.** It is
