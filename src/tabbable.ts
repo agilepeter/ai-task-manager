@@ -42,10 +42,17 @@
 //    again, with no ring to show where focus sat (a ring is drawn for
 //    keyboard focus only). So after a POINTER click, focus does not stay
 //    on a control this module made tabbable. Keyboard activation keeps it.
+//    A right-click and a middle click count too: WebKit focuses on the
+//    press, and no click follows to undo it.
 //
 // 2. An element that is a button by role only (a provider card's name, a
 //    figure that flips when clicked) is reachable now, so Enter and Space
 //    have to activate it as they would a real button.
+//
+// And one guard for everyone who uses the keyboard: a held-down Enter
+// repeats, and each repeat would press the control in focus again. A
+// control that opens a confirmation would then answer it. Only the first
+// press of a held key activates anything.
 
 const TABBABLE_SELECTOR = 'button:not([tabindex]), a[href]:not([tabindex]), summary:not([tabindex]), [role="button"]:not([tabindex]), [role="tab"]:not([tabindex])';
 
@@ -79,6 +86,12 @@ export function releasesFocus(pointerClick: boolean, focusIsOnAControlThisModule
   return pointerClick && focusIsOnAControlThisModuleMarked;
 }
 
+/** Pure: whether a key press is the automatic repeat of a held key on a
+ *  control, which must not press it again. */
+export function blocksRepeat(key: string, repeat: boolean, onControl: boolean): boolean {
+  return repeat && onControl && (key === "Enter" || key === " ");
+}
+
 /** Pure: whether a key press activates an element that is a button by role
  *  only. Native controls answer Enter and Space themselves. */
 export function activatesByKey(key: string, roleButton: boolean, native: boolean, alreadyHandled: boolean): boolean {
@@ -86,6 +99,7 @@ export function activatesByKey(key: string, roleButton: boolean, native: boolean
 }
 
 const NATIVE = "button, a[href], summary, input, select, textarea";
+const CONTROL = 'button, a[href], summary, [role="button"], [role="tab"]';
 
 /** Runs makeTabbable() once for what is already in the DOM, then for every
  *  subtree a later change adds, and installs the two listeners described at
@@ -100,21 +114,30 @@ export function watchTabbable(): void {
     }
   }).observe(document.body, { childList: true, subtree: true });
 
+  // Which kind of input came last. A click that Enter, Space or an arrow key
+  // made follows a keydown; one the pointer made follows a pointerdown.
+  let pointer = false;
+  document.addEventListener("pointerdown", () => (pointer = true), true);
+  document.addEventListener("keydown", () => (pointer = false), true);
+
   // On the document, in the bubble phase: every handler of the click itself
   // has run by now and has put focus where it wants it.
-  document.addEventListener("click", (e) => {
+  const release = () => {
     const focused = document.activeElement as HTMLElement | null;
-    // `detail` counts pointer clicks. A click made by Enter, Space or
-    // element.click() reports 0.
-    if (!releasesFocus(e.detail > 0, focused?.hasAttribute?.(ADDED) === true)) return;
+    if (!releasesFocus(pointer, focused?.hasAttribute?.(ADDED) === true)) return;
     // To <body>, which carries tabindex="-1" for this (src/focus.ts): focus
     // sent nowhere leaves Tab dead in this WebKit.
     document.body.focus({ preventScroll: true });
-  });
+  };
+  for (const type of ["click", "auxclick", "contextmenu"]) document.addEventListener(type, release);
 
   document.addEventListener("keydown", (e) => {
     const el = e.target as HTMLElement | null;
     if (!el?.matches) return;
+    if (blocksRepeat(e.key, e.repeat, el.matches(CONTROL))) {
+      e.preventDefault();
+      return;
+    }
     if (!activatesByKey(e.key, el.matches('[role="button"]'), el.matches(NATIVE), e.defaultPrevented)) return;
     e.preventDefault(); // Space would scroll the view
     el.click();

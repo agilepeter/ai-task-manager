@@ -136,3 +136,93 @@ test("focus is handed back only to a keyboard user whose control is gone and who
   assert.equal(handsFocusBack(true, false, true), false, "the control is still there: focus left it on purpose");
   assert.equal(handsFocusBack(true, true, false), false, "a handler already put focus somewhere");
 });
+
+// A small DOM stand-in for placeOf() and findPlace(). Its selector matching
+// covers exactly the forms focus.ts builds, with the browser's rule that an
+// attribute selector matches an element carrying more attributes than it
+// names.
+function parseSelector(sel) {
+  const m = /^([a-z]*)(?:\.([\w-]+))?((?:\[[\w-]+="(?:[^"\\]|\\.)*"\])*)$/.exec(sel);
+  if (!m) throw new Error(`the stand-in cannot parse ${sel}`);
+  const attrs = [...m[3].matchAll(/\[([\w-]+)="((?:[^"\\]|\\.)*)"\]/g)].map(([, k, v]) => [k, v.replace(/\\(.)/g, "$1")]);
+  return { tag: m[1], cls: m[2], attrs };
+}
+class El {
+  constructor(tag, { id = "", cls = [], data = {} } = {}, children = []) {
+    Object.assign(this, { tagName: tag.toUpperCase(), id, classList: cls, dataset: { ...data }, children, parentElement: null, isConnected: true });
+    for (const c of children) c.parentElement = this;
+  }
+  attr(name) {
+    if (name === "id") return this.id || null;
+    if (!name.startsWith("data-")) return null;
+    const key = name.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    return key in this.dataset ? this.dataset[key] : null;
+  }
+  matches(sel) {
+    const { tag, cls, attrs } = parseSelector(sel);
+    if (tag && this.tagName.toLowerCase() !== tag) return false;
+    if (cls && !this.classList.includes(cls)) return false;
+    return attrs.every(([k, v]) => this.attr(k) === v);
+  }
+  *walk() { for (const c of this.children) { yield c; yield* c.walk(); } }
+  querySelectorAll(sel) { return [...this.walk()].filter((e) => e.matches(sel)); }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; }
+}
+// Two cards and a toolbar button, built fresh each time: a redraw.
+function page(extraFirst = false) {
+  const card = (id) => new El("article", { cls: ["provider"], data: { provider: id } }, [
+    new El("span", { cls: ["provider-name"], data: { tabAdded: "" } }),
+    ...(extraFirst && id === "codex" ? [new El("button", { cls: ["quick-link"], data: { link: "x" } })] : []),
+    new El("button", { cls: ["quick-link"], data: { link: "x", tabAdded: "" } }),
+    new El("button", { cls: ["quick-link"], data: { link: "x", tabAdded: "" } }),
+  ]);
+  return new El("body", {}, [card("claude"), card("codex"), new El("button", { id: "inv-rescan" })]);
+}
+function useDocument(body) {
+  globalThis.document = { body, querySelector: (s) => body.querySelector(s) };
+}
+
+test("a control is found again in the same place after a redraw", async () => {
+  const { placeOf, findPlace } = await loadFocusModule();
+  let body = page();
+  useDocument(body);
+  const second = body.children[1].children[2]; // codex's second quick link
+  const place = placeOf(second);
+  assert.deepEqual(place, { anchor: '[data-provider="codex"]', inside: 'button.quick-link[data-link="x"]', index: 1 });
+  body = page();
+  useDocument(body);
+  assert.equal(findPlace(place), body.children[1].children[2], "the same card, the same position among its twins");
+});
+
+test("a control that is its own anchor is found by its id", async () => {
+  const { placeOf, findPlace } = await loadFocusModule();
+  let body = page();
+  useDocument(body);
+  const place = placeOf(body.children[2]);
+  assert.deepEqual(place, { anchor: '[id="inv-rescan"]', inside: "", index: 0 });
+  body = page();
+  useDocument(body);
+  assert.equal(findPlace(place), body.children[2]);
+});
+
+test("this app's own marker never decides whether a control is found again", async () => {
+  const { placeOf, findPlace } = await loadFocusModule();
+  let body = page();
+  useDocument(body);
+  const place = placeOf(body.children[0].children[1]);
+  body = page();
+  useDocument(body);
+  for (const e of body.walk()) delete e.dataset.tabAdded; // redrawn, not marked yet
+  assert.equal(findPlace(place), body.children[0].children[1]);
+});
+
+test("nothing is handed back when the place is gone, or was never one", async () => {
+  const { placeOf, findPlace } = await loadFocusModule();
+  const body = page();
+  useDocument(body);
+  assert.equal(findPlace({ anchor: '[data-provider="gone"]', inside: "button.quick-link", index: 0 }), null, "the card was hidden meanwhile");
+  assert.equal(findPlace({ anchor: '[data-provider="claude"]', inside: 'button.quick-link[data-link="x"]', index: 5 }), null);
+  const orphan = new El("button", { cls: ["loose"] });
+  orphan.parentElement = body;
+  assert.equal(placeOf(orphan), null, "a control with no anchor has no place to keep");
+});

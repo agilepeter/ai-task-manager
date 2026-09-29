@@ -1145,6 +1145,18 @@ export function rerender(): void {
   if (el && !el.hidden) render();
 }
 
+/// Where keyboard focus goes after each step of End task, first match wins.
+/// The confirmation takes focus on Cancel: Return pressed twice, or held
+/// down, must not stop a server. Nothing for a pointer user, who is left
+/// with nothing armed (src/tabbable.ts).
+export function endTaskFocus(step: "asked" | "cancelled" | "ended", name: string, byKeyboard: boolean): string[] {
+  if (!byKeyboard) return [];
+  const own = `[data-end="${name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`;
+  if (step === "asked") return ["[data-end-no]"];
+  if (step === "cancelled") return [own];
+  return [own, '[data-section="running"] .inv-head'];
+}
+
 export function setupViews(h: InventoryHost): void {
   host = h;
   document.querySelector("#view-tabs")?.addEventListener("click", (e) => {
@@ -1162,15 +1174,25 @@ export function setupViews(h: InventoryHost): void {
       return;
     }
     // End task: two steps, always. The first click only asks.
+    // `detail` is 0 for a click that Enter or Space made: only then is there
+    // a keyboard user whose place has to be kept through each step.
+    const byKeyboard = e.detail === 0;
+    const focusFirst = (selectors: string[]) => {
+      const found = selectors.map((s) => document.querySelector<HTMLElement>(s)).find((el) => el);
+      if (found) focusOrFallback(found);
+    };
     const endBtn = target.closest<HTMLElement>("[data-end]");
     if (endBtn) {
       ending = endBtn.dataset.end ?? "";
       render();
+      focusFirst(endTaskFocus("asked", ending, byKeyboard));
       return;
     }
     if (target.closest("[data-end-no]")) {
+      const was = ending;
       ending = "";
       render();
+      focusFirst(endTaskFocus("cancelled", was, byKeyboard));
       return;
     }
     const endYes = target.closest<HTMLElement>("[data-end-yes]");
@@ -1183,7 +1205,12 @@ export function setupViews(h: InventoryHost): void {
           runningError = String(err);
         })
         .then(() => loadRunning())
-        .then(render);
+        .then(render)
+        .then(() => {
+          // Only if focus is still where the redraw left it: nowhere.
+          const active = document.activeElement;
+          if (!active || active === document.body) focusFirst(endTaskFocus("ended", name, byKeyboard));
+        });
       void loadAgents().then(render);
       return;
     }

@@ -344,3 +344,12 @@ test("empty.runningAgentsError carries the error message with no leftover {error
     assert.ok(rendered.includes("permission denied"), `${locale}: error message missing from the rendered sentence: "${rendered}"`);
   }
 });
+
+test("End task keeps a keyboard user's place through each step, and leaves a pointer user with nothing armed", async () => {
+  const { endTaskFocus } = await loadInventoryModule();
+  assert.deepEqual(endTaskFocus("asked", "notes", true), ["[data-end-no]"], "the confirmation opens on Cancel: Return twice must not stop a server");
+  assert.deepEqual(endTaskFocus("cancelled", "notes", true), ['[data-end="notes"]'], "back to the same server's End task");
+  assert.deepEqual(endTaskFocus("ended", "notes", true), ['[data-end="notes"]', '[data-section="running"] .inv-head'], "the server still there, else the section");
+  for (const step of ["asked", "cancelled", "ended"]) assert.deepEqual(endTaskFocus(step, "notes", false), [], step);
+  assert.deepEqual(endTaskFocus("cancelled", 'a"b\\c', true), ['[data-end="a\\"b\\\\c"]'], "a name cannot break out of the selector");
+});

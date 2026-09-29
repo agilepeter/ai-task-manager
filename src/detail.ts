@@ -1213,6 +1213,13 @@ function markSelected(): void {
   });
 }
 
+/// Pure: whether Escape, in wide mode, takes focus from the docked page back
+/// to the list. Only while the page is open with focus inside it and no
+/// panel is open: a panel makes the list inert, and Escape closes the panel.
+export function escapeReturnsToList(wide: boolean, pageOpen: boolean, focusInPage: boolean, panelOpen: boolean): boolean {
+  return wide && pageOpen && focusInPage && !panelOpen;
+}
+
 /// Same decision src/agents.ts's closeFocusTarget() makes, kept as this
 /// view's own copy -- the convention every view here follows (see
 /// audit.ts's own comment on why).
@@ -1352,14 +1359,27 @@ export function setupDetail(src: DetailSource): void {
   document.addEventListener(
     "keydown",
     (e) => {
-      // Wide mode has no page to back out of, so Esc keeps its usual job.
+      if (e.key !== "Escape") return;
       // isTopPanel(): if another panel covers Detail, that panel's own
       // Escape handler already claimed this keypress.
-      if (e.key === "Escape" && openId && !wide && isTopPanel("detail")) {
+      if (openId && !wide && isTopPanel("detail")) {
         e.stopImmediatePropagation();
         e.preventDefault();
         close();
+        return;
       }
+      // Wide mode keeps the page open beside the list, so backing out of it
+      // means taking focus back to the list. The next Esc does its usual job.
+      const inPage = document.querySelector("#detail")?.contains(document.activeElement) === true;
+      const panelOpen = ["drawer", "about", "audit", "agents", "settings"].some(isTopPanel);
+      if (!escapeReturnsToList(wide, openId !== null, inPage, panelOpen)) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      const card = [...document.querySelectorAll<HTMLElement>("#providers [data-provider]")].find(
+        (c) => c.dataset.provider === openId,
+      );
+      const back = card?.querySelector<HTMLElement>(".provider-name") ?? (opener?.isConnected ? opener : null);
+      focusOrFallback(back);
     },
     true,
   );

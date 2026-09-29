@@ -1896,8 +1896,8 @@ function appConfirm(opts: {
         <h3>${escapeHtml(opts.title)}</h3>
         <p>${escapeHtml(opts.message)}</p>
         <div id="confirm-actions">
-          <button id="confirm-cancel" type="button">${escapeHtml(t("dialog.cancel"))}</button>
-          <button id="confirm-ok" type="button" class="${opts.danger ? "danger" : ""}">${escapeHtml(opts.confirmLabel)}</button>
+          <button id="confirm-cancel" type="button" tabindex="0">${escapeHtml(t("dialog.cancel"))}</button>
+          <button id="confirm-ok" type="button" tabindex="0" class="${opts.danger ? "danger" : ""}">${escapeHtml(opts.confirmLabel)}</button>
         </div>
       </div>`;
     const done = (ok: boolean) => {
@@ -1929,7 +1929,11 @@ function appConfirm(opts: {
     overlay.querySelector("#confirm-ok")!.addEventListener("click", () => done(true));
     document.addEventListener("keydown", onKey, true);
     document.body.appendChild(overlay);
-    overlay.querySelector<HTMLButtonElement>("#confirm-ok")!.focus();
+    // A dialog holds focus, however it was opened: its buttons carry their own
+    // tabindex, so src/tabbable.ts does not take focus back after a mouse
+    // click. For something that cannot be undone the default is Cancel, so
+    // Return pressed without reading, or held down, loses nothing.
+    overlay.querySelector<HTMLButtonElement>(opts.danger ? "#confirm-cancel" : "#confirm-ok")!.focus();
   });
 }
 

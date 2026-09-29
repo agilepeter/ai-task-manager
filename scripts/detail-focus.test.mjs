@@ -145,3 +145,12 @@ test("saveClientRules: focuses #dt-rule-edit directly when it is there", async (
     __invoke.current = async () => { throw new Error("invoke() is not stubbed in this test"); };
   }
 });
+
+test("in wide mode Escape takes focus from the page back to the list, only when nothing covers the list", async () => {
+  const { escapeReturnsToList } = await loadDetailModule();
+  assert.equal(escapeReturnsToList(true, true, true, false), true);
+  assert.equal(escapeReturnsToList(false, true, true, false), false, "narrow: Escape closes the page instead");
+  assert.equal(escapeReturnsToList(true, false, true, false), false, "no page open");
+  assert.equal(escapeReturnsToList(true, true, false, false), false, "focus is already on the list: Escape does its usual job");
+  assert.equal(escapeReturnsToList(true, true, true, true), false, "a panel makes the list inert, and Escape closes the panel");
+});

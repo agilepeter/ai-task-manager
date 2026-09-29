@@ -84,3 +84,12 @@ test("Enter and Space activate a button by role, and nothing else", async () => 
   assert.equal(activatesByKey("Enter", true, false, true), false, "something nearer already handled the key");
   for (const key of ["Tab", "Escape", "a", "ArrowRight", "Spacebar"]) assert.equal(activatesByKey(key, true, false, false), false, key);
 });
+
+test("a held key presses a control once: its repeats are stopped", async () => {
+  const { blocksRepeat } = await load();
+  assert.equal(blocksRepeat("Enter", true, true), true);
+  assert.equal(blocksRepeat(" ", true, true), true);
+  assert.equal(blocksRepeat("Enter", false, true), false, "the first press is the one that counts");
+  assert.equal(blocksRepeat("Enter", true, false), false, "a held Return in a text field is the field's business");
+  for (const key of ["a", "ArrowDown", "Tab", "Backspace"]) assert.equal(blocksRepeat(key, true, true), false, key);
+});
