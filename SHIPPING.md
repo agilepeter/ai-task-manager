@@ -55,6 +55,13 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
   converted with `cwebp -q 82 -m 6`; that step is by hand and belongs to any release that
   changes what a screen looks like.
 
+- **v0.1.5 was published on 2026-09-28** (03:42 UTC on the 29th) from tag `v0.1.5` (commit
+  be20883, run 36517855508) by the `publish` job, after CI passed on the same commit. A small
+  keyboard release. Checked afterwards: the three installers and the update feed answer, the feed
+  names 0.1.5 with all seven platform entries signed, and the product page, its demo, its
+  changelog page and its twelve screenshots show 0.1.5. `docs/promo.png` was retaken for the
+  first time since 0.1.0.
+
 ## Not yet on, and why
 
 1. **Update checks are opt-in and off by default.** A Settings toggle (`updateChecks`) turns them
