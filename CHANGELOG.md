@@ -24,6 +24,13 @@ A small release: keyboard access and a wrapping label, nothing more.
 - **The Agents view's third figure wrapped to two lines in Russian, French,
   Portuguese and German.** Its label is now a short noun on its own line,
   with "Last 30 days" underneath in a smaller line, in every language.
+- **Tab could reach the tab bar and the cards behind an open panel, and two
+  open panels disagreed on which one was in front.** A keyboard user
+  tabbing through Settings no longer lands in Usage or Inventory underneath
+  it. When a second panel opens over a first, such as Settings from the
+  rail while Agents is open, only the front one answers Tab and Escape now,
+  and a mouse click always reaches its close button first. Closing it
+  brings the other panel back to the front, exactly as it was.
 
 ## 0.1.4 — 2026-09-28
 

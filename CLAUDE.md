@@ -202,6 +202,14 @@ and computed Opportunities). Usage stays the default view.
   in the tab but scored nothing for a day because of this. `enriched_inventory()` in
   `src-tauri/src/lib.rs` is now the single place both the tab and the audit get their findings
   from, so the two lists cannot drift apart again.
+- **Panels** (`src/panels.ts`): the one module that decides which slide-in panel (Customize,
+  About, Audit, Agents, Detail, Settings) is on top. It is the only writer of `inert` and
+  `data-top-panel` on a panel and on the background (`.main-col`); a panel's own open()/close()
+  only toggles its body class and calls `syncPanels()` synchronously right after (a
+  MutationObserver also calls it, but a tick too late for the focus-on-open that follows in the
+  same call). A new panel registers its body class in `CLASS_FOR` there, nowhere else. Each
+  panel's own Escape handler asks `isTopPanel(id)` before acting, so one Escape closes the panel
+  actually on top, not whichever handler happens to run first.
 - **Agents** (`src/agents.ts`): a view opened from Inventory > Agents or the row at the top of
   Inventory, built like the Audit. It holds the running agent hosts, custom and built-in agents
   with their spend, and the findings about agents. Inventory no longer lists agents. It reads
