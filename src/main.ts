@@ -6,6 +6,7 @@ import { rerender as rerenderLedger, setupLedger } from "./ledger";
 import { applySavedWide, cardExtras, refreshDetail, rerender as rerenderDetail, setupDetail } from "./detail";
 import { watchTabbable } from "./tabbable";
 import { focusOrFallback } from "./focus";
+import { beginModal, endModal, focusAfterClose, initPanels, isTopPanel, syncPanels } from "./panels";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -1882,6 +1883,11 @@ function appConfirm(opts: {
     // the button it clicked). Restoring to <body> is a no-op, not a
     // regression: this dialog never used to restore focus anywhere at all.
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // src/panels.ts: a modal sits above every panel, the background and the
+    // rail at once. Must run AFTER capturing `opener` just above --
+    // inert-ing an ancestor of the currently-focused element blurs it, which
+    // would otherwise corrupt that capture.
+    beginModal();
     const overlay = document.createElement("div");
     overlay.id = "confirm-overlay";
     overlay.innerHTML = `
@@ -1897,6 +1903,10 @@ function appConfirm(opts: {
       dismissConfirm = null;
       document.removeEventListener("keydown", onKey, true);
       overlay.remove();
+      // src/panels.ts: end the modal BEFORE restoring focus below -- opener
+      // can be a control inside the panel this un-inerts, so focus would
+      // silently fail to land if this ran any later.
+      endModal();
       // focusOrFallback() (src/focus.ts): overlay.remove() just destroyed
       // whatever had focus inside it (#confirm-ok/#confirm-cancel).
       const restore = opener && opener !== document.body && document.contains(opener) ? opener : null;
@@ -2380,9 +2390,7 @@ let drawerOpener: HTMLElement | null = null;
 function setDrawer(open: boolean, opener: HTMLElement | null = null): void {
   const wasOpen = customizeOpen;
   customizeOpen = open;
-  const drawerEl = document.querySelector("#drawer");
   if (open) {
-    drawerEl?.removeAttribute("inert");
     drawerOpener = opener;
     renderDrawerBody();
     // Local JSON list — cheap, and required if Customize opens before Settings.
@@ -2400,6 +2408,12 @@ function setDrawer(open: boolean, opener: HTMLElement | null = null): void {
     });
   }
   document.body.classList.toggle("drawer-open", open);
+  // src/panels.ts is the only writer of `inert`/`data-top-panel` on panels
+  // and the background now -- called synchronously, right here, because the
+  // focus() calls just below are a microtask too soon for the
+  // MutationObserver initPanels() also installs (see that module's own
+  // header comment).
+  syncPanels();
   document.querySelector("#customize-btn")?.classList.toggle("active", open);
   if (open) {
     // The Done button is the drawer's own first control -- renderCustomize()
@@ -2407,10 +2421,10 @@ function setDrawer(open: boolean, opener: HTMLElement | null = null): void {
     // control" branch of the same on-open rule every other panel follows.
     document.querySelector<HTMLElement>("[data-customize-close]")?.focus();
   } else if (wasOpen) {
-    drawerEl?.setAttribute("inert", "");
     const fallback = document.querySelector<HTMLElement>("#customize-btn");
     const stillThere = drawerOpener != null && document.contains(drawerOpener);
-    focusOrFallback(panelCloseFocusTarget(drawerOpener, stillThere, fallback));
+    const candidate = panelCloseFocusTarget(drawerOpener, stillThere, fallback);
+    focusOrFallback(focusAfterClose(candidate));
     drawerOpener = null;
   }
 }
@@ -2424,18 +2438,19 @@ let settingsOpener: HTMLElement | null = null;
 function setSettings(open: boolean, opener: HTMLElement | null = null): void {
   const wasOpen = document.body.classList.contains("settings-open");
   document.body.classList.toggle("settings-open", open);
+  // See setDrawer()'s own comment: src/panels.ts owns `inert`/`data-top-panel`
+  // now, applied synchronously here so the focus() calls below see it.
+  syncPanels();
   document.querySelector("#settings-btn")?.classList.toggle("active", open);
-  const settingsEl = document.querySelector("#settings");
   if (open) {
-    settingsEl?.removeAttribute("inert");
     settingsOpener = opener;
     for (const manager of siteKeyManagers) void manager.load();
     document.querySelector<HTMLElement>("#settings-heading")?.focus();
   } else if (wasOpen) {
-    settingsEl?.setAttribute("inert", "");
     const fallback = document.querySelector<HTMLElement>("#settings-btn");
     const stillThere = settingsOpener != null && document.contains(settingsOpener);
-    focusOrFallback(panelCloseFocusTarget(settingsOpener, stillThere, fallback));
+    const candidate = panelCloseFocusTarget(settingsOpener, stillThere, fallback);
+    focusOrFallback(focusAfterClose(candidate));
     settingsOpener = null;
   }
 }
@@ -4836,6 +4851,10 @@ window.addEventListener("DOMContentLoaded", () => {
   // measured. Started once, here, before the first render -- it also covers
   // every panel's static markup already in index.html at boot.
   watchTabbable();
+  // See src/panels.ts's own header for what this owns. index.html already
+  // starts every panel `inert`, so this has nothing to undo at boot -- it
+  // just starts watching for the first one to open.
+  initPanels();
   setupViews({
     trustLookup: () => config.trustLookup === true,
     setTrustLookup: (trustLookup) => patchConfig({ trustLookup }),
@@ -4884,13 +4903,18 @@ window.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       undoLayout();
     }
-    // Esc backs out of Customize/Settings; on the dashboard it hides the
-    // popover (Mac parity). IME candidate cancel must not close anything.
+    // Esc backs out of Customize/Settings, but only the one actually on top
+    // (isTopPanel() -- see src/panels.ts): if some other panel covers it,
+    // that panel's own document-capture Escape handler already claimed this
+    // keypress before it ever bubbled up to this window-level listener. With
+    // neither open, Esc hides the popover (Mac parity). IME candidate cancel
+    // must not close anything.
     if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229) {
-      if (customizeOpen || document.body.classList.contains("settings-open")) {
+      if (isTopPanel("drawer")) {
         setDrawer(false);
+      } else if (isTopPanel("settings")) {
         setSettings(false);
-      } else {
+      } else if (!customizeOpen && !document.body.classList.contains("settings-open")) {
         void invoke("hide_popover");
       }
     }
