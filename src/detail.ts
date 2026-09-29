@@ -637,6 +637,37 @@ function readDraft(root: HTMLElement): ClientRule[] {
   });
 }
 
+/// The #dt-rule-save click handler's own body, pulled out so it can be
+/// exercised directly by a test (scripts/detail-focus.test.mjs) without a
+/// real DOM standing in for the whole click-delegate chain. Exported for
+/// that reason only -- setupDetail() is still the one and only call site in
+/// the running app.
+export function saveClientRules(rules: ClientRule[]): Promise<void> {
+  return invoke("save_clients", { rules }).then(
+    () => {
+      draftRules = null;
+      clientNote = "";
+      // loadClients() calls render() itself once the fresh rollup lands;
+      // #dt-rule-edit only exists in that redrawn, non-editing markup, so
+      // the focus-restore has to wait for it rather than running against
+      // the editing form's own about-to-be-replaced DOM.
+      // focusOrFallback() (src/focus.ts), not a bare `?.focus()`: the save
+      // is async and #dt-rule-edit exists only while grouping by client, so
+      // by the time this runs the group could have changed (or grouping
+      // could have left "client" entirely) and the button may simply not be
+      // there any more -- a bare optional-chained focus() would then
+      // silently leave focus nowhere, which is the exact WebKit "Tab stops
+      // responding" state src/focus.ts documents.
+      return loadClients().then(() => focusOrFallback(document.querySelector<HTMLElement>("#dt-rule-edit")));
+    },
+    (err) => {
+      draftRules = rules; // keep what was typed
+      clientNote = String(err);
+      render();
+    },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Sessions drill-down
 // ---------------------------------------------------------------------------
@@ -1392,23 +1423,7 @@ export function setupDetail(src: DetailSource): void {
       clientNote = "";
       ruleFocusAfter = "edit-button";
     } else if (target.closest("#dt-rule-save")) {
-      const rules = readDraft(root);
-      void invoke("save_clients", { rules }).then(
-        () => {
-          draftRules = null;
-          clientNote = "";
-          // loadClients() calls render() itself once the fresh rollup lands;
-          // #dt-rule-edit only exists in that redrawn, non-editing markup,
-          // so the focus-restore has to wait for it rather than running
-          // against the editing form's own about-to-be-replaced DOM.
-          return loadClients().then(() => document.querySelector<HTMLElement>("#dt-rule-edit")?.focus());
-        },
-        (err) => {
-          draftRules = rules; // keep what was typed
-          clientNote = String(err);
-          render();
-        },
-      );
+      void saveClientRules(readDraft(root));
       return;
     } else if (target.closest("#dt-export-table")) {
       if (!lastTable) return;

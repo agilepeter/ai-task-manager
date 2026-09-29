@@ -44,7 +44,17 @@ async function buildDetailModule() {
 
   const detailSource = await readFile(new URL("../src/detail.ts", import.meta.url), "utf8");
   const strippedDetail = detailSource
-    .replace('import { invoke } from "@tauri-apps/api/core";', 'const invoke = async () => { throw new Error("invoke() is not stubbed in this test"); };')
+    // A plain object, not a bare stub function, so a test can redirect it
+    // per call (scripts/detail-focus.test.mjs's own saveClientRules() test
+    // needs `invoke("save_clients", …)` to actually resolve) without
+    // rebuilding this whole combined module -- rebuilding is expensive
+    // (loadDetailModule() memoizes it in `cachedModule` for exactly that
+    // reason) and would also lose the pristine-module-state guarantee later
+    // tests in this file rely on. Defaults to the original throwing stub.
+    .replace(
+      'import { invoke } from "@tauri-apps/api/core";',
+      'export const __invoke = { current: async () => { throw new Error("invoke() is not stubbed in this test"); } };\nconst invoke = (...args) => __invoke.current(...args);',
+    )
     .replace('import { focusOrFallback } from "./focus";', "")
     .replace('import { focusAfterClose, isTopPanel, syncPanels } from "./panels";', "")
     .replace('import { displayMetricDetail, displayMetricLabel, localeTag, plural, t } from "./i18n";', "")
@@ -76,4 +86,62 @@ test("closeFocusTarget: returns to the opener when it is still in the document, 
   assert.equal(closeFocusTarget(opener, false, fallback), fallback, "a detached opener should fall back");
   assert.equal(closeFocusTarget(null, false, fallback), fallback, "no opener at all should fall back");
   assert.equal(closeFocusTarget(null, false, null), null, "no opener and no fallback (Detail's own real case) should return null, not throw");
+});
+
+/** A fake element whose .focus() moves the fake document's activeElement --
+ *  same shape scripts/focus.test.mjs's own fakeElement() uses, needed here
+ *  too since this test exercises the real focusOrFallback() (inlined into
+ *  this same combined module) rather than a mock of it. */
+function fakeFocusable(doc) {
+  const el = { focus: () => { doc.activeElement = el; } };
+  return el;
+}
+
+// The #dt-rule-save click handler's own body (src/detail.ts's
+// saveClientRules(), pulled out of the click-delegate chain precisely so it
+// can be called directly here): a fixed bug had it calling
+// `document.querySelector("#dt-rule-edit")?.focus()` bare, after the
+// asynchronous save+reload -- silently landing focus nowhere at all
+// whenever that button was not there any more, e.g. grouping left "client"
+// while the save was in flight. openId stays null (the module's own default
+// boot state) for both cases below, which sends loadClients() down its own
+// early-return path (`if (!sp) return;`, `sp` derived from `openId`) without
+// calling invoke() or render() a second time -- so the only invoke() call
+// either test needs to stub is "save_clients" itself.
+test("saveClientRules: falls back instead of landing focus nowhere when #dt-rule-edit is gone by the time the save settles", async () => {
+  const { saveClientRules, __invoke } = await loadDetailModule();
+  const doc = { activeElement: { tag: "whatever-had-focus-before" } };
+  doc.body = fakeFocusable(doc);
+  // #dt-rule-edit is absent from this "document" -- the exact real-world
+  // case (grouping changed while the request was in flight).
+  doc.querySelector = () => null;
+  globalThis.document = doc;
+  __invoke.current = async (cmd) => {
+    assert.equal(cmd, "save_clients");
+    return undefined;
+  };
+  try {
+    await saveClientRules([{ client: "Acme", patterns: ["acme/*"] }]);
+    assert.equal(doc.activeElement, doc.body, "with no #dt-rule-edit to land on, focus must fall back to document.body, never nowhere");
+  } finally {
+    delete globalThis.document;
+    __invoke.current = async () => { throw new Error("invoke() is not stubbed in this test"); };
+  }
+});
+
+test("saveClientRules: focuses #dt-rule-edit directly when it is there", async () => {
+  const { saveClientRules, __invoke } = await loadDetailModule();
+  const doc = { activeElement: { tag: "whatever-had-focus-before" } };
+  doc.body = fakeFocusable(doc);
+  const editButton = fakeFocusable(doc);
+  doc.querySelector = (sel) => (sel === "#dt-rule-edit" ? editButton : null);
+  globalThis.document = doc;
+  __invoke.current = async () => undefined;
+  try {
+    await saveClientRules([]);
+    assert.equal(doc.activeElement, editButton, "the real #dt-rule-edit button should win over the document.body fallback");
+  } finally {
+    delete globalThis.document;
+    __invoke.current = async () => { throw new Error("invoke() is not stubbed in this test"); };
+  }
 });
