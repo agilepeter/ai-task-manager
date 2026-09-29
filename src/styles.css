@@ -3348,6 +3348,21 @@ body.reduce-anim #detail {
   margin: 2px 0;
 }
 
+/* ------------------------------------------------------------ top panel */
+/* src/panels.ts is the only writer of this attribute: whichever panel sits
+   at the top of the open-panel stack carries it, so it climbs above every
+   OTHER panel's own fixed z-index (50-54 above) -- the fix for two panels
+   open at once (e.g. Settings opened from the rail while Agents is open)
+   leaving the covered one's close button on top by DOM order alone. The
+   `:is(#id, ...)` selectors below give this the specificity of a plain ID
+   selector *plus* an attribute selector, so it always outranks a bare
+   `#agents { z-index: 54 }` regardless of source order. Still below
+   #side-zone's 65 (the rail stays reachable over any single panel, open or
+   covered) and #confirm-overlay's 90 (a modal is above everything). */
+:is(#settings, #drawer, #detail, #audit, #about, #agents)[data-top-panel] {
+  z-index: 58;
+}
+
 /* ---------------------------------------------------------------- wide mode */
 /* One window, twice as wide: the usual column on the left, the detail page
    as a permanent column on the right. Full-window panels keep to the left
