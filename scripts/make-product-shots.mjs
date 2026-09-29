@@ -18,7 +18,8 @@
 //   npm run build:demo
 //   (cd dist-demo && python3 -m http.server 8731 &)
 //   node scripts/make-product-shots.mjs http://127.0.0.1:8731 ./out
-//   # then: magick <name>.png -quality 82 -define webp:method=6 <name>.webp
+//   # then: cwebp -q 82 -m 6 <name>.png -o <name>.webp   (every shot but promo)
+//   # and:  cp <out>/promo.png docs/promo.png
 //
 // Playwright is not a dependency of this repo; run it from an install that
 // has it (`npx playwright install webkit` once).
@@ -136,6 +137,22 @@ await page.waitForTimeout(900);
 await page.mouse.move(340, 320);
 await page.waitForTimeout(900);
 await shot('about');
+
+// The README's own image: wide mode, the list beside a provider's detail.
+// It went five releases showing v0.1.0 because nothing retook it. It is
+// 760x600 at 2x, the size docs/promo.png has always been; copy it there by
+// hand (it stays a PNG, since GitHub renders the README).
+const widePage = await browser.newPage({ viewport: { width: 760, height: 600 }, deviceScaleFactor: 2 });
+await widePage.goto(`${BASE}/demo.html`, { waitUntil: 'networkidle' });
+await widePage.waitForTimeout(1800);
+await widePage.locator('.provider:not(.total-spend) .provider-name').first().click();
+await widePage.waitForTimeout(1500);
+await widePage.locator('#detail-wide').click();
+await widePage.waitForTimeout(1500);
+await widePage.mouse.move(380, 590);
+await widePage.waitForTimeout(400);
+await widePage.screenshot({ path: `${OUT}/promo.png` });
+console.log('  ✓ promo');
 
 await browser.close();
 console.log('done ->', OUT);

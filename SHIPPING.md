@@ -106,6 +106,12 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
    cell's own number and its "See what changed" link, the "Version X.Y.Z is on
    GitHub Releases for" sentence, the two direct download links, and the JSON-LD
    softwareVersion. `scripts/changelog-page.py --check` is the drift gate for all of it.
+5. Retake the images when a screen changed: `scripts/make-product-shots.mjs` takes the
+   product page's twelve shots and the README's own image from the browser demo (its
+   header says how to run it). Convert the twelve with `cwebp -q 82 -m 6` into the site's
+   `task-manager/shots/`, and copy `promo.png` over `docs/promo.png`. Every image carries
+   the version in its footer, so a stale one can be seen at a glance: `docs/promo.png`
+   showed v0.1.0 through five releases because no step named it.
 
 ## Still upstream's
 
