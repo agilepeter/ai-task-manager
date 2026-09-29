@@ -25,7 +25,8 @@ A small release for people who use the keyboard.
   card.
 - **A redraw keeps a keyboard user's place.** The cards redraw on a timer
   and Inventory redraws after a rescan. Focus stays on the control in the
-  same place, and End task keeps it through each of its steps.
+  same place. End task keeps it through each of its steps, and so does
+  drilling into a bar on a provider's page and coming back out.
 - **Nothing is left armed.** After a click or a right-click, Space and
   Enter do not press the control that was clicked, or the button that
   opened a panel the click closed. A held Enter presses a control once.

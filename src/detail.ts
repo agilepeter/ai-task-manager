@@ -200,6 +200,8 @@ let clientNote = "";
  *  (#dt-rule-edit only exists in the non-editing markup this render() is
  *  about to draw). Read once, right after that render(), then cleared. */
 let ruleFocusAfter: "first" | "last" | "edit-button" | null = null;
+/** The bar a keyboard user drilled into, so Back can return focus to it. */
+let drillOrigin: { area?: string; day?: string } | null = null;
 /** Every session of the last 30 days, for Group by → Session; null until loaded. */
 let sessionsAll: SessionSpend[] | null = null;
 let sessionNote = "";
@@ -1213,6 +1215,17 @@ function markSelected(): void {
   });
 }
 
+/// Where keyboard focus goes after drilling into a bar and after coming back
+/// out, first match wins: Back, then the bar it came from. Nothing for a
+/// pointer user (src/tabbable.ts leaves nothing armed after a click).
+export function drillFocus(step: "in" | "back", origin: { area?: string; day?: string } | null, byKeyboard: boolean): string[] {
+  if (!byKeyboard) return [];
+  if (step === "in") return ["#dt-drill-back"];
+  const q = (v: string) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  const bar = origin?.area !== undefined ? `[data-drill-area=${q(origin.area)}]` : origin?.day !== undefined ? `[data-drill-day=${q(origin.day)}]` : null;
+  return bar ? [bar, "#dt-group"] : ["#dt-group"];
+}
+
 /// Pure: whether Escape, in wide mode, takes focus from the docked page back
 /// to the list. Only while the page is open with focus inside it and no
 /// panel is open: a panel makes the list inert, and Escape closes the panel.
@@ -1425,13 +1438,26 @@ export function setupDetail(src: DetailSource): void {
     }
     const drillArea = target.closest<HTMLElement>("[data-drill-area]")?.dataset.drillArea;
     const drillDay = target.closest<HTMLElement>("[data-drill-day]");
+    // `detail` is 0 for a click that Enter or Space made.
+    const byKeyboard = (e as MouseEvent).detail === 0;
+    const focusFirst = (selectors: string[]) => {
+      const found = selectors.map((s) => document.querySelector<HTMLElement>(s)).find((el) => el);
+      if (found) focusOrFallback(found);
+    };
+    let afterRender: string[] = [];
     if (target.closest("#dt-drill-back")) {
       drill = null;
+      afterRender = drillFocus("back", drillOrigin, byKeyboard);
+      drillOrigin = null;
     } else if (drillArea) {
-      void openDrill({ title: drillArea, area: drillArea });
+      drillOrigin = { area: drillArea };
+      void openDrill({ title: drillArea, area: drillArea }); // renders before its first await
+      focusFirst(drillFocus("in", drillOrigin, byKeyboard));
       return;
     } else if (drillDay?.dataset.drillDay) {
+      drillOrigin = { day: drillDay.dataset.drillDay };
       void openDrill({ title: drillDay.dataset.drillLabel ?? drillDay.dataset.drillDay, day: drillDay.dataset.drillDay });
+      focusFirst(drillFocus("in", drillOrigin, byKeyboard));
       return;
     } else if (target.closest("#dt-rule-edit")) {
       draftRules = clientView?.rules.length ? clientView.rules.map((r) => ({ ...r })) : [{ client: "", patterns: [] }];
@@ -1466,6 +1492,7 @@ export function setupDetail(src: DetailSource): void {
       return;
     }
     render();
+    if (afterRender.length) focusFirst(afterRender);
     // focusOrFallback() on every branch: see src/focus.ts -- a defensive
     // fallback in case one of these freshly-rendered targets is ever absent
     // for a reason this code does not yet know about.
@@ -1478,13 +1505,7 @@ export function setupDetail(src: DetailSource): void {
     }
     ruleFocusAfter = null;
   });
-  document.querySelector("#detail-body")?.addEventListener("keydown", (e) => {
-    const key = (e as KeyboardEvent).key;
-    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-drill-area], [data-drill-day]");
-    if (el && (key === "Enter" || key === " ")) {
-      e.preventDefault();
-      el.click();
-    }
-  });
+  // Enter and Space on a drill row (role="button") are src/tabbable.ts's:
+  // one path for every button by role, with its guard against a held key.
   new ResizeObserver(() => openId && draftRules === null && render()).observe(document.body);
 }

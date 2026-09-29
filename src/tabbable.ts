@@ -131,13 +131,22 @@ export function watchTabbable(): void {
   };
   for (const type of ["click", "auxclick", "contextmenu"]) document.addEventListener(type, release);
 
+  // In the capture phase, before any handler of the control's own: a repeat
+  // reaches nothing.
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      const el = e.target as HTMLElement | null;
+      if (!el?.matches || !blocksRepeat(e.key, e.repeat, el.matches(CONTROL))) return;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    true,
+  );
+
   document.addEventListener("keydown", (e) => {
     const el = e.target as HTMLElement | null;
     if (!el?.matches) return;
-    if (blocksRepeat(e.key, e.repeat, el.matches(CONTROL))) {
-      e.preventDefault();
-      return;
-    }
     if (!activatesByKey(e.key, el.matches('[role="button"]'), el.matches(NATIVE), e.defaultPrevented)) return;
     e.preventDefault(); // Space would scroll the view
     el.click();

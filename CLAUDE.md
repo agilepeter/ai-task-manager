@@ -218,7 +218,9 @@ and computed Opportunities). Usage stays the default view.
   holds focus however it opened: give its buttons their own tabindex. Anything that cannot be
   undone opens on Cancel (the confirm dialog with `danger`, End task). A step that redraws the
   control a keyboard user pressed decides where focus goes next itself, only when the click came
-  from the keyboard (`detail === 0`), as End task does (`endTaskFocus`). Check keyboard work in
+  from the keyboard (`detail === 0`), as End task (`endTaskFocus`) and a drill into a bar
+  (`drillFocus`) do. A button by role is activated in one place only, `src/tabbable.ts`: a
+  view's own Enter/Space handler would escape the held-key guard. Check keyboard work in
   WebKit, by pressing keys, and when you mutate code to prove a check, confirm the build
   succeeded (an unused parameter fails `tsc`, and the old build is then what gets tested).
 - **Panels** (`src/panels.ts`): the one module that decides which slide-in panel (Customize,
