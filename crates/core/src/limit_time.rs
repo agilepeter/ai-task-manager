@@ -294,7 +294,10 @@ mod tests {
                     assert!(!text.contains('{') && !text.contains('}'), "{locale} {name} {times}: {text}");
                     assert!(!text.contains("finding.") && !text.contains("unit.") && !text.contains("time."), "{locale}: {text}");
                     if *locale != "en" {
-                        assert_ne!(text, i18n::render("en", &detail_msg), "{locale} still reads in English");
+                        // The durations inside differ by language even when the sentence
+                        // around them has fallen back to English, so test the fixed words.
+                        assert!(!text.contains("While a limit is at 100%"), "{locale} detail still reads in English: {text}");
+                        assert_ne!(i18n::render(locale, &title_msg), i18n::render("en", &title_msg), "{locale} title still reads in English");
                     }
                     if std::env::var("SHOW_LIMIT_TIME").is_ok() {
                         eprintln!("[{locale}] {name} x{times}: {text}");
