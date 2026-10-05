@@ -3747,6 +3747,10 @@ body.wide #ledger {
   line-height: 1.4;
   color: var(--secondary-foreground);
 }
+/* A limit's name comes from the vendor: let any run of it break at 380 px. */
+.dt-limit-time p {
+  overflow-wrap: anywhere;
+}
 /* A wall before the reset is a warning state: status colour plus the words. */
 .dt-forecast-hit,
 .dt-forecast p.dt-forecast-hit {

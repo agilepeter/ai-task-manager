@@ -18,6 +18,7 @@ pub mod httpapi;
 pub mod i18n;
 pub mod inventory;
 pub mod ledger;
+pub mod limit_time;
 pub mod mcp_usage;
 pub mod pin;
 pub mod policy;

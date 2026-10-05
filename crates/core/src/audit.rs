@@ -394,6 +394,7 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
     usage.extend(only_if_present(inv, "pricing-drift"));
     usage.extend(only_if_present(inv, "agent-over-budget"));
     usage.extend(only_if_present(inv, "agent-runaway"));
+    usage.extend(only_if_present(inv, "limit-time"));
     if i.spend30 >= 50.0 {
         usage.push(from_finding(
             inv,
@@ -628,6 +629,16 @@ mod tests {
         }
         let quiet = statuses(&run_one(&Inventory::default()));
         assert!(quiet.iter().all(|(id, _)| id != "agent-over-budget" && id != "agent-runaway"), "absent when there is nothing to say");
+    }
+
+    #[test]
+    fn the_limit_time_finding_reaches_the_audit_unscored() {
+        let row = crate::limit_time::LimitTime { provider: "claude".into(), metric: "Weekly".into(), times: 3, total_ms: 5 * 3_600_000, longest_ms: 3_600_000 };
+        let inv = Inventory { opportunities: crate::limit_time::opportunities(&[row]), ..Inventory::default() };
+        let got = statuses(&run_one(&inv));
+        assert!(got.contains(&("limit-time".to_string(), "consider".to_string())), "{got:?}");
+        let quiet = statuses(&run_one(&Inventory::default()));
+        assert!(quiet.iter().all(|(id, _)| id != "limit-time"), "absent when there is nothing to say");
     }
 
     fn agent(name: &str, model: Option<&str>, tools: Option<Vec<&str>>) -> Definition {

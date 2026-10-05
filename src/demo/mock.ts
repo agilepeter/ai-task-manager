@@ -128,6 +128,15 @@ function burnProfile(provider: string) {
     }));
 }
 
+/** Time spent at 100 percent, for one card only: one limit over the finding's threshold, one under. */
+function limitTime(provider: string) {
+  if (provider !== "claude") return [];
+  return [
+    { provider, metric: "Weekly", times: 3, totalMs: 5 * HOUR + 40 * 60_000, longestMs: 3 * HOUR + 10 * 60_000 },
+    { provider, metric: "Session", times: 2, totalMs: 35 * 60_000, longestMs: 20 * 60_000 },
+  ];
+}
+
 function forecast(metrics: any[]) {
   return metrics.map((m) => {
     const hoursToReset = m.resetsAt ? (m.resetsAt - now()) / HOUR : null;
@@ -416,6 +425,7 @@ export function handle(cmd: string, args: Args = {}): unknown {
     case "get_effort": return structuredClone(EFFORT);
     case "get_history": return history(args.providerId, args.hours);
     case "get_burn_profile": return burnProfile(args.providerId);
+    case "get_limit_time": return limitTime(args.providerId);
     case "get_forecast": return forecast(args.metrics ?? []);
     case "get_sessions": return args.day ? (fixture as any).sessions.day.slice(0, 12) : (fixture as any).sessions.area;
     case "get_audit": return (fixture as any).audit;

@@ -402,21 +402,8 @@ fn hours_minutes(minutes: u64) -> String {
     format!("{}:{:02}", minutes / 60, minutes % 60)
 }
 
-/// The open time as the locale's own short duration, chosen by size the way
-/// the Running now row does (days and hours, hours and minutes, minutes).
-fn duration_msg(minutes: u64) -> Msg {
-    let (d, h, m) = (minutes / 1440, (minutes % 1440) / 60, minutes % 60);
-    if d > 0 {
-        Msg::new("time.daysHours").var("d", d).var("h", h)
-    } else if h > 0 {
-        Msg::new("time.hoursMins").var("h", h).var("m", m)
-    } else {
-        Msg::new("time.mins").var("m", m.max(1))
-    }
-}
-
 fn duration_body(who: &str, minutes: u64) -> Msg {
-    Msg::new("notify.agentRunaway.duration").var("who", who).sub("open", duration_msg(minutes))
+    Msg::new("notify.agentRunaway.duration").var("who", who).sub("open", crate::i18n::duration_msg(minutes))
 }
 
 /// One alert per running agent per day, and the process is the agent: the mark

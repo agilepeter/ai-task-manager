@@ -282,6 +282,20 @@ impl Msg {
     }
 }
 
+/// A length of time as the locale's own short duration, chosen by size the
+/// way the Running now row does (days and hours, hours and minutes, minutes).
+/// Whole minutes: the rest is dropped, and anything under a minute reads as one.
+pub fn duration_msg(minutes: u64) -> Msg {
+    let (d, h, m) = (minutes / 1440, (minutes % 1440) / 60, minutes % 60);
+    if d > 0 {
+        Msg::new("time.daysHours").var("d", d).var("h", h)
+    } else if h > 0 {
+        Msg::new("time.hoursMins").var("h", h).var("m", m)
+    } else {
+        Msg::new("time.mins").var("m", m.max(1))
+    }
+}
+
 /// CLDR cardinal rule for exactly the nine locales this app ships.
 /// Same rules as `pluralForm` in `src/i18n.ts`; `plural_forms_match_the_typescript_table`
 /// keeps the two identical instead of letting them drift apart by hand. A locale that
@@ -726,6 +740,7 @@ mod tests {
             .chain(crate::changes::FINDING_IDS)
             .chain(crate::mcp_usage::FINDING_IDS)
             .chain(crate::agent_watch::FINDING_IDS)
+            .chain(crate::limit_time::FINDING_IDS)
             .map(|id| format!("finding.{id}"))
             .collect();
         prefixes.extend(crate::audit::CHECK_KEYS.iter().map(|k| k.to_string()));
@@ -810,6 +825,7 @@ mod tests {
             .chain(crate::changes::FINDING_IDS)
             .chain(crate::mcp_usage::FINDING_IDS)
             .chain(crate::agent_watch::FINDING_IDS)
+            .chain(crate::limit_time::FINDING_IDS)
             .map(|id| format!("finding.{id}."))
             .collect();
         let check_prefixes: Vec<String> = crate::audit::CHECK_KEYS.iter().map(|k| format!("{k}.")).collect();

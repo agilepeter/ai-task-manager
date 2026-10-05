@@ -120,6 +120,40 @@ fn raw_series(conn: &Connection, provider: &str, since: i64) -> rusqlite::Result
     Ok(out)
 }
 
+/// One metric's readings as `(at, used, resets_at)`, oldest first.
+pub type LimitReadings = Vec<(i64, f64, Option<i64>)>;
+
+/// Every reading since `since`, unthinned and with its own reset time, one
+/// entry per `(provider, metric)`: the time-at-the-limit count walks
+/// consecutive pairs and needs the reset a reading carried. `provider` None
+/// reads every provider.
+pub fn limit_samples_at(
+    conn: &Connection,
+    provider: Option<&str>,
+    since: i64,
+) -> rusqlite::Result<Vec<(String, String, LimitReadings)>> {
+    let mut stmt = conn.prepare(
+        "SELECT provider, metric, at, used, resets_at FROM samples
+         WHERE at >= ?1 AND (?2 IS NULL OR provider = ?2) ORDER BY provider, metric, at",
+    )?;
+    let rows = stmt.query_map(params![since, provider], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            (row.get::<_, i64>(2)?, row.get::<_, f64>(3)?, row.get::<_, Option<i64>>(4)?),
+        ))
+    })?;
+    let mut out: Vec<(String, String, LimitReadings)> = Vec::new();
+    for row in rows {
+        let (provider, metric, reading) = row?;
+        match out.last_mut() {
+            Some((p, m, readings)) if *p == provider && *m == metric => readings.push(reading),
+            _ => out.push((provider, metric, vec![reading])),
+        }
+    }
+    Ok(out)
+}
+
 /// When in the week a limit gets used: points of the limit burned in each
 /// (weekday, hour) cell, Monday first, in the user's local time.
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -220,6 +254,15 @@ pub fn series(provider: &str, since: i64) -> Vec<Series> {
         .lock()
         .ok()
         .and_then(|guard| guard.as_ref().and_then(|conn| series_at(conn, provider, since).ok()))
+        .unwrap_or_default()
+}
+
+/// `limit_samples_at` against the process-wide store; empty when it cannot be read.
+pub fn limit_samples(provider: Option<&str>, since: i64) -> Vec<(String, String, LimitReadings)> {
+    store()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().and_then(|conn| limit_samples_at(conn, provider, since).ok()))
         .unwrap_or_default()
 }
 
@@ -327,6 +370,33 @@ mod tests {
         let east = burn_profile_from("Weekly", &points, 11 * H);
         assert_eq!(east.cells[((weekday_of_base + 1) % 7) as usize][8], 6.0);
         assert_eq!(burn_profile_from("x", &[], 0).days_observed, 0);
+    }
+
+    #[test]
+    fn limit_samples_carry_the_reset_time() {
+        let conn = db();
+        let snap_with = |id: &str, used: f64, reset: Option<i64>| {
+            Snapshot::ok(id, "Claude", None, vec![Metric::progress("Weekly", used, None).with_reset(reset, None)])
+        };
+        record_at(&conn, &[snap_with("claude", 5.0, Some(1))], 0).unwrap();
+        record_at(&conn, &[snap_with("claude", 100.0, Some(9_000_000))], 10 * MIN).unwrap();
+        record_at(&conn, &[snap_with("claude", 40.0, None)], 100 * MIN).unwrap();
+        record_at(&conn, &[snap_with("codex", 70.0, Some(5))], 20 * MIN).unwrap();
+
+        let one = limit_samples_at(&conn, Some("claude"), 5 * MIN).unwrap();
+        assert_eq!(one.len(), 1);
+        assert_eq!((one[0].0.as_str(), one[0].1.as_str()), ("claude", "Weekly"));
+        assert_eq!(
+            one[0].2,
+            [(10 * MIN, 100.0, Some(9_000_000)), (100 * MIN, 40.0, None)],
+            "oldest first, unthinned, with each reading's own reset; `since` drops the older one"
+        );
+        let all = limit_samples_at(&conn, None, 0).unwrap();
+        let names: Vec<&str> = all.iter().map(|(p, _, _)| p.as_str()).collect();
+        assert_eq!(names, ["claude", "codex"]);
+        assert_eq!(all[0].2.len(), 3);
+        assert_eq!(all[1].2, [(20 * MIN, 70.0, Some(5))]);
+        assert!(limit_samples_at(&conn, Some("nobody"), 0).unwrap().is_empty());
     }
 
     #[test]

@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{agent_watch, alerts, audit, changes, clients, coaching, diagnose, digest, drift, effort, forecast, history, httpapi, i18n, inventory, ledger, mcp_usage, pin, pricing, procs, providers, spend, trust};
+pub(crate) use aitm_core::{agent_watch, alerts, audit, changes, clients, coaching, diagnose, digest, drift, effort, forecast, history, httpapi, i18n, inventory, ledger, limit_time, mcp_usage, pin, pricing, procs, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -516,6 +516,27 @@ async fn get_burn_profile(provider_id: String) -> Result<Vec<history::BurnProfil
         .map_err(|e| format!("burn profile: {e}"))
 }
 
+/// Every limit of one card that reached 100 percent in the last 30 days, with
+/// how often and for how long, most time first.
+#[tauri::command]
+async fn get_limit_time(provider_id: String) -> Result<Vec<limit_time::LimitTime>, String> {
+    let since = chrono::Utc::now().timestamp_millis() - limit_time::WINDOW_MS;
+    tauri::async_runtime::spawn_blocking(move || limit_time_rows(Some(&provider_id), since))
+        .await
+        .map_err(|e| format!("limit time: {e}"))
+}
+
+/// The limits that reached 100 percent since `since`, one row per metric of
+/// each provider asked for, most time first.
+fn limit_time_rows(provider: Option<&str>, since: i64) -> Vec<limit_time::LimitTime> {
+    let mut rows: Vec<limit_time::LimitTime> = history::limit_samples(provider, since)
+        .iter()
+        .filter_map(|(provider, metric, points)| limit_time::from_points(provider, metric, points))
+        .collect();
+    rows.sort_by(|a, b| b.total_ms.cmp(&a.total_ms).then_with(|| a.metric.cmp(&b.metric)));
+    rows
+}
+
 /// How long `get_agent_spend` and `get_setup_changes` may each answer
 /// straight from what `enriched_inventory` just computed, instead of
 /// re-running their own scan over the same files. `load()` on the frontend
@@ -595,6 +616,7 @@ fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
         inv.opportunities
             .extend(agent_watch::opportunities(&agent_watch::currently_over(&rows), &agent_watch::runaways(&running, &watch.live)));
     }
+    inv.opportunities.extend(limit_time::opportunities(&limit_time_rows(None, chrono::Utc::now().timestamp_millis() - limit_time::WINDOW_MS)));
     // Gaps first, then things to learn, each in the order found.
     inv.opportunities.sort_by_key(|o| o.kind != "tighten");
     (inv, spend)
@@ -3976,6 +3998,7 @@ pub fn run() {
             get_audit,
             export_audit,
             get_burn_profile,
+            get_limit_time,
             pin_preview,
             pin_apply,
             export_table,

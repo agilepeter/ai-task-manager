@@ -29,6 +29,15 @@ interface BurnProfile {
   daysObserved: number;
 }
 
+/** One limit that reached 100 percent in the last 30 days (get_limit_time). */
+export interface LimitTime {
+  provider: string;
+  metric: string;
+  times: number;
+  totalMs: number;
+  longestMs: number;
+}
+
 interface Forecast {
   metric: string;
   basis: "recent" | "period";
@@ -216,6 +225,8 @@ function revealWord(): string {
 let lastTable: { name: string; headers: string[]; rows: string[][] } | null = null;
 /** Forecasts per card, refreshed with the history. */
 const forecasts = new Map<string, Forecast[]>();
+/** Time spent at 100 percent per card, refreshed with the history. */
+const limitTimes = new Map<string, LimitTime[]>();
 let burn: BurnProfile[] = [];
 let burnFor = "";
 let burnMetric = "";
@@ -382,6 +393,38 @@ function wireCrosshair(root: HTMLElement): void {
     cross.setAttribute("visibility", "hidden");
     tip.hidden = true;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Time at the limit
+// ---------------------------------------------------------------------------
+
+/// A length of time through the same `time.*` keys `until()` uses, whole
+/// minutes, so every unit word and its order are the locale's own.
+function spanText(ms: number): string {
+  const m = Math.max(0, Math.floor(ms / 60_000));
+  if (m >= 1440) return t("time.daysHours", { d: Math.floor(m / 1440), h: Math.floor((m % 1440) / 60) });
+  if (m >= 60) return t("time.hoursMins", { h: Math.floor(m / 60), m: m % 60 });
+  return t("time.mins", { m });
+}
+
+/// One line per limit that reached 100 percent, most time first, under the
+/// forecast. Nothing at all (no heading, no "never" line) when none did.
+/// Each line is one translated sentence; the count and the duration are
+/// translated pieces spliced in, so no unit word is built here.
+export function limitTimeSection(rows: LimitTime[]): string {
+  const lines = rows.filter((r) => r.times > 0).sort((a, b) => b.totalMs - a.totalMs);
+  if (!lines.length) return "";
+  return `<div class="dt-forecast dt-limit-time">${lines
+    .map((r) => {
+      const text = t("detail.limitTime.line", {
+        metric: displayMetricLabel(r.metric),
+        times: plural("unit.times", r.times),
+        total: spanText(r.totalMs),
+      });
+      return `<p>${esc(text)}</p>`;
+    })
+    .join("")}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1170,6 +1213,7 @@ function render(fromRefresh = false): void {
       </div>
       ${loading && historyFor !== openId ? `<p class="dt-empty">${esc(t("detail.loading"))}</p>` : lineChart(history, width)}
       ${forecastSection(openId)}
+      ${limitTimeSection(limitTimes.get(openId) ?? [])}
     </section>
     <section class="dt-section">
       <h3>${esc(t("detail.section.yourWeek"))}</h3>
@@ -1192,12 +1236,14 @@ async function loadHistory(): Promise<void> {
   loading = true;
   lastLoad = Date.now();
   try {
-    const [got, week] = await Promise.all([
+    const [got, week, atLimit] = await Promise.all([
       invoke<Series[]>("get_history", { providerId: id, hours }),
       invoke<BurnProfile[]>("get_burn_profile", { providerId: id }).catch(() => [] as BurnProfile[]),
+      invoke<LimitTime[]>("get_limit_time", { providerId: id }).catch(() => [] as LimitTime[]),
       loadForecast(id),
     ]);
     if (openId !== id) return;
+    limitTimes.set(id, atLimit);
     burn = week;
     burnFor = id;
     history = got;
