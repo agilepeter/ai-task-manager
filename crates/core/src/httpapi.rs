@@ -342,10 +342,8 @@ pub fn start() {
             // cross-origin reads; scripts, widgets, and curl are unaffected
             // (CORS only constrains browsers). The Mac app allows "*" and
             // discloses it — we chose the stricter default.
-            for (k, v) in [("Content-Type", "application/json")] {
-                if let Ok(h) = tiny_http::Header::from_bytes(k.as_bytes(), v.as_bytes()) {
-                    response.add_header(h);
-                }
+            if let Ok(h) = tiny_http::Header::from_bytes("Content-Type", "application/json") {
+                response.add_header(h);
             }
             let _ = request.respond(response);
         }

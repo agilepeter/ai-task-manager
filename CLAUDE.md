@@ -471,3 +471,9 @@ of them sit in Tauri's own tree and cannot be moved from here). A waiver goes in
 `cargo update -p <crate>` alone can stop short of the fixed version without saying why (the
 fix may need a newer sibling crate), so use `--precise <fixed version>`, then read which
 crates the lockfile moved, not whether the command exited 0.
+
+CI installs whatever `stable` is that day, so a new Rust release can fail the clippy gate on
+code nobody touched (1.99.0 did, on 2026-10-04, with a lint 1.98 did not raise). When clippy
+is green here and red there, compare `rustc --version` with the run's toolchain line before
+looking at the diff, and lint with the runner's version: `rustup toolchain install <version>
+--component clippy`, then `cargo +<version> clippy` with its own `CARGO_TARGET_DIR`.
