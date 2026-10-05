@@ -241,3 +241,50 @@ test("audit.ts and agents.ts agree on the freshness window", async () => {
   assert.ok(match, "src/agents.ts no longer exports a plain numeric RELOAD_FRESHNESS_MS -- update this test's pattern");
   assert.equal(auditMs, Number(match[1].replace(/_/g, "")), "the Audit and the Agents view must apply the same freshness window");
 });
+
+// A check that something can fix gets an "Open ..." link under it when it
+// needs attention or is worth a look, and WHERE (src/audit.ts) is what says
+// where. A finding that is computed and scored but missing from that map
+// shows a row with no way to act on it, so the four findings that reach the
+// Audit as "worth a look" and have a place to go are each rendered here and
+// checked for the link they get. A check outside the map gets none, which
+// keeps the assertions from passing on a renderer that links everything.
+test("render() links each unused-server, budget, runaway and limit-time check to where it is handled", async () => {
+  const { openAudit } = await loadAuditModule();
+  const fakeDocument = makeFakeDocument();
+  globalThis.document = fakeDocument;
+  const expected = {
+    "mcp-unused": "inventory",
+    "agent-over-budget": "agents",
+    "agent-runaway": "agents",
+    "limit-time": "usage",
+    "check-with-nowhere-to-go": null,
+  };
+  const en = JSON.parse(await readFile(new URL("../src/locales/en.json", import.meta.url), "utf8"));
+  const checks = Object.keys(expected).map((id) => ({ id, status: "consider", title: `title-of-${id}`, detail: "" }));
+  const { invoke } = makeRecordingInvoke({ get_audit: emptyReport({ sections: [{ name: "Setup", checks }] }) });
+  globalThis.invoke = invoke;
+
+  try {
+    openAudit();
+    await flushMicrotasks();
+    const body = fakeDocument.elements.get("#audit-body").innerHTML;
+    // Each check starts at its own `au-check` div, so a chunk holds one title and at most one link.
+    const chunks = body.split('<div class="au-check ').slice(1);
+    assert.equal(chunks.length, checks.length, "every check must be painted, or this proves nothing");
+    for (const [id, where] of Object.entries(expected)) {
+      const chunk = chunks.find((c) => c.includes(`title-of-${id}<`));
+      assert.ok(chunk, `${id} was not painted`);
+      const link = chunk.match(/data-goto="([^"]*)">([^<]*)</);
+      if (where === null) {
+        assert.equal(link, null, `${id} has nowhere to go and must get no link`);
+        continue;
+      }
+      assert.ok(link, `${id} must get an "Open ..." link`);
+      assert.deepEqual([link[1], link[2]], [where, en[`audit.goto.${where}`]], `${id} must lead to ${where}, with that place's own label`);
+    }
+  } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});

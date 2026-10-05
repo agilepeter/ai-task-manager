@@ -95,7 +95,10 @@ const WHERE: Record<string, "inventory" | "ledger" | "usage" | "agents"> = {
   ledger: "ledger", "ledger-idle": "ledger", "ledger-dates": "ledger",
   clients: "usage", "areas-unsorted": "usage", "mix-top-heavy": "usage", "session-long-lived": "usage",
   "cache-read-share": "usage", "subagent-share": "usage",
-  "mcp-context-heavy": "inventory", "guardrail-removed": "inventory", "setup-changed": "inventory",
+  "mcp-context-heavy": "inventory", "mcp-unused": "inventory", "guardrail-removed": "inventory", "setup-changed": "inventory",
+  // The Agents view holds the monthly budgets and the running agents; a limit
+  // that sat at 100% is read off the provider's own card, which Usage lists.
+  "agent-over-budget": "agents", "agent-runaway": "agents", "limit-time": "usage",
 };
 
 function esc(s: string): string {

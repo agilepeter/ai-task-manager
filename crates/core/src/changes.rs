@@ -1056,17 +1056,23 @@ mod tests {
         let today = "2026-10-05";
         let set = |names: &[&str]| -> HashSet<String> { names.iter().map(|n| n.to_string()).collect() };
 
-        // The newest snapshot at least 30 days old is the start (2026-09-05 is exactly 30 days back);
-        // a server missing from any snapshot since is out, even if it is back in the latest.
+        // The start is the NEWEST snapshot at least 30 days old: 2026-09-05 is exactly 30 days back,
+        // 2026-08-20 is older, and 2026-09-06 is 29 days back, one day too young.
+        //   late   was added after the oldest snapshot but is in the start and every later one: counts.
+        //   young  first appears one day inside the window: does not.
+        //   gone   is in the oldest snapshot only: does not.
+        //   b      is in the first and the last snapshot but missing from one between: does not.
+        //   new    is in today's snapshot only: does not.
         let history = [
-            with("2026-08-20", &["old-only", "a", "b", "c"]),
-            with("2026-09-05", &["a", "b", "c"]),
-            with("2026-09-20", &["a", "c"]),
-            with("2026-10-05", &["a", "b", "c", "new"]),
+            with("2026-08-20", &["gone", "a", "b", "c"]),
+            with("2026-09-05", &["a", "b", "c", "late"]),
+            with("2026-09-06", &["a", "b", "c", "late", "young"]),
+            with("2026-09-20", &["a", "c", "late", "young"]),
+            with("2026-10-05", &["a", "b", "c", "late", "young", "new"]),
         ];
-        assert_eq!(configured_throughout(&history, today, 30, "Claude Code"), Some(set(&["a", "c"])));
+        assert_eq!(configured_throughout(&history, today, 30, "Claude Code"), Some(set(&["a", "c", "late"])));
 
-        // Only other-client servers are not counted for this client.
+        // A server of another client is not counted for this client.
         let mut other = with("2026-09-01", &["a"]);
         other.servers.push(SnapServer { client: "Cursor".into(), ..server("x", None, None) });
         assert_eq!(configured_throughout(&[other], today, 30, "Claude Code"), Some(set(&["a"])));

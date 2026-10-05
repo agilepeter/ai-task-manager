@@ -2768,17 +2768,26 @@ pub fn mcp_usage_30d() -> HashMap<String, crate::mcp_usage::McpUsage> {
     mcp_usage_for_window(map.values().map(|e| &e.data.mcp), today)
 }
 
-/// How many days back Claude Code's log activity reaches, counting today as
-/// the first: 0 when there is none. The earliest day any file's spend
-/// carries is the evidence; a day after `today` (a clock behind the log's)
-/// is not counted. Takes `today` and the maps as parameters so a test can
-/// pick both.
+/// How many days back the given files' spend reaches, counting today as the
+/// first: 0 when there is none. The earliest day any file carries is the
+/// evidence; a day after `today` (a clock behind the log's) is not counted.
+/// Takes `today` and the maps as parameters so a test can pick both.
 fn scan_covers_days_from<'a>(day_maps: impl Iterator<Item = &'a DayMap>, today: i32) -> i64 {
     day_maps
         .flat_map(|m| m.keys().map(|(day, _)| *day))
         .filter(|day| *day <= today)
         .min()
         .map_or(0, |first| i64::from(today - first) + 1)
+}
+
+/// `scan_covers_days_from` over only the scan cache's Claude Code files: one
+/// folder or deeper under the projects `root`, the same test `claude_sessions`
+/// and `session_path_among` apply. The cache holds other tools' logs too, and
+/// counting one of those would let forty days of Codex logs vouch for ten days
+/// of Claude Code's, so a server would be called unused on ten days of
+/// evidence.
+fn scan_covers_days_among<'a>(root: &Path, files: impl Iterator<Item = (&'a PathBuf, &'a DayMap)>, today: i32) -> i64 {
+    scan_covers_days_from(files.filter(|(path, _)| project_of(root, path).is_some()).map(|(_, days)| days), today)
 }
 
 /// How many days back the scan's Claude Code log activity reaches, today
@@ -2788,7 +2797,7 @@ pub fn scan_covers_days() -> i64 {
     load_persisted_cache();
     let today = today_days_from_ce();
     let Ok(map) = cache().lock() else { return 0 };
-    scan_covers_days_from(map.iter().filter(|(path, _)| path.starts_with(&root)).map(|(_, e)| &e.data.days), today)
+    scan_covers_days_among(&root, map.iter().map(|(path, e)| (path, &e.data.days)), today)
 }
 
 // ---------------------------------------------------------------------------
@@ -8423,6 +8432,28 @@ mod tests {
                 ))
             );
         }
+    }
+
+    #[test]
+    fn only_claude_code_logs_count_as_coverage() {
+        let today = 739_100;
+        let root = Path::new("/home/me/.claude/projects");
+        let file = |path: PathBuf, day: i32| {
+            let mut days = DayMap::new();
+            days.insert((day, "claude-sonnet-5".to_string()), (1.0, 10.0));
+            (path, days)
+        };
+        let claude = file(root.join("-work-acme").join("a.jsonl"), today - 9); // 10 days of coverage
+        let subagent = file(root.join("-work-acme").join("s-1").join("subagents").join("b.jsonl"), today - 19); // 20
+        let codex = file(PathBuf::from("/home/me/.codex/sessions/2026/09/rollout.jsonl"), today - 39); // 40
+        let loose = file(root.join("loose.jsonl"), today - 49); // 50, but no project's log
+        let covers = |files: &[&(PathBuf, DayMap)]| scan_covers_days_among(root, files.iter().map(|f| (&f.0, &f.1)), today);
+
+        assert_eq!(covers(&[&claude, &codex]), 10, "forty days of another tool's logs do not stretch ten days of Claude Code's");
+        assert_eq!(covers(&[&codex]), 0, "no Claude Code logs, no coverage, whatever else the scan has seen");
+        assert_eq!(covers(&[&claude, &subagent, &codex]), 20, "a subagent transcript deeper under the root is Claude Code activity too");
+        assert_eq!(covers(&[&claude, &loose]), 10, "a file directly in the projects root belongs to no project, as for sessions");
+        assert_eq!(covers(&[]), 0);
     }
 
     #[test]
