@@ -602,8 +602,17 @@ fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
         *slot = Some((std::time::Instant::now(), setup_changes.clone()));
     }
     inv.opportunities.extend(changes::opportunities(&setup_changes));
-    mcp_usage::attach(&mut inv.mcp_servers, &spend::mcp_usage_30d());
+    let mcp_by_server = spend::mcp_usage_30d();
+    mcp_usage::attach(&mut inv.mcp_servers, &mcp_by_server);
     inv.opportunities.extend(mcp_usage::opportunities(&inv.mcp_servers));
+    let configured = changes::configured_throughout(
+        &changes::load_from(&providers::config_dir()),
+        &today,
+        mcp_usage::UNUSED_NEEDS_DAYS,
+        "Claude Code",
+    );
+    let unused = mcp_usage::unused(&inv.mcp_servers, &mcp_by_server, spend::scan_covers_days(), configured.as_ref());
+    inv.opportunities.extend(mcp_usage::unused_opportunities(&unused));
     // Nothing set means nothing is read, scanned or shown.
     let watch = agent_watch::load_from(&agent_watch::path());
     if !watch.is_empty() {

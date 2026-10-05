@@ -256,6 +256,7 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
         )
     }];
     setup.extend(only_if_present(inv, "mcp-context-heavy"));
+    setup.extend(only_if_present(inv, "mcp-unused"));
     if inv.mcp_servers.is_empty() {
         setup.push(check(
             "mcp",
@@ -639,6 +640,15 @@ mod tests {
         assert!(got.contains(&("limit-time".to_string(), "consider".to_string())), "{got:?}");
         let quiet = statuses(&run_one(&Inventory::default()));
         assert!(quiet.iter().all(|(id, _)| id != "limit-time"), "absent when there is nothing to say");
+    }
+
+    #[test]
+    fn the_unused_mcp_finding_reaches_the_audit_unscored() {
+        let inv = Inventory { opportunities: crate::mcp_usage::unused_opportunities(&["idle".to_string()]), ..Inventory::default() };
+        let got = statuses(&run_one(&inv));
+        assert!(got.contains(&("mcp-unused".to_string(), "consider".to_string())), "{got:?}");
+        let quiet = statuses(&run_one(&Inventory::default()));
+        assert!(quiet.iter().all(|(id, _)| id != "mcp-unused"), "absent when there is nothing to say");
     }
 
     fn agent(name: &str, model: Option<&str>, tools: Option<Vec<&str>>) -> Definition {

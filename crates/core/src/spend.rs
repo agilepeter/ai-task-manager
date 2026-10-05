@@ -205,7 +205,7 @@ const UNSORTED_AREA: &str = "(unsorted)";
 /// `mcp_usage::server_of`'s own refusal, so only the *count* of distinct
 /// servers needs a cap here, not the length of each one.
 const MAX_MCP_SERVERS_PER_FILE: usize = MAX_AREAS_PER_FILE;
-const OTHER_MCP_SERVER: &str = "(other)";
+pub(crate) const OTHER_MCP_SERVER: &str = "(other)";
 
 /// Fixed bucket for model names refused by the two caps above. Spend and
 /// token totals stay exact — only the per-model attribution merges.
@@ -2766,6 +2766,29 @@ pub fn mcp_usage_30d() -> HashMap<String, crate::mcp_usage::McpUsage> {
     let today = today_days_from_ce();
     let Ok(map) = cache().lock() else { return HashMap::new() };
     mcp_usage_for_window(map.values().map(|e| &e.data.mcp), today)
+}
+
+/// How many days back Claude Code's log activity reaches, counting today as
+/// the first: 0 when there is none. The earliest day any file's spend
+/// carries is the evidence; a day after `today` (a clock behind the log's)
+/// is not counted. Takes `today` and the maps as parameters so a test can
+/// pick both.
+fn scan_covers_days_from<'a>(day_maps: impl Iterator<Item = &'a DayMap>, today: i32) -> i64 {
+    day_maps
+        .flat_map(|m| m.keys().map(|(day, _)| *day))
+        .filter(|day| *day <= today)
+        .min()
+        .map_or(0, |first| i64::from(today - first) + 1)
+}
+
+/// How many days back the scan's Claude Code log activity reaches, today
+/// included; 0 when there is none. Read from the scan cache, never a rescan.
+pub fn scan_covers_days() -> i64 {
+    let root = claude_projects_root();
+    load_persisted_cache();
+    let today = today_days_from_ce();
+    let Ok(map) = cache().lock() else { return 0 };
+    scan_covers_days_from(map.iter().filter(|(path, _)| path.starts_with(&root)).map(|(_, e)| &e.data.days), today)
 }
 
 // ---------------------------------------------------------------------------
@@ -8400,5 +8423,22 @@ mod tests {
                 ))
             );
         }
+    }
+
+    #[test]
+    fn scan_covers_days_counts_from_the_earliest_log_day() {
+        let today = 739_100;
+        let day = |d: i32| {
+            let mut m = DayMap::new();
+            m.insert((d, "claude-sonnet-5".to_string()), (1.0, 10.0));
+            m
+        };
+        assert_eq!(scan_covers_days_from(std::iter::empty(), today), 0, "no activity at all");
+        assert_eq!(scan_covers_days_from([DayMap::new()].iter(), today), 0, "a file with no days says nothing");
+        assert_eq!(scan_covers_days_from([day(today)].iter(), today), 1, "today alone is one day");
+        assert_eq!(scan_covers_days_from([day(today - 29)].iter(), today), 30);
+        let maps = [day(today - 5), day(today - 44), day(today - 1)];
+        assert_eq!(scan_covers_days_from(maps.iter(), today), 45, "the earliest file wins");
+        assert_eq!(scan_covers_days_from([day(today + 3)].iter(), today), 0, "a day after today is not coverage");
     }
 }

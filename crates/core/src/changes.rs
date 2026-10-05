@@ -12,6 +12,7 @@
 use crate::i18n::{self, Msg};
 use crate::inventory::{Inventory, Opportunity};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::Path;
 
 /// A snapshot older than this, measured from today, is too old to be what
@@ -160,6 +161,29 @@ fn days_between(from: &str, to: &str) -> Option<i64> {
     let a = chrono::NaiveDate::parse_from_str(from, "%Y-%m-%d").ok()?;
     let b = chrono::NaiveDate::parse_from_str(to, "%Y-%m-%d").ok()?;
     Some((b - a).num_days())
+}
+
+/// The servers of `client` that the newest snapshot at least `days` old
+/// holds, and that every snapshot taken after it holds too: the ones that
+/// were configured the whole time. `None` when no snapshot is that old, or
+/// when a snapshot's date cannot be read -- the history cannot vouch for
+/// anything then, and a caller treats that as "not known".
+pub fn configured_throughout(snapshots: &[Snapshot], today: &str, days: i64, client: &str) -> Option<HashSet<String>> {
+    let mut dated: Vec<(chrono::NaiveDate, &Snapshot)> = Vec::new();
+    for s in snapshots {
+        dated.push((chrono::NaiveDate::parse_from_str(&s.taken, "%Y-%m-%d").ok()?, s));
+    }
+    let today_date = chrono::NaiveDate::parse_from_str(today, "%Y-%m-%d").ok()?;
+    let start = dated.iter().map(|(d, _)| *d).filter(|d| (today_date - *d).num_days() >= days).max()?;
+    let mut kept: Option<HashSet<String>> = None;
+    for (_, s) in dated.iter().filter(|(d, _)| *d >= start) {
+        let names: HashSet<String> = s.servers.iter().filter(|v| v.client == client).map(|v| v.name.clone()).collect();
+        kept = Some(match kept {
+            None => names,
+            Some(k) => k.intersection(&names).cloned().collect(),
+        });
+    }
+    kept
 }
 
 /// Today's setup, reduced to the shape a snapshot keeps. Every field here
@@ -1021,5 +1045,40 @@ mod tests {
         let today = crate::spend::today_naive_date().format("%Y-%m-%d").to_string();
         let sc = changes_at(&crate::providers::config_dir(), &inv, &today);
         println!("{}", serde_json::to_string(&sc).unwrap());
+    }
+
+    #[test]
+    fn configured_throughout_needs_every_snapshot_since() {
+        let with = |taken: &str, names: &[&str]| Snapshot {
+            servers: names.iter().map(|n| server(n, None, None)).collect(),
+            ..empty_snapshot(taken)
+        };
+        let today = "2026-10-05";
+        let set = |names: &[&str]| -> HashSet<String> { names.iter().map(|n| n.to_string()).collect() };
+
+        // The newest snapshot at least 30 days old is the start (2026-09-05 is exactly 30 days back);
+        // a server missing from any snapshot since is out, even if it is back in the latest.
+        let history = [
+            with("2026-08-20", &["old-only", "a", "b", "c"]),
+            with("2026-09-05", &["a", "b", "c"]),
+            with("2026-09-20", &["a", "c"]),
+            with("2026-10-05", &["a", "b", "c", "new"]),
+        ];
+        assert_eq!(configured_throughout(&history, today, 30, "Claude Code"), Some(set(&["a", "c"])));
+
+        // Only other-client servers are not counted for this client.
+        let mut other = with("2026-09-01", &["a"]);
+        other.servers.push(SnapServer { client: "Cursor".into(), ..server("x", None, None) });
+        assert_eq!(configured_throughout(&[other], today, 30, "Claude Code"), Some(set(&["a"])));
+
+        // No snapshot that old: no answer at all, not an empty set.
+        let young = [with("2026-09-06", &["a"]), with("2026-10-05", &["a"])];
+        assert_eq!(configured_throughout(&young, today, 30, "Claude Code"), None);
+        assert_eq!(configured_throughout(&[], today, 30, "Claude Code"), None);
+
+        // A date that cannot be read means the history cannot vouch for anything.
+        let broken = [with("2026-08-01", &["a"]), with("not a date", &["a"])];
+        assert_eq!(configured_throughout(&broken, today, 30, "Claude Code"), None);
+        assert_eq!(configured_throughout(&history, "garbage", 30, "Claude Code"), None);
     }
 }
