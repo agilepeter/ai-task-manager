@@ -302,6 +302,30 @@
               <option value="500">$500</option>
             </select>
           </div>
+          <div class="setting-row">
+            <label for="agent-pace" data-i18n="settings.agentPace" title="The cost of an agent's last 10 minutes, carried over an hour. On a flat-rate plan the figure is API-equivalent value, not a charge. The app tells you and never stops an agent." data-i18n-title="settings.agentPaceTip">Agent pace, per hour</label>
+            <select id="agent-pace" disabled>
+              <option value="" data-i18n="settings.alertOff">Off</option>
+              <option value="5" data-i18n="settings.agentPace5">$5</option>
+              <option value="10" data-i18n="settings.agentPace10">$10</option>
+              <option value="25" data-i18n="settings.agentPace25">$25</option>
+              <option value="50" data-i18n="settings.agentPace50">$50</option>
+              <option value="100" data-i18n="settings.agentPace100">$100</option>
+              <option value="250" data-i18n="settings.agentPace250">$250</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label for="agent-open" data-i18n="settings.agentOpen" title="How long an agent can stay open and still working before the app tells you. An idle agent never counts. The app never stops an agent." data-i18n-title="settings.agentOpenTip">Agent open and working</label>
+            <select id="agent-open" disabled>
+              <option value="" data-i18n="settings.alertOff">Off</option>
+              <option value="60" data-i18n="settings.agentOpen1">1 hour</option>
+              <option value="120" data-i18n="settings.agentOpen2">2 hours</option>
+              <option value="240" data-i18n="settings.agentOpen4">4 hours</option>
+              <option value="480" data-i18n="settings.agentOpen8">8 hours</option>
+              <option value="720" data-i18n="settings.agentOpen12">12 hours</option>
+              <option value="1440" data-i18n="settings.agentOpen24">24 hours</option>
+            </select>
+          </div>
         </div></div>
       </div>
 

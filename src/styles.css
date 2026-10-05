@@ -4091,6 +4091,39 @@ body.wide:not(.agents-open) #agents {
   margin-bottom: 7px;
 }
 
+/* The Budgets section's rows and its add row. A row is the same .inv-row the
+   other agent sections use, with its Remove button in the meta cell (the
+   global .inv-learn margin is for a button under text, not beside it). The add
+   row wraps instead of overflowing: the picker takes what is left of a line,
+   the amount and Add keep their own size, so a long translated placeholder or
+   button drops to the next line rather than squeezing the picker. */
+.ag-budget-row .inv-learn {
+  margin-left: 0;
+}
+.ag-budget-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.ag-budget-add select {
+  flex: 1 1 130px;
+  min-width: 0;
+  background: var(--background);
+}
+.ag-budget-add input[type="number"] {
+  flex: 0 1 96px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.ag-budget-add .inv-learn {
+  margin-left: 0;
+}
+.dt-section > .lg-error {
+  margin-top: 8px;
+}
+
 /* -------------------------------------------------------------------- about */
 #about {
   position: fixed;

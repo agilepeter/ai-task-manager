@@ -1,9 +1,23 @@
 import { rerender as rerenderInventory, setupViews, showView } from "./inventory";
 import { maybeFirstRunAudit, openAudit, reloadAudit, rerender as rerenderAudit, setupAudit } from "./audit";
-import { applyRescan, openAgents, reloadAgents, rerender as rerenderAgents, setupAgents } from "./agents";
+import {
+  agentWatchState,
+  applyRescan,
+  LIVE_OPEN_PRESETS,
+  LIVE_PACE_PRESETS,
+  liveSelectValue,
+  loadAgentWatch,
+  onAgentWatchChange,
+  openAgents,
+  reloadAgents,
+  rerender as rerenderAgents,
+  saveAgentLive,
+  setupAgents,
+} from "./agents";
 import { rerender as rerenderAbout, setupAbout } from "./about";
 import { rerender as rerenderLedger, setupLedger } from "./ledger";
 import { applySavedWide, cardExtras, refreshDetail, rerender as rerenderDetail, setupDetail } from "./detail";
+import { money } from "./format";
 import { watchTabbable } from "./tabbable";
 import { wireTabList } from "./tablist";
 import { focusOrFallback, keepFocusAcrossRedraws } from "./focus";
@@ -2457,6 +2471,9 @@ function setSettings(open: boolean, opener: HTMLElement | null = null): void {
   if (open) {
     settingsOpener = opener;
     for (const manager of siteKeyManagers) void manager.load();
+    // The live pace in the hint moves, and a budget may have changed in the
+    // Agents view: read both fresh each time Settings opens.
+    void loadAgentWatch();
     document.querySelector<HTMLElement>("#settings-heading")?.focus();
   } else if (wasOpen) {
     const fallback = document.querySelector<HTMLElement>("#settings-btn");
@@ -4554,6 +4571,67 @@ function applyLocale(): void {
   renderBuildInfo();
 }
 
+/// The two agent live-rule dropdowns are not config keys: they are read with
+/// get_agent_watch and written with set_agent_watch (src/agents.ts), which
+/// returns every saved budget alongside them. Both stay disabled until the
+/// first answer, and stay disabled with the error shown if that load fails, so
+/// nothing can ever be saved from an empty default. A saved figure that is not
+/// one of the presets leaves its select blank and keeps working.
+function paintAgentLive(): void {
+  const pace = document.querySelector<HTMLSelectElement>("#agent-pace");
+  const open = document.querySelector<HTMLSelectElement>("#agent-open");
+  if (!pace || !open) return;
+  const { view, error } = agentWatchState();
+  pace.disabled = open.disabled = view === null;
+  const show = (el: HTMLSelectElement, value: string | null) => {
+    if (value === null) el.selectedIndex = -1;
+    else el.value = value;
+  };
+  if (view) {
+    show(pace, liveSelectValue(view.watch.live.hourlyPaceUsd, LIVE_PACE_PRESETS));
+    show(open, liveSelectValue(view.watch.live.maxMinutes, LIVE_OPEN_PRESETS));
+  }
+  // The user's own live pace, only when there is one; no filler otherwise.
+  const paceRow = pace.closest<HTMLElement>(".setting-row");
+  const openRow = open.closest<HTMLElement>(".setting-row");
+  const note = (id: string, after: HTMLElement | null, text: string | null, cls: string) => {
+    let el = document.querySelector<HTMLElement>(`#${id}`);
+    if (text === null || !after) {
+      el?.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement("p");
+      el.id = id;
+      after.insertAdjacentElement("afterend", el);
+    }
+    el.className = cls;
+    el.textContent = text;
+  };
+  const hint = view && view.liveHint !== null ? t("settings.agentPaceHint", { pace: money(view.liveHint) }) : null;
+  note("agent-pace-hint", paceRow, hint, "settings-note");
+  note("agent-live-error", openRow, view ? null : error || null, "settings-note lg-error");
+}
+
+function setupAgentLive(): void {
+  onAgentWatchChange(paintAgentLive);
+  const wire = (sel: string, key: "hourlyPaceUsd" | "maxMinutes") => {
+    const el = document.querySelector<HTMLSelectElement>(sel);
+    el?.addEventListener("change", () => {
+      const change = { [key]: el.value === "" ? null : Number(el.value) };
+      void saveAgentLive(change).then((result) => {
+        // The select goes back to what is saved, and the refusal (already in
+        // the active language) goes where Settings reports a failed save.
+        if (result.outcome === "rejected") document.querySelector("#status")!.textContent = result.error;
+        if (result.outcome !== "saved" && result.outcome !== "stale") paintAgentLive();
+      });
+    });
+  };
+  wire("#agent-pace", "hourlyPaceUsd");
+  wire("#agent-open", "maxMinutes");
+  paintAgentLive();
+}
+
 async function initSettings(): Promise<void> {
   config = await invoke<Config>("get_config");
   config.locale = normalizeLocalePref(config.locale);
@@ -4615,6 +4693,7 @@ async function initSettings(): Promise<void> {
   const digestSel = document.querySelector<HTMLSelectElement>("#weekly-digest")!;
   digestSel.value = config.weeklyDigest;
   digestSel.addEventListener("change", () => void patchConfig({ weeklyDigest: digestSel.value }));
+  setupAgentLive();
 
   const localeSel = document.querySelector<HTMLSelectElement>("#locale")!;
   localeSel.value = config.locale;

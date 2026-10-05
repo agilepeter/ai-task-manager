@@ -10,6 +10,7 @@
 // Nothing in the demo leaves the page: exports and config edits are pretend.
 
 import fixture from "../demo-fixture.json";
+import { t } from "../i18n";
 import { buildDuplicateProcessesRow, buildUsageRows } from "./synthetic";
 
 // Set by the build from package.json (vite.config.ts), never typed in here.
@@ -297,6 +298,99 @@ const TRUST: Record<string, [string, string, number]> = {
   "figma-context-mcp": ["Figma Context", "emerging", 58],
 };
 
+// Agent budgets and the live rule, in memory. The real command refuses what
+// this one refuses (a name that is not offered, a repeated name, a bad figure)
+// with the same translated keys, so the Budgets section and the two Settings
+// dropdowns behave in the browser exactly as they do in the app. Nothing here
+// is written anywhere: a reload starts again from the two budgets below.
+const BUILTIN_AGENT_NAMES = ["general-purpose", "Explore", "Plan", "claude-code-guide", "statusline-setup", "workflow-subagent"];
+const MAX_WATCH_BUDGETS = 50;
+const MAX_WATCH_USD = 1_000_000;
+const MAX_WATCH_MINUTES = 1_000_000_000;
+// One over its budget, one under, both on names the fixture's own agent spend
+// carries: general-purpose has spent about $14.74 against $10, deploy-checker
+// about $1.69 against $5. The live rule starts unset.
+let agentWatch: { budgets: { agent: string; monthlyBudget: number }[]; live: { hourlyPaceUsd: number | null; maxMinutes: number | null } } = {
+  budgets: [
+    { agent: "general-purpose", monthlyBudget: 10 },
+    { agent: "deploy-checker", monthlyBudget: 5 },
+  ],
+  live: { hourlyPaceUsd: null, maxMinutes: null },
+};
+
+function agentWatchKnown(saved: { agent: string }[]): string[] {
+  const spendRows: { name: string }[] = (fixture as any).agentSpend ?? [];
+  const defined: { name: string }[] = (fixture as any).inventory.agents ?? [];
+  const names = [...BUILTIN_AGENT_NAMES, ...defined.map((a) => a.name), ...saved.map((b) => b.agent), ...spendRows.map((r) => r.name)];
+  return [...new Set(names.filter((n) => n))].sort();
+}
+
+function agentWatchView() {
+  // The fixture's agent spend covers 30 days and is the only per-agent series
+  // it has, so a budget's "this month" figure is that agent's figure there:
+  // the demo does not invent a second series for the calendar month.
+  const spendRows: { name: string; cost: number }[] = (fixture as any).agentSpend ?? [];
+  // The same sum the real app makes: the fastest priced, non-idle running pace,
+  // a dollar figure an hour (the last ten minutes carried over an hour).
+  const paces = AGENTS.map((a) => a.pace as { priced: boolean; idleSecs: number; tokens10m: number; cost10m: number } | null)
+    .filter((p) => p && p.priced && !(p.idleSecs >= 60 && p.tokens10m === 0))
+    .map((p) => p!.cost10m * 6);
+  return structuredClone({
+    watch: agentWatch,
+    budgets: agentWatch.budgets.map((b) => ({
+      agent: b.agent,
+      monthToDate: spendRows.find((r) => r.name === b.agent)?.cost ?? 0,
+      monthlyBudget: b.monthlyBudget,
+    })),
+    runaways: [],
+    liveHint: paces.length ? Math.max(...paces) : null,
+    known: agentWatchKnown(agentWatch.budgets),
+  });
+}
+
+function goodWatchFigure(x: unknown): x is number {
+  return typeof x === "number" && Number.isFinite(x) && x > 0 && x <= MAX_WATCH_USD;
+}
+
+/// Mirrors watch_from_json and validate in crates/core/src/agent_watch.rs.
+function saveAgentWatch(v: any) {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) throw t("error.agentWatch.figure");
+  const budgets: { agent: string; monthlyBudget: number }[] = [];
+  if (v.budgets != null) {
+    if (!Array.isArray(v.budgets)) throw t("error.agentWatch.figure");
+    for (const entry of v.budgets) {
+      if (typeof entry?.agent !== "string" || !entry.agent) throw t("error.agentWatch.pick");
+      if (typeof entry.monthlyBudget !== "number") throw t("error.agentWatch.figure");
+      budgets.push({ agent: entry.agent, monthlyBudget: entry.monthlyBudget });
+    }
+  }
+  const live = { hourlyPaceUsd: null as number | null, maxMinutes: null as number | null };
+  if (v.live != null) {
+    if (typeof v.live !== "object" || Array.isArray(v.live)) throw t("error.agentWatch.figure");
+    if (v.live.hourlyPaceUsd != null) {
+      if (typeof v.live.hourlyPaceUsd !== "number") throw t("error.agentWatch.figure");
+      live.hourlyPaceUsd = v.live.hourlyPaceUsd;
+    }
+    if (v.live.maxMinutes != null) {
+      const m = v.live.maxMinutes;
+      if (typeof m !== "number" || !Number.isInteger(m) || m < 1 || m > MAX_WATCH_MINUTES) throw t("error.agentWatch.figure");
+      live.maxMinutes = m;
+    }
+  }
+  if (budgets.length > MAX_WATCH_BUDGETS) throw t("error.agentWatch.tooMany", { max: MAX_WATCH_BUDGETS });
+  const known = agentWatchKnown(agentWatch.budgets);
+  const seen = new Set<string>();
+  for (const b of budgets) {
+    if (!known.includes(b.agent)) throw t("error.agentWatch.pick");
+    if (seen.has(b.agent)) throw t("error.agentWatch.duplicate");
+    seen.add(b.agent);
+    if (!goodWatchFigure(b.monthlyBudget)) throw t("error.agentWatch.figure");
+  }
+  if ((live.hourlyPaceUsd !== null && !goodWatchFigure(live.hourlyPaceUsd))) throw t("error.agentWatch.figure");
+  agentWatch = { budgets, live };
+  return agentWatchView();
+}
+
 const DEMO_NOTE = "This is the demo: nothing is written to disk. The real app saves this to your Downloads folder.";
 
 export function handle(cmd: string, args: Args = {}): unknown {
@@ -310,6 +404,8 @@ export function handle(cmd: string, args: Args = {}): unknown {
     case "get_running": return structuredClone(RUNNING.filter((r) => !endedServers.has(r.name)));
     case "get_running_agents": return structuredClone(AGENTS);
     case "get_agent_spend": return (fixture as any).agentSpend ?? [];
+    case "get_agent_watch": return agentWatchView();
+    case "set_agent_watch": return saveAgentWatch(args.watch);
     case "get_setup_changes": return (fixture as any).setupChanges;
     case "end_task": {
       if (!RUNNING.some((r) => r.name === args.name)) throw "that server is not running any more";

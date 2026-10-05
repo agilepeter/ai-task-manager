@@ -248,6 +248,26 @@ function opportunity(overrides = {}) {
   return { id: "agents-none", kind: "learn", title: "No custom agents defined", detail: "detail", learnUrl: null, ...overrides };
 }
 
+const NO_DRAFT = { agent: "", amount: "" };
+
+/** A budgets view as the backend answers: `rows` are [agent, monthToDate,
+ *  monthlyBudget] in saved order, `watch` is derived from them. */
+function watchView({ rows = [["general-purpose", 14.74, 10], ["deploy-checker", 1.69, 5]], live = { hourlyPaceUsd: null, maxMinutes: null }, known, liveHint = null } = {}) {
+  return {
+    watch: { budgets: rows.map(([agent, , monthlyBudget]) => ({ agent, monthlyBudget })), live },
+    budgets: rows.map(([agent, monthToDate, monthlyBudget]) => ({ agent, monthToDate, monthlyBudget })),
+    runaways: [],
+    liveHint,
+    known: known ?? ["Explore", "Plan", "deploy-checker", "general-purpose"],
+  };
+}
+
+/** The `<option>` values of the add row's picker, in order. */
+function pickerValues(html) {
+  const select = html.match(/<select id="agent-budget-pick"[\s\S]*?<\/select>/);
+  return select ? [...select[0].matchAll(/<option value="([^"]*)"/g)].map((m) => m[1]) : null;
+}
+
 test("the_agents_view_shows_what_inventory_showed: same rows, same text, for a fixture with running agents, custom agents and built-ins", async () => {
   const { renderAgentsView, renderAgents, agentRows, builtInAgentRows, renderOpportunityRows, setActiveLocale } = await loadAgentsModule();
   setActiveLocale("en");
@@ -625,19 +645,21 @@ test("applyRescan() re-invokes only get_audit, never get_inventory/get_running_a
     get_running_agents: [],
     get_agent_spend: [],
     get_audit: { sections: [] },
+    get_agent_watch: watchView(),
   });
   globalThis.invoke = invoke;
 
   try {
     openAgents();
-    // loadData()'s four invoke() calls, plus loadFailingGuardrails()'s own
-    // get_audit, are all fire-and-forget promises openAgents() never awaits --
-    // let their microtasks drain before moving on.
+    // loadData()'s own invoke() calls (the budgets' get_agent_watch among
+    // them), plus loadFailingGuardrails()'s own get_audit, are all
+    // fire-and-forget promises openAgents() never awaits -- let their
+    // microtasks drain before moving on.
     await flushMicrotasks();
     assert.deepEqual(
       [...calls].sort(),
-      ["get_agent_spend", "get_audit", "get_inventory", "get_running_agents"].sort(),
-      "openAgents()'s own initial load did not make the four calls this test's baseline assumes",
+      ["get_agent_spend", "get_agent_watch", "get_audit", "get_inventory", "get_running_agents"].sort(),
+      "openAgents()'s own initial load did not make the five calls this test's baseline assumes",
     );
     calls.length = 0; // only calls made by applyRescan() itself matter from here
 
@@ -704,4 +726,332 @@ test("render() bails out before touching the DOM when the panel is closed", asyn
     delete globalThis.document;
     delete globalThis.invoke;
   }
+});
+
+// ---------------------------------------------------------------------------
+// The Budgets section: src/agents.ts's renderBudgetsSection() is pure (the
+// last view, the load error, the add row's draft in; HTML out), and the
+// load/save functions behind it keep one shared copy of what the backend last
+// said. The module under test is one instance for the whole file, so every
+// behavioural test below starts by loading the state it needs.
+// ---------------------------------------------------------------------------
+
+/** One recording invoke whose set_agent_watch echoes back a view built from
+ *  what it was sent, the way the real command does. */
+function watchInvoke(initial, extra = {}) {
+  const calls = [];
+  const sent = [];
+  const invoke = async (cmd, args) => {
+    calls.push(cmd);
+    if (cmd === "get_agent_watch") return initial;
+    if (cmd === "set_agent_watch") {
+      sent.push(args.watch);
+      return watchView({
+        rows: args.watch.budgets.map((b) => [b.agent, 0, b.monthlyBudget]),
+        live: args.watch.live,
+        known: initial.known,
+      });
+    }
+    if (cmd in extra) return extra[cmd];
+    throw new Error(`no fixture for ${cmd}`);
+  };
+  return { calls, sent, invoke };
+}
+
+test("a budget with no spend still shows", async () => {
+  const { renderBudgetsSection, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  // "gone-agent" is not in `known` at all: its definition was deleted, but its
+  // budget is still saved, so the row must still be there to be removed.
+  const view = watchView({ rows: [["Plan", 0, 20], ["gone-agent", 0, 7]] });
+  const html = renderBudgetsSection(view, "", NO_DRAFT);
+
+  assert.equal((html.match(/class="inv-row ag-budget-row"/g) ?? []).length, 2, "a budget with no spend must still get its row");
+  assert.ok(html.includes("No spend this month, against a budget of $20"), "a zero-spend row must say there is no spend, with the budget");
+  assert.ok(html.includes("No spend this month, against a budget of $7.00"), "a budget on an agent that no longer exists must still show");
+  assert.ok(html.includes('data-budget-remove="gone-agent"'), "every row has its own Remove button");
+  assert.match(html, /aria-label="Remove the budget for gone-agent"/, "Remove's accessible name must include the agent's name");
+  assert.ok(!html.includes("This month:"), "a zero-spend row must not claim a figure for the month");
+});
+
+test("an over-budget row is marked and an under-budget row is not", async () => {
+  const { renderBudgetsSection, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  // Over, exactly at (the client budget line counts "at" as over), and under.
+  const view = watchView({ rows: [["over-agent", 14.74, 10], ["at-agent", 10, 10], ["under-agent", 1.69, 5]] });
+  const html = renderBudgetsSection(view, "", NO_DRAFT);
+  const rows = html.split('<div class="inv-row ag-budget-row">').slice(1);
+  assert.equal(rows.length, 3);
+  const marked = (agent) => rows.find((r) => r.includes(`>${agent}</span>`)).includes("dt-forecast-hit");
+
+  assert.equal(marked("over-agent"), true, "a row past its budget must carry the budget-hit emphasis");
+  assert.equal(marked("at-agent"), true, "a row exactly at its budget counts as over, like the client budget line");
+  assert.equal(marked("under-agent"), false, "a row under its budget must not be marked");
+  assert.ok(html.includes("This month: $15 of $10"), "the figure for the month must read as this month's spend of the budget");
+  assert.ok(html.includes("This month: $1.69 of $5.00"));
+});
+
+test("the picker offers only known names without a budget", async () => {
+  const { renderBudgetsSection, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  const view = watchView({ rows: [["Plan", 1, 5]], known: ["Explore", "Plan", "general-purpose"] });
+  const html = renderBudgetsSection(view, "", NO_DRAFT);
+
+  assert.deepEqual(pickerValues(html), ["", "Explore", "general-purpose"], "a name that already has a budget must not be offered again");
+  assert.match(html, /<option value="" disabled selected>Choose an agent<\/option>/, "the first option is a disabled placeholder");
+  assert.match(html, /<input id="agent-budget-amount" type="number" min="1" max="1000000" step="1"/, "the amount is whole dollars from 1 to 1,000,000");
+  assert.ok(html.includes('id="agent-budget-add"'));
+
+  // The draft survives a redraw: the picked name and the typed amount come back.
+  const redrawn = renderBudgetsSection(view, "", { agent: "Explore", amount: "25" });
+  assert.match(redrawn, /<option value="Explore" selected>/);
+  assert.match(redrawn, /value="25"/);
+
+  // Nothing left to pick: a line replaces the add row.
+  const all = renderBudgetsSection(watchView({ rows: [["Plan", 1, 5]], known: ["Plan"] }), "", NO_DRAFT);
+  assert.equal(pickerValues(all), null);
+  assert.ok(all.includes("Every agent the app knows already has a budget."));
+  assert.ok(!all.includes("agent-budget-add"));
+
+  // At the cap of 50 budgets, another line replaces it, whatever is still known.
+  const rows = Array.from({ length: 50 }, (_, i) => [`agent-${i}`, 0, 5]);
+  const full = renderBudgetsSection(watchView({ rows, known: [...rows.map((r) => r[0]), "one-more"] }), "", NO_DRAFT);
+  assert.equal(pickerValues(full), null);
+  assert.ok(full.includes("50 budgets is the most the app keeps."));
+});
+
+test("budget controls are absent until the watch has loaded", async () => {
+  const { renderBudgetsSection, loadAgentWatch, saveAgentWatch, saveAgentLive, addBudget, noteBudgetDraft, agentWatchState, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  const hostile = "<img src=x onerror=alert(1)>";
+
+  for (const [error, expected] of [["", "Loading"], [hostile, "&lt;img src=x onerror=alert(1)&gt;"]]) {
+    const html = renderBudgetsSection(null, error, NO_DRAFT);
+    assert.doesNotMatch(html, /<select|<input|<button/, "no control may exist before the watch has loaded");
+    assert.ok(html.includes(expected), `the section must say ${expected}`);
+    assert.ok(!html.includes(hostile));
+    assert.doesNotMatch(html, /<span class="plan">/, "no count is known yet");
+  }
+
+  // The state behind it: a load that failed leaves no view behind, even after
+  // an earlier success, so no payload can be built from a stale or empty one.
+  globalThis.document = makeFakeDocument();
+  try {
+    const good = watchInvoke(watchView());
+    globalThis.invoke = good.invoke;
+    await loadAgentWatch();
+    assert.ok(agentWatchState().view, "the load did not land");
+
+    let failing = true;
+    const calls = [];
+    globalThis.invoke = async (cmd) => {
+      calls.push(cmd);
+      if (failing) throw "the file is locked";
+      throw new Error("unexpected");
+    };
+    await loadAgentWatch();
+    assert.equal(agentWatchState().view, null, "a failed load must not leave the previous view to build a save from");
+    assert.equal(agentWatchState().error, "the file is locked");
+
+    calls.length = 0;
+    noteBudgetDraft("agent", "Plan");
+    noteBudgetDraft("amount", "10");
+    await addBudget(true);
+    assert.deepEqual(await saveAgentLive({ hourlyPaceUsd: 5 }), { outcome: "notLoaded" });
+    assert.deepEqual(await saveAgentWatch(() => ({ budgets: [], live: { hourlyPaceUsd: null, maxMinutes: null } })), { outcome: "notLoaded" });
+    assert.deepEqual(calls, [], "nothing may be sent before a load has answered");
+  } finally {
+    noteBudgetDraftReset();
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+  function noteBudgetDraftReset() {
+    noteBudgetDraft("agent", "");
+    noteBudgetDraft("amount", "");
+  }
+});
+
+test("a hostile agent name in a budget row renders as text", async () => {
+  const { renderBudgetsSection, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  const hostile = "<img src=x onerror=alert(1)>";
+  const quote = '" onfocus="alert(1)';
+  const view = watchView({ rows: [[hostile, 3, 5], [quote, 0, 5]], known: [hostile, quote, 'free"><b>x</b>'] });
+  const html = renderBudgetsSection(view, "", { agent: "", amount: '"><b>' });
+
+  assert.ok(!html.includes(hostile), "the raw hostile name reached the page");
+  assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"), "the escaped name is missing from its row");
+  assert.ok(!html.includes(quote), "a name with a quote must not break out of an attribute");
+  assert.ok(!html.includes("<b>"), "no tag from a name or from the draft may reach the page");
+  assert.ok(html.includes("free&quot;&gt;&lt;b&gt;x&lt;/b&gt;"), "an offered name is escaped in the picker too");
+});
+
+test("the budgets section calls only set_agent_watch", async () => {
+  const { loadAgentWatch, addBudget, removeBudget, noteBudgetDraft, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  globalThis.document = makeFakeDocument();
+  const { calls, sent, invoke } = watchInvoke(watchView({ live: { hourlyPaceUsd: 25, maxMinutes: 480 } }));
+  globalThis.invoke = invoke;
+  try {
+    await loadAgentWatch();
+    calls.length = 0;
+
+    noteBudgetDraft("agent", "Plan");
+    noteBudgetDraft("amount", "30");
+    await addBudget(false);
+    await removeBudget("general-purpose", false);
+
+    assert.deepEqual(calls, ["set_agent_watch", "set_agent_watch"], "adding and removing may call set_agent_watch and nothing else");
+    assert.deepEqual(
+      sent[0],
+      {
+        budgets: [{ agent: "general-purpose", monthlyBudget: 10 }, { agent: "deploy-checker", monthlyBudget: 5 }, { agent: "Plan", monthlyBudget: 30 }],
+        live: { hourlyPaceUsd: 25, maxMinutes: 480 },
+      },
+      "an add sends the saved budgets plus the new one, with the live rule untouched",
+    );
+    assert.deepEqual(
+      sent[1],
+      {
+        budgets: [{ agent: "deploy-checker", monthlyBudget: 5 }, { agent: "Plan", monthlyBudget: 30 }],
+        live: { hourlyPaceUsd: 25, maxMinutes: 480 },
+      },
+      "a remove sends what is left, from the view the add's answer returned",
+    );
+
+    // A bad figure is caught before any call.
+    calls.length = 0;
+    noteBudgetDraft("agent", "Explore");
+    noteBudgetDraft("amount", "0");
+    await addBudget(false);
+    noteBudgetDraft("amount", "2.5");
+    await addBudget(false);
+    noteBudgetDraft("amount", "1000001");
+    await addBudget(false);
+    noteBudgetDraft("agent", "");
+    noteBudgetDraft("amount", "5");
+    await addBudget(false);
+    assert.deepEqual(calls, [], "a figure outside 1 to 1,000,000, or no agent, must make no call");
+  } finally {
+    noteBudgetDraft("agent", "");
+    noteBudgetDraft("amount", "");
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
+
+test("an answer to an older save is not painted", async () => {
+  const { loadAgentWatch, saveAgentWatch, agentWatchState, onAgentWatchChange, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  globalThis.document = makeFakeDocument();
+  const base = watchView();
+  const queue = [];
+  globalThis.invoke = (cmd, args) => {
+    if (cmd === "get_agent_watch") return Promise.resolve(base);
+    return new Promise((resolve) => queue.push(() => resolve(watchView({ rows: args.watch.budgets.map((b) => [b.agent, 0, b.monthlyBudget]), known: base.known }))));
+  };
+  const painted = [];
+  onAgentWatchChange(() => painted.push(agentWatchState().view?.budgets.map((b) => b.agent).join(",")));
+  try {
+    await loadAgentWatch();
+    painted.length = 0;
+
+    const older = saveAgentWatch((last) => ({ budgets: [...last.watch.budgets, { agent: "Plan", monthlyBudget: 1 }], live: last.watch.live }));
+    const newer = saveAgentWatch((last) => ({ budgets: [...last.watch.budgets, { agent: "Explore", monthlyBudget: 2 }], live: last.watch.live }));
+    queue[1](); // the newer call answers first
+    assert.deepEqual(await newer, { outcome: "saved" });
+    queue[0](); // then the older one answers late
+    assert.deepEqual(await older, { outcome: "stale" });
+
+    assert.deepEqual(painted, ["general-purpose,deploy-checker,Explore"], "only the latest call's answer may be painted");
+    assert.equal(agentWatchState().view.budgets.map((b) => b.agent).join(","), "general-purpose,deploy-checker,Explore", "a late older answer must not replace the newer view");
+  } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
+
+test("the budgets heading counts the rows shown", async () => {
+  const { renderBudgetsSection, renderAgentsView, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  for (const n of [0, 1, 3]) {
+    const rows = Array.from({ length: n }, (_, i) => [`agent-${i}`, i, 5]);
+    // Many more known names than budgets, so a count taken from anywhere but
+    // the rows themselves cannot match by accident.
+    const view = watchView({ rows, known: [...rows.map((r) => r[0]), "a", "b", "c", "d", "e", "f"] });
+    const html = renderBudgetsSection(view, "", NO_DRAFT);
+    const shown = (html.match(/class="inv-row ag-budget-row"/g) ?? []).length;
+    assert.equal(shown, n);
+    assert.ok(html.includes(`Budgets <span class="plan">${n}</span>`), `the heading must count ${n} rows`);
+  }
+
+  // Placement: after Built-in agents, before Worth a look.
+  const full = renderAgentsView(inventory(), [], "", [agentSpendRow({ name: "general-purpose" })], "", 0, NOW_MS, watchView(), "", NO_DRAFT, "");
+  const at = (needle) => full.indexOf(needle);
+  assert.ok(at("Built-in agents") < at('data-section="agent-budgets"') && at('data-section="agent-budgets"') < at("Worth a look"));
+  assert.match(full, /<p class="inv-note">A budget covers the calendar month\./, "the note line sits under the title");
+});
+
+test("the live rule selects send the loaded budgets back unchanged", async () => {
+  const { loadAgentWatch, saveAgentLive, livePayload, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  const loaded = watchView({ live: { hourlyPaceUsd: 25, maxMinutes: 480 } });
+
+  assert.deepEqual(livePayload(loaded, { hourlyPaceUsd: null }), {
+    budgets: loaded.watch.budgets,
+    live: { hourlyPaceUsd: null, maxMinutes: 480 },
+  });
+
+  globalThis.document = makeFakeDocument();
+  const { sent, invoke } = watchInvoke(loaded);
+  globalThis.invoke = invoke;
+  try {
+    await loadAgentWatch();
+    assert.deepEqual(await saveAgentLive({ hourlyPaceUsd: null }), { outcome: "saved" });
+    assert.deepEqual(await saveAgentLive({ maxMinutes: 60 }), { outcome: "saved" });
+    assert.deepEqual(sent[0], { budgets: loaded.watch.budgets, live: { hourlyPaceUsd: null, maxMinutes: 480 } }, "only the changed figure may differ; the budgets go back as loaded");
+    assert.deepEqual(sent[1], { budgets: loaded.watch.budgets, live: { hourlyPaceUsd: null, maxMinutes: 60 } }, "the second change builds on the answer to the first");
+  } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
+
+test("an unlisted saved figure leaves the select blank", async () => {
+  const { liveSelectValue, LIVE_PACE_PRESETS, LIVE_OPEN_PRESETS, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  assert.equal(liveSelectValue(7, LIVE_PACE_PRESETS), null, "a pace that is not a preset must leave the select blank");
+  assert.equal(liveSelectValue(90, LIVE_OPEN_PRESETS), null, "a duration that is not a preset must leave the select blank");
+  assert.equal(liveSelectValue(null, LIVE_PACE_PRESETS), "", "nothing set is the Off option");
+  assert.equal(liveSelectValue(25, LIVE_PACE_PRESETS), "25");
+  assert.equal(liveSelectValue(480, LIVE_OPEN_PRESETS), "480");
+
+  // The presets and the options in index.html are one list: an option the code
+  // does not know would always show blank, and a preset with no option could
+  // never be shown.
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const optionValues = (id) => {
+    const select = html.match(new RegExp(`<select id="${id}"[^>]*>([\\s\\S]*?)</select>`));
+    return [...select[1].matchAll(/<option value="([^"]*)"/g)].map((m) => m[1]);
+  };
+  assert.deepEqual(optionValues("agent-pace"), ["", ...LIVE_PACE_PRESETS.map(String)]);
+  assert.deepEqual(optionValues("agent-open"), ["", ...LIVE_OPEN_PRESETS.map(String)]);
+});
+
+test("checkBudgetInput and the remove focus order", async () => {
+  const { checkBudgetInput, budgetRemoveFocus } = await loadAgentsModule();
+  assert.deepEqual(checkBudgetInput("Plan", " 25 "), { ok: true, amount: 25 });
+  assert.deepEqual(checkBudgetInput("Plan", "1000000"), { ok: true, amount: 1000000 });
+  assert.deepEqual(checkBudgetInput("", "25"), { ok: false, key: "error.agentWatch.pick" });
+  for (const bad of ["", "0", "-3", "2.5", "1000001", "abc"]) {
+    assert.deepEqual(checkBudgetInput("Plan", bad), { ok: false, key: "error.agentWatch.figure" }, `"${bad}" is not a whole number from 1 to 1,000,000`);
+  }
+
+  const names = ["a", "b", "c"];
+  assert.deepEqual(budgetRemoveFocus(names, "b", true), ['[data-budget-remove="c"]', '[data-budget-remove="a"]', "#agent-budget-pick"], "next row, then previous, then the picker");
+  assert.deepEqual(budgetRemoveFocus(names, "c", true), ['[data-budget-remove="b"]', "#agent-budget-pick"], "the last row hands focus to the one before it");
+  assert.deepEqual(budgetRemoveFocus(["a"], "a", true), ["#agent-budget-pick"], "no rows left: the picker");
+  assert.deepEqual(budgetRemoveFocus(names, "b", false), [], "a pointer click leaves nothing focused");
+  assert.deepEqual(budgetRemoveFocus(['we"ird'], 'we"ird', true), ["#agent-budget-pick"]);
+  assert.deepEqual(budgetRemoveFocus(['we"ird', "x"], "x", true), ['[data-budget-remove="we\\"ird"]', "#agent-budget-pick"], "a quote in a name is escaped in the selector");
 });
