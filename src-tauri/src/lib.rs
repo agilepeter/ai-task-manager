@@ -297,9 +297,9 @@ struct AgentWatchView {
 
 /// The names a budget may be set for: built-in agents, agents defined on this
 /// machine, and any agent with spend. Never typed by the user.
-fn known_agent_names(saved: &agent_watch::Watch) -> Vec<String> {
+fn known_agent_inputs() -> (Vec<String>, Vec<spend::AgentSpend>) {
     let defined: Vec<String> = inventory::scan().agents.into_iter().map(|a| a.name).collect();
-    agent_watch::known_names(&defined, &spend::agent_spend(31), saved)
+    (defined, spend::agent_spend(31))
 }
 
 fn agent_watch_view(watch: agent_watch::Watch, known: Vec<String>) -> AgentWatchView {
@@ -318,7 +318,8 @@ fn agent_watch_view(watch: agent_watch::Watch, known: Vec<String>) -> AgentWatch
 async fn get_agent_watch() -> Result<AgentWatchView, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let saved = agent_watch::load_from(&agent_watch::path());
-        let known = known_agent_names(&saved);
+        let (defined, with_spend) = known_agent_inputs();
+        let known = agent_watch::known_names(&defined, &with_spend, &saved);
         agent_watch_view(saved, known)
     })
     .await
@@ -328,13 +329,18 @@ async fn get_agent_watch() -> Result<AgentWatchView, String> {
 /// Validates against the known names, saves, and returns the fresh view. The
 /// app only ever tells: nothing here, or in the rules it saves, acts on an agent.
 #[tauri::command]
-async fn set_agent_watch(watch: agent_watch::WatchInput) -> Result<AgentWatchView, String> {
+async fn set_agent_watch(watch: serde_json::Value) -> Result<AgentWatchView, String> {
     let cfg = config_with_defaults(load_config());
     tauri::async_runtime::spawn_blocking(move || {
-        let watch = watch.into_watch().map_err(|m| user_error(&cfg, &m))?;
-        // A name already saved stays acceptable even if its agent is gone.
-        let known = known_agent_names(&agent_watch::load_from(&agent_watch::path()));
+        let watch = agent_watch::watch_from_json(&watch).map_err(|m| user_error(&cfg, &m))?;
+        let (defined, with_spend) = known_agent_inputs();
+        // Validation still honours the names already saved, so an existing row
+        // stays saveable even if its agent is gone; the returned list is built
+        // from what was just saved, so a row that was removed drops out of it.
+        let before = agent_watch::load_from(&agent_watch::path());
+        let known = agent_watch::known_names(&defined, &with_spend, &before);
         let saved = agent_watch::save_to(&agent_watch::path(), watch, &known).map_err(|m| user_error(&cfg, &m))?;
+        let known = agent_watch::known_names(&defined, &with_spend, &saved);
         Ok(agent_watch_view(saved, known))
     })
     .await
@@ -3036,11 +3042,15 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
             marks["budgetFired"] = json!(fired);
         }
 
+        // One date for both steps below, the one `agent_spend_month()` reads
+        // (it honours AITM_TODAY), so "this month" and the mark's month agree.
+        let watch_today = spend::today_naive_date();
+
         // Agent budgets: one notification per agent per calendar month.
         if !watch.budgets.is_empty() {
             // The per-cycle cost of having a budget: one read of the cached month's spend.
             let rows = agent_watch::budget_rows(&spend::agent_spend_month(), &watch);
-            for row in agent_watch::newly_over_budget(&mut marks, &rows, today) {
+            for row in agent_watch::newly_over_budget(&mut marks, &rows, watch_today) {
                 let body = i18n::Msg::new("notify.agentBudget.body")
                     .var("agent", &row.agent)
                     .var("spent", format!("{:.2}", row.month_to_date))
@@ -3059,7 +3069,7 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
         // tells; it never touches the agent.
         if watch.live_is_set() {
             let runaways = agent_watch::runaways(&running_agents, &watch.live);
-            for alert in agent_watch::due_runaway_alerts(&mut marks, &runaways, &today.format("%Y-%m-%d").to_string()) {
+            for alert in agent_watch::due_runaway_alerts(&mut marks, &runaways, &watch_today.format("%Y-%m-%d").to_string()) {
                 let _ = app
                     .notification()
                     .builder()

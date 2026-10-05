@@ -42,35 +42,55 @@ pub(crate) const ERROR_KEYS: &[&str] = &[
     "error.agentWatch.write",
 ];
 
-/// The same watch as the webview sends it. The one figure that must be whole,
-/// `maxMinutes`, arrives as a plain number so that a fraction is refused by
-/// `into_watch` in the user's language rather than by serde in English.
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct WatchInput {
-    #[serde(default)]
-    pub budgets: Vec<AgentBudget>,
-    #[serde(default)]
-    pub live: LiveInput,
-}
-
-#[derive(Deserialize, Debug, Default)]
-#[serde(rename_all = "camelCase", default)]
-pub struct LiveInput {
-    pub hourly_pace_usd: Option<f64>,
-    pub max_minutes: Option<f64>,
-}
-
-impl WatchInput {
-    /// A whole number of minutes above zero, or `error.agentWatch.figure`.
-    pub fn into_watch(self) -> Result<Watch, Msg> {
-        let max_minutes = match self.live.max_minutes {
-            None => None,
-            Some(m) if m.is_finite() && m.fract() == 0.0 && (1.0..=1e9).contains(&m) => Some(m as u64),
-            Some(_) => return Err(Msg::new("error.agentWatch.figure")),
-        };
-        Ok(Watch { budgets: self.budgets, live: LiveRule { hourly_pace_usd: self.live.hourly_pace_usd, max_minutes } })
+/// Reads the watch the webview sends, as plain JSON, so that every way it can
+/// be malformed ends in a translated error instead of a serde string in
+/// English: an empty number field arrives as `null`, a figure may be a string,
+/// a name may be missing. `null` or a missing `budgets` / `live` means none
+/// set. A bad or missing name is `error.agentWatch.pick`; a bad or missing
+/// figure, or anything else the wrong shape, is `error.agentWatch.figure`.
+/// Bounds and known names are checked afterwards by `save_to`.
+pub fn watch_from_json(v: &Value) -> Result<Watch, Msg> {
+    let figure = || Msg::new("error.agentWatch.figure");
+    let obj = match v {
+        Value::Null => return Ok(Watch::default()),
+        Value::Object(o) => o,
+        _ => return Err(figure()),
+    };
+    let mut w = Watch::default();
+    match obj.get("budgets") {
+        None | Some(Value::Null) => {}
+        Some(Value::Array(list)) => {
+            for entry in list {
+                let agent = entry.get("agent").and_then(Value::as_str).filter(|a| !a.is_empty());
+                let Some(agent) = agent else { return Err(Msg::new("error.agentWatch.pick")) };
+                let monthly_budget = entry.get("monthlyBudget").and_then(Value::as_f64).ok_or_else(figure)?;
+                w.budgets.push(AgentBudget { agent: agent.to_string(), monthly_budget });
+            }
+        }
+        Some(_) => return Err(figure()),
     }
+    match obj.get("live") {
+        None | Some(Value::Null) => {}
+        Some(Value::Object(live)) => {
+            w.live.hourly_pace_usd = match live.get("hourlyPaceUsd") {
+                None | Some(Value::Null) => None,
+                Some(x) => Some(x.as_f64().ok_or_else(figure)?),
+            };
+            // A whole number of minutes: a fraction is refused, not rounded.
+            w.live.max_minutes = match live.get("maxMinutes") {
+                None | Some(Value::Null) => None,
+                Some(x) => {
+                    let m = x.as_f64().ok_or_else(figure)?;
+                    if !(m.is_finite() && m.fract() == 0.0 && (1.0..=MAX_MINUTES as f64).contains(&m)) {
+                        return Err(figure());
+                    }
+                    Some(m as u64)
+                }
+            };
+        }
+        Some(_) => return Err(figure()),
+    }
+    Ok(w)
 }
 
 /// The notification keys this module's alerts and the budget notification in
@@ -87,6 +107,11 @@ pub(crate) const NOTIFY_KEYS: &[&str] = &[
 pub const MAX_BUDGETS: usize = 50;
 /// A name longer than this is not an agent name; a hand-edited file may hold one.
 const MAX_NAME_CHARS: usize = 80;
+/// The largest budget or hourly pace, in dollars. Anything above is not a
+/// figure anyone set on purpose and would print as a wall of digits.
+const MAX_USD: f64 = 1_000_000.0;
+/// The largest open time, in minutes.
+const MAX_MINUTES: u64 = 1_000_000_000;
 /// Keys of the remembered "already said" marks in `alert_marks.json`.
 const BUDGET_MARKS: &str = "agentBudgetFired";
 const RUNAWAY_MARKS: &str = "runawayFired";
@@ -133,7 +158,15 @@ impl Watch {
 }
 
 fn good_figure(x: f64) -> bool {
-    x.is_finite() && x > 0.0
+    x.is_finite() && x > 0.0 && x <= MAX_USD
+}
+
+fn good_name(n: &str) -> bool {
+    !n.is_empty() && n.chars().count() <= MAX_NAME_CHARS
+}
+
+fn good_minutes(m: u64) -> bool {
+    (1..=MAX_MINUTES).contains(&m)
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +183,8 @@ pub fn path() -> PathBuf {
 /// empty or over-long name is dropped, a repeated name keeps its first row, at
 /// most `MAX_BUDGETS` rows are kept, and a figure that could not have been
 /// saved is dropped rather than acted on.
+/// Whatever `save_to` accepts, this returns unchanged: both read the same
+/// `good_*` bounds.
 pub fn load_from(path: &Path) -> Watch {
     let Some(root) = std::fs::read_to_string(path).ok().and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) else {
         return Watch::default();
@@ -158,8 +193,7 @@ pub fn load_from(path: &Path) -> Watch {
     if let Some(list) = root.get("budgets").and_then(Value::as_array) {
         for entry in list {
             let Ok(b) = serde_json::from_value::<AgentBudget>(entry.clone()) else { continue };
-            let ok = !b.agent.is_empty()
-                && b.agent.chars().count() <= MAX_NAME_CHARS
+            let ok = good_name(&b.agent)
                 && good_figure(b.monthly_budget)
                 && !w.budgets.iter().any(|seen| seen.agent == b.agent);
             if ok {
@@ -172,7 +206,7 @@ pub fn load_from(path: &Path) -> Watch {
     }
     let live = root.get("live");
     w.live.hourly_pace_usd = live.and_then(|l| l.get("hourlyPaceUsd")).and_then(Value::as_f64).filter(|x| good_figure(*x));
-    w.live.max_minutes = live.and_then(|l| l.get("maxMinutes")).and_then(Value::as_u64).filter(|m| *m > 0);
+    w.live.max_minutes = live.and_then(|l| l.get("maxMinutes")).and_then(Value::as_u64).filter(|m| good_minutes(*m));
     w
 }
 
@@ -186,7 +220,7 @@ pub fn known_names(defined: &[String], spend: &[AgentSpend], saved: &Watch) -> V
     names.extend(defined.iter().cloned());
     names.extend(saved.budgets.iter().map(|b| b.agent.clone()));
     names.extend(spend.iter().map(|a| a.name.clone()));
-    names.retain(|n| !n.is_empty());
+    names.retain(|n| good_name(n));
     names.sort();
     names.dedup();
     names
@@ -198,7 +232,7 @@ fn validate(w: Watch, known: &[String]) -> Result<Watch, Msg> {
     }
     let mut seen: Vec<&str> = Vec::new();
     for b in &w.budgets {
-        if b.agent.is_empty() || !known.contains(&b.agent) {
+        if !good_name(&b.agent) || !known.contains(&b.agent) {
             return Err(Msg::new("error.agentWatch.pick"));
         }
         if seen.contains(&b.agent.as_str()) {
@@ -209,7 +243,7 @@ fn validate(w: Watch, known: &[String]) -> Result<Watch, Msg> {
             return Err(Msg::new("error.agentWatch.figure"));
         }
     }
-    if w.live.hourly_pace_usd.is_some_and(|x| !good_figure(x)) || w.live.max_minutes == Some(0) {
+    if w.live.hourly_pace_usd.is_some_and(|x| !good_figure(x)) || w.live.max_minutes.is_some_and(|m| !good_minutes(m)) {
         return Err(Msg::new("error.agentWatch.figure"));
     }
     Ok(w)
@@ -382,6 +416,10 @@ fn duration_msg(minutes: u64) -> Msg {
     }
 }
 
+fn duration_body(who: &str, minutes: u64) -> Msg {
+    Msg::new("notify.agentRunaway.duration").var("who", who).sub("open", duration_msg(minutes))
+}
+
 /// One alert per running agent per day, and the process is the agent: the mark
 /// is "tool|area|pid|YYYY-MM-DD", because the folder is often unknown and two
 /// sessions of one tool must not silence each other. It is one per process
@@ -402,7 +440,7 @@ pub fn alerts_for(runaways: &[Runaway], today: &str, fired: &mut Vec<String>) ->
         fired.push(mark);
         let body = match (r.reason, r.pace_per_hour) {
             ("pace", Some(pace)) => Msg::new("notify.agentRunaway.pace").var("who", who(r)).var("pace", format!("{pace:.2}")),
-            _ => Msg::new("notify.agentRunaway.duration").var("who", who(r)).sub("open", duration_msg(r.minutes)),
+            _ => duration_body(&who(r), r.minutes),
         };
         out.push(Alert { title: Msg::new("notify.agentRunaway.title"), body });
     }
@@ -782,7 +820,7 @@ mod tests {
         let odd = [runaway(Some("x|y"), 5), runaway(Some("x"), 5), runaway(Some("y"), 5)];
         assert_eq!(alerts_for(&odd, "2026-10-03", &mut marks).len(), 3, "areas with and around a pipe stay distinct");
         assert!(alerts_for(&odd, "2026-10-03", &mut marks).is_empty());
-        assert!(alerts_for(&odd, "2026-10-04", &mut marks).len() == 3, "and are dropped by day");
+        assert_eq!(alerts_for(&odd, "2026-10-04", &mut marks).len(), 3, "and are dropped by day");
     }
 
     #[test]
@@ -882,15 +920,100 @@ mod tests {
     }
 
     #[test]
-    fn a_fractional_or_out_of_range_minute_count_is_refused_in_the_users_language() {
-        let input = |m: Option<f64>| WatchInput { budgets: vec![], live: LiveInput { hourly_pace_usd: None, max_minutes: m } };
-        for bad in [90.5, 0.0, -3.0, f64::NAN, 1e30] {
-            assert_eq!(input(Some(bad)).into_watch().unwrap_err().key, "error.agentWatch.figure", "{bad}");
+    fn a_malformed_payload_is_refused_in_the_users_language() {
+        let err = |v: Value| watch_from_json(&v).unwrap_err().key;
+        let fig = "error.agentWatch.figure";
+        let pick = "error.agentWatch.pick";
+        // An empty number field is NaN in the webview, which JSON turns into null.
+        assert_eq!(err(json!({"budgets":[{"agent":"Plan","monthlyBudget":null}]})), fig);
+        assert_eq!(err(json!({"budgets":[{"agent":"Plan","monthlyBudget":"5"}]})), fig);
+        assert_eq!(err(json!({"budgets":[{"agent":"Plan"}]})), fig);
+        assert_eq!(err(json!({"budgets":[{"monthlyBudget":5}]})), pick);
+        assert_eq!(err(json!({"budgets":[{"agent":7,"monthlyBudget":5}]})), pick);
+        assert_eq!(err(json!({"budgets":[{"agent":"","monthlyBudget":5}]})), pick);
+        assert_eq!(err(json!({"budgets":["Plan"]})), pick);
+        assert_eq!(err(json!({"budgets":"Plan"})), fig);
+        assert_eq!(err(json!({"live":{"hourlyPaceUsd":"5"}})), fig);
+        assert_eq!(err(json!({"live":{"maxMinutes":"90"}})), fig);
+        assert_eq!(err(json!({"live":5})), fig);
+        for bad in [90.5, 0.0, -3.0, 1e30] {
+            assert_eq!(err(json!({"live":{"maxMinutes":bad}})), fig, "{bad}");
         }
-        assert_eq!(input(Some(90.0)).into_watch().unwrap().live.max_minutes, Some(90));
-        assert_eq!(input(None).into_watch().unwrap().live.max_minutes, None);
-        let parsed: WatchInput = serde_json::from_str(r#"{"budgets":[],"live":{"maxMinutes":90.5}}"#).expect("a fraction parses, then is refused by into_watch");
-        assert!(parsed.into_watch().is_err());
+        for top in [json!([1]), json!("watch"), json!(7), json!(true)] {
+            assert_eq!(err(top), fig);
+        }
+        // Null or missing means none set, not an error.
+        for none in [json!(null), json!({}), json!({"budgets":null,"live":null}), json!({"live":{"hourlyPaceUsd":null,"maxMinutes":null}})] {
+            assert_eq!(watch_from_json(&none).unwrap(), Watch::default());
+        }
+        let ok = watch_from_json(&json!({"budgets":[{"agent":"Plan","monthlyBudget":5}],"live":{"hourlyPaceUsd":2.5,"maxMinutes":90}})).unwrap();
+        assert_eq!(ok, Watch { budgets: vec![budget("Plan", 5.0)], live: LiveRule { hourly_pace_usd: Some(2.5), max_minutes: Some(90) } });
+    }
+
+    #[test]
+    fn whatever_is_saved_loads_back_unchanged() {
+        let long_ok = "n".repeat(MAX_NAME_CHARS);
+        let long_bad = "n".repeat(MAX_NAME_CHARS + 1);
+        let mut names: Vec<String> = vec!["Plan".into(), "a|b".into(), "名前".into(), long_ok.clone(), long_bad.clone()];
+        names.extend((0..MAX_BUDGETS + 2).map(|i| format!("agent-{i}")));
+        let known = known_names(&names, &[], &Watch::default());
+        assert!(!known.contains(&long_bad), "an over-long name is never offered");
+        // Even if one were offered (a stale picker), saving it must be refused.
+        let mut known = known;
+        known.push(long_bad.clone());
+        let many: Vec<AgentBudget> = (0..MAX_BUDGETS).map(|i| budget(&format!("agent-{i}"), 1.0 + i as f64)).collect();
+        let candidates = vec![
+            Watch::default(),
+            Watch { budgets: vec![budget("Plan", 0.01), budget(&long_ok, MAX_USD), budget("a|b", 1.0 / 3.0), budget("名前", 12.345)], live: LiveRule::default() },
+            Watch { budgets: many.clone(), live: LiveRule { hourly_pace_usd: Some(MAX_USD), max_minutes: Some(MAX_MINUTES) } },
+            Watch { budgets: vec![], live: LiveRule { hourly_pace_usd: Some(0.5), max_minutes: Some(1) } },
+            // Refused, so nothing to load back: every one of these must be an error.
+            Watch { budgets: vec![budget(&long_bad, 1.0)], ..Watch::default() },
+            Watch { budgets: vec![budget("Plan", MAX_USD * 2.0)], ..Watch::default() },
+            Watch { budgets: vec![budget("Plan", 1e300)], ..Watch::default() },
+            Watch { budgets: vec![budget("Plan", 1.0), budget("Plan", 2.0)], ..Watch::default() },
+            Watch { budgets: vec![], live: LiveRule { hourly_pace_usd: Some(1e300), max_minutes: None } },
+            Watch { budgets: vec![], live: LiveRule { hourly_pace_usd: None, max_minutes: Some(MAX_MINUTES + 1) } },
+            Watch { budgets: vec![], live: LiveRule { hourly_pace_usd: None, max_minutes: Some(0) } },
+            Watch { budgets: (0..=MAX_BUDGETS).map(|i| budget(&format!("agent-{i}"), 1.0)).collect(), ..Watch::default() },
+        ];
+        let path = temp_path("agent_watch.json");
+        let mut accepted = 0;
+        for w in candidates {
+            if let Ok(saved) = save_to(&path, w.clone(), &known) {
+                accepted += 1;
+                assert_eq!(saved, w);
+                assert_eq!(load_from(&path), w, "what was saved must load back unchanged");
+            }
+        }
+        // A hand-edited file holding what could never have been saved loses only that.
+        std::fs::write(
+            &path,
+            format!(r#"{{"budgets":[{{"agent":"Plan","monthlyBudget":1e300}},{{"agent":"Explore","monthlyBudget":2}}],"live":{{"hourlyPaceUsd":1e300,"maxMinutes":{}}}}}"#, MAX_MINUTES + 1),
+        )
+        .unwrap();
+        assert_eq!(load_from(&path), Watch { budgets: vec![budget("Explore", 2.0)], live: LiveRule::default() });
+        assert_eq!(accepted, 4, "the four in-bounds watches are accepted and the eight out-of-bounds ones refused");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn the_duration_sentence_reads_whole_in_every_language_and_size() {
+        let sizes = [45_u64, 130, 27 * 60];
+        let mut shown = Vec::new();
+        for loc in ["en", "zh", "ru", "es", "fr", "de", "ja", "pt-BR", "ko"] {
+            for m in sizes {
+                let text = crate::i18n::render(loc, &duration_body("Claude Code (site)", m));
+                assert!(!text.contains('{') && !text.contains('}'), "{loc} {m}: {text}");
+                assert!(text.contains("Claude Code (site)"), "{loc} {m}: {text}");
+                if loc == "ja" {
+                    assert!(!text.contains("時間間") && !text.contains("分間間") && !text.contains(" 間") && !text.contains("  "), "{loc} {m}: {text}");
+                }
+                shown.push(format!("{loc} {m}: {text}"));
+            }
+        }
+        assert_eq!(shown.len(), 27);
+        println!("{}", shown.join("\n"));
     }
 
     #[test]

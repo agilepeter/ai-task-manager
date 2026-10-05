@@ -911,7 +911,7 @@
   "notify.agentBudget.body": "{agent} は今月 ${spent} に達し、予算の ${budget} を超過しました。",
   "notify.agentRunaway.title": "エージェントが暴走している可能性があります",
   "notify.agentRunaway.pace": "{who} は直近 10 分のペースで、1 時間あたり約 ${pace} かかっています。",
-  "notify.agentRunaway.duration": "{who} は {open} 間開いたままで、まだ作業中です。",
+  "notify.agentRunaway.duration": "{who} は{open}開いたままで、まだ作業中です。",
   "error.setupHistory.newer": "このアプリの新しいバージョンが書き込んだもので、そのまま残されます",
   "error.pin.alreadyPinned": "すでに固定されています",
   "error.pin.invalidJson": "設定ファイルが有効な JSON ではないため、変更していません",
