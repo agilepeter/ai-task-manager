@@ -2822,37 +2822,40 @@ pub fn mcp_usage_30d() -> HashMap<String, crate::mcp_usage::McpUsage> {
 }
 
 /// For how many days the scan can show that Claude Code's logs are kept: the
-/// largest age, in days, of the last activity of a scanned Claude Code log
-/// (`today` minus the newest day its spend carries); `None` when there is no
-/// such log, or when the walk that found them skipped something
+/// longest time, in whole days, since a scanned Claude Code log was last
+/// written, by the modification time the scan recorded for it; `None` when
+/// there is no such log, or when the walk that found them skipped something
 /// (`scan_complete` false).
 ///
-/// Claude Code deletes a session log once it has sat idle longer than its
-/// retention period. A log last active A days ago that is still on disk was
+/// Claude Code deletes a session log once it has sat unwritten longer than its
+/// retention period. A log last written A days ago that is still on disk was
 /// kept at every clean-up since, so the retention period was then at least as
-/// long as the idle time that log had; any log active more recently had been
-/// idle no longer at each of them, so it was kept too. No log active within
-/// the last A days has been deleted by age, whatever the setting is or was,
-/// and no settings file needs reading. It is the LAST day that counts: a long
-/// session started 40 days ago and written to today says nothing about 40
-/// days. Only Claude Code's own session logs count, `<project>/<session>.jsonl`
-/// directly in a project folder under the projects `root`: another tool's logs
-/// prove nothing about Claude Code's retention, and a transcript deeper down
-/// (a session's own `subagents/`) can outlive its own idleness because it goes
-/// with its session, so its age shows nothing.
+/// long as the time that log had sat; any log written more recently had sat no
+/// longer at each of them, so it was kept too. No log written within the last
+/// A days has been deleted by age, whatever the setting is or was, and no
+/// settings file needs reading. It is the last WRITE that counts, not what
+/// the log holds: a session begun 40 days ago and written to today says
+/// nothing about 40 days, and neither does an old session that was reopened
+/// last week or restored from a backup, because the write is what kept it. A
+/// file dated after `now` (a clock that moved) shows nothing. Only Claude
+/// Code's own session logs count, `<project>/<session>.jsonl` directly in a
+/// project folder under the projects `root`: another tool's logs prove nothing
+/// about Claude Code's retention, and a transcript deeper down (a session's
+/// own `subagents/`) can outlive its own idleness because it goes with its
+/// session, so its age shows nothing.
 fn logs_kept_days_among<'a>(
     root: &Path,
     scan_complete: bool,
-    files: impl Iterator<Item = (&'a PathBuf, &'a DayMap)>,
-    today: i32,
+    files: impl Iterator<Item = (&'a PathBuf, SystemTime)>,
+    now: SystemTime,
 ) -> Option<i64> {
     if !scan_complete {
         return None;
     }
     files
         .filter(|(path, _)| path.strip_prefix(root).is_ok_and(|below| below.components().count() == 2))
-        .filter_map(|(_, days)| days.keys().map(|(day, _)| *day).max())
-        .map(|last| i64::from(today) - i64::from(last))
+        .filter_map(|(_, written)| now.duration_since(written).ok())
+        .map(|unwritten| i64::try_from(unwritten.as_secs() / 86_400).unwrap_or(i64::MAX))
         .max()
 }
 
@@ -2863,11 +2866,10 @@ fn logs_kept_days_among<'a>(
 pub fn logs_kept_days() -> Option<i64> {
     let root = claude_projects_root();
     load_persisted_cache();
-    let today = today_days_from_ce();
     let complete = CLAUDE_WALK_COMPLETE.load(std::sync::atomic::Ordering::Relaxed);
     let touched = touched().lock().ok()?;
     let map = cache().lock().ok()?;
-    logs_kept_days_among(&root, complete, map.iter().filter(|(path, _)| touched.contains(*path)).map(|(path, e)| (path, &e.data.days)), today)
+    logs_kept_days_among(&root, complete, map.iter().filter(|(path, _)| touched.contains(*path)).map(|(path, e)| (path, e.mtime)), SystemTime::now())
 }
 
 // ---------------------------------------------------------------------------
@@ -8505,20 +8507,22 @@ mod tests {
         }
     }
 
-    /// A day map holding one priced day for each given day number.
-    fn spend_days(days: &[i32]) -> DayMap {
-        days.iter().map(|d| ((*d, "claude-sonnet-5".to_string()), (1.0, 10.0))).collect()
+    /// A fixed "now", and a moment a number of whole days (plus some seconds) before it.
+    fn kept_now() -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000)
+    }
+    fn written_ago(days: u64, and_secs: u64) -> SystemTime {
+        kept_now() - Duration::from_secs(days * 86_400 + and_secs)
     }
 
     #[test]
     fn only_claude_code_logs_count_as_kept() {
-        let today = 739_100;
         let root = Path::new("/home/me/.claude/projects");
-        let claude = (root.join("-work-acme").join("a.jsonl"), spend_days(&[today - 10])); // last active 10 days ago
-        let subagent = (root.join("-work-acme").join("s-1").join("subagents").join("b.jsonl"), spend_days(&[today - 20]));
-        let codex = (PathBuf::from("/home/me/.codex/sessions/2026/09/rollout.jsonl"), spend_days(&[today - 40]));
-        let loose = (root.join("loose.jsonl"), spend_days(&[today - 50])); // no project's log
-        let kept = |files: &[&(PathBuf, DayMap)]| logs_kept_days_among(root, true, files.iter().map(|f| (&f.0, &f.1)), today);
+        let claude = (root.join("-work-acme").join("a.jsonl"), written_ago(10, 5)); // last written 10 days ago
+        let subagent = (root.join("-work-acme").join("s-1").join("subagents").join("b.jsonl"), written_ago(20, 5));
+        let codex = (PathBuf::from("/home/me/.codex/sessions/2026/09/rollout.jsonl"), written_ago(40, 5));
+        let loose = (root.join("loose.jsonl"), written_ago(50, 5)); // no project's log
+        let kept = |files: &[&(PathBuf, SystemTime)]| logs_kept_days_among(root, true, files.iter().map(|f| (&f.0, f.1)), kept_now());
 
         assert_eq!(kept(&[&claude, &codex]), Some(10), "another tool's older log says nothing about Claude Code's retention");
         assert_eq!(kept(&[&codex]), None, "no Claude Code log, nothing shown, whatever else the scan has seen");
@@ -8526,38 +8530,39 @@ mod tests {
         assert_eq!(kept(&[&subagent]), None);
         assert_eq!(kept(&[&claude, &loose]), Some(10), "a file directly in the projects root belongs to no project, as for sessions");
         assert_eq!(kept(&[]), None);
-        // A log with no priced day says nothing about when it was last active.
-        let blank = (root.join("-work-acme").join("e.jsonl"), DayMap::new());
-        assert_eq!(kept(&[&blank]), None);
-        // The newest day is the one that counts, and a day after today (a clock behind the log's) is not skipped.
-        let ahead = (root.join("-work-acme").join("f.jsonl"), spend_days(&[today - 30, today + 2]));
-        assert_eq!(kept(&[&ahead]), Some(-2));
+        // Whole days only: a log written 10 days less one second ago has sat 9 days.
+        let nearly = (root.join("-work-acme").join("n.jsonl"), kept_now() - Duration::from_secs(10 * 86_400 - 1));
+        assert_eq!(kept(&[&nearly]), Some(9));
+        // A file dated after now (a clock that moved) shows nothing, and takes nothing from the others.
+        let ahead = (root.join("-work-acme").join("f.jsonl"), kept_now() + Duration::from_secs(2 * 86_400));
+        assert_eq!(kept(&[&ahead]), None);
+        assert_eq!(kept(&[&ahead, &claude]), Some(10));
     }
 
     #[test]
     fn logs_must_be_demonstrably_kept_for_the_window() {
         use crate::mcp_usage::{unused_from_history, McpUsage, UNUSED_WINDOW_DAYS};
-        let today = 739_100;
         let root = Path::new("/home/me/.claude/projects");
         // A setup that would let the rule name `idle`, if the logs show their retention.
         let servers = crate::inventory::mcp_from_claude_json(&json!({"mcpServers": {"busy": {"command": "npx"}, "idle": {"command": "npx"}}}));
         let by_server: HashMap<String, McpUsage> = HashMap::from([("busy".to_string(), McpUsage { calls: 3, result_bytes: 10 })]);
         let history = crate::changes::daily_history("2026-10-05", UNUSED_WINDOW_DAYS, |_| vec!["busy", "idle"]);
-        let verdict = |files: &[(PathBuf, DayMap)]| {
-            let kept = logs_kept_days_among(root, true, files.iter().map(|(path, days)| (path, days)), today);
+        let verdict = |files: &[(PathBuf, SystemTime)]| {
+            let kept = logs_kept_days_among(root, true, files.iter().map(|(path, written)| (path, *written)), kept_now());
             unused_from_history(&servers, &by_server, kept, &history, "2026-10-05")
         };
-        let log = |ago: i32| (root.join("-work-acme").join(format!("session-{ago}.jsonl")), spend_days(&[today - ago]));
+        let log = |ago: u64| (root.join("-work-acme").join(format!("session-{ago}.jsonl")), written_ago(ago, 0));
 
-        assert!(verdict(&[log(20)]).is_empty(), "the oldest log was last active 20 days ago: one day short of the window");
-        assert_eq!(verdict(&[log(21)]), ["idle"], "last active 21 days ago, and still there");
+        assert!(verdict(&[log(20)]).is_empty(), "the oldest log was last written 20 days ago: one day short of the window");
+        assert_eq!(verdict(&[log(21)]), ["idle"], "last written 21 days ago, and still there");
+        let a_second_short = (root.join("-work-acme").join("short.jsonl"), kept_now() - Duration::from_secs(21 * 86_400 - 1));
+        assert!(verdict(std::slice::from_ref(&a_second_short)).is_empty(), "21 days less a second is 20 whole days");
         assert_eq!(verdict(&[log(3), log(25), log(9)]), ["idle"], "the oldest surviving log is what shows it");
-        // A long session begun 40 days ago and written to today shows nothing about 40 days: its last activity is today.
-        let long_lived = (root.join("-work-acme").join("long.jsonl"), spend_days(&[today - 40, today - 12, today]));
-        assert!(verdict(std::slice::from_ref(&long_lived)).is_empty());
-        assert!(verdict(&[long_lived, log(5)]).is_empty());
+        // It is the last write that counts, whatever the log holds: one written today shows nothing, however long ago it began.
+        assert!(verdict(&[log(0)]).is_empty());
+        assert!(verdict(&[log(0), log(5)]).is_empty());
         // Another tool's old log is not Claude Code's.
-        let codex = (PathBuf::from("/home/me/.codex/sessions/2026/09/rollout.jsonl"), spend_days(&[today - 25]));
+        let codex = (PathBuf::from("/home/me/.codex/sessions/2026/09/rollout.jsonl"), written_ago(25, 0));
         assert!(verdict(&[log(5), codex]).is_empty());
         assert!(verdict(&[]).is_empty(), "no log at all");
     }
@@ -8604,10 +8609,9 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
 
         // The measure and the rule keep to it: logs that would show 25 days show nothing from a partial scan.
-        let today = 739_100;
         let root = Path::new("/home/me/.claude/projects");
-        let old_log = (root.join("-work-acme").join("old.jsonl"), spend_days(&[today - 25]));
-        let kept = |complete: bool| logs_kept_days_among(root, complete, [&old_log].into_iter().map(|f| (&f.0, &f.1)), today);
+        let old_log = (root.join("-work-acme").join("old.jsonl"), written_ago(25, 0));
+        let kept = |complete: bool| logs_kept_days_among(root, complete, [&old_log].into_iter().map(|f| (&f.0, f.1)), kept_now());
         assert_eq!(kept(true), Some(25));
         assert_eq!(kept(false), None);
         let servers = crate::inventory::mcp_from_claude_json(&json!({"mcpServers": {"busy": {"command": "npx"}, "idle": {"command": "npx"}}}));
