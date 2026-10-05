@@ -605,14 +605,14 @@ fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     let mcp_by_server = spend::mcp_usage_30d();
     mcp_usage::attach(&mut inv.mcp_servers, &mcp_by_server);
     inv.opportunities.extend(mcp_usage::opportunities(&inv.mcp_servers));
-    let unused = mcp_usage::unused_from_history(
-        &inv.mcp_servers,
-        &mcp_by_server,
-        spend::logs_kept_days(),
-        &changes::load_from(&providers::config_dir()),
-        &today,
-    );
-    inv.opportunities.extend(mcp_usage::unused_opportunities(&unused));
+    // The rule that would name unused MCP servers (`mcp_usage::unused_from_history`)
+    // is deliberately not called here. It infers that no call was made from the
+    // logs that are still on disk, and two ordinary setups make that inference
+    // wrong: Claude Code keeps a session started in Claude Desktop at any age,
+    // so one such log can stand for a retention its other logs do not have; and
+    // a second Claude Code config directory is never scanned. A finding that can
+    // name a server in daily use is worse than no finding, so none is shown
+    // until calls are counted from a record this app keeps of what it saw.
     // Nothing set means nothing is read, scanned or shown.
     let watch = agent_watch::load_from(&agent_watch::path());
     if !watch.is_empty() {
