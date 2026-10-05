@@ -38,7 +38,8 @@ pub struct ClientSpend {
     pub today: Window,
     pub yesterday: Window,
     pub last30: Window,
-    /// This calendar month so far, from the daily series.
+    /// This calendar month so far: each area's own figure from the scan, or a
+    /// cut of its daily series for an area that has none.
     pub month_to_date: f64,
     /// The areas that rolled up here, largest first.
     pub areas: Vec<String>,
@@ -106,9 +107,16 @@ fn add(into: &mut Window, from: &Window) {
     into.tokens += from.tokens;
 }
 
-/// Sum of the daily series over the days that fall in `today`'s month.
-/// `daily` is oldest first with today last, like every trend in the app.
-fn month_to_date(daily: &[f64], today: NaiveDate) -> f64 {
+/// Sum of the daily series over the days that fall in `today`'s month: the
+/// answer for an area that carries no `month_to_date` of its own, and only
+/// for that. `daily` is oldest first with today last, like every trend in the
+/// app.
+///
+/// Short by one day on the 31st of a 31-day month. The series holds
+/// `TREND_DAYS` (30) days, so the 1st is one past its oldest slot. That is why
+/// the scan sums the month itself (`AreaSpend::month_to_date`); this only
+/// stands in for an area that did not come from a scan.
+fn month_to_date_from_series(daily: &[f64], today: NaiveDate) -> f64 {
     let n = daily.len();
     daily
         .iter()
@@ -147,7 +155,9 @@ pub fn rollup(areas: &[AreaSpend], rules: &[ClientRule], today: NaiveDate) -> Ve
         add(&mut row.today, &area.today);
         add(&mut row.yesterday, &area.yesterday);
         add(&mut row.last30, &area.last30);
-        row.month_to_date += month_to_date(&area.daily_cost, today);
+        row.month_to_date += area
+            .month_to_date
+            .unwrap_or_else(|| month_to_date_from_series(&area.daily_cost, today));
         row.areas.push(area.area.clone());
     }
     out.sort_by(|a, b| {
@@ -319,7 +329,16 @@ mod tests {
         let mut daily = vec![0.0; TREND_DAYS];
         let start = TREND_DAYS - daily_tail.len();
         daily[start..].copy_from_slice(daily_tail);
-        AreaSpend { area: name.into(), today: w(today), yesterday: w(0.0), last30: w(last30), daily_cost: daily, week: None }
+        // No scan figure, so these tests go through the series fallback.
+        AreaSpend {
+            area: name.into(),
+            today: w(today),
+            yesterday: w(0.0),
+            last30: w(last30),
+            daily_cost: daily,
+            week: None,
+            month_to_date: None,
+        }
     }
 
     fn rule(client: &str, patterns: &[&str]) -> ClientRule {
@@ -405,6 +424,27 @@ mod tests {
         let big = [area("misc", 999.0, 0.0, &[]), area("site/acme-x", 1.0, 0.0, &[])];
         let rows = rollup(&big, &[rule("Acme", &["site/acme*"])], today);
         assert_eq!(rows.last().unwrap().client, UNASSIGNED);
+    }
+
+    #[test]
+    fn an_area_without_the_field_takes_the_old_cut() {
+        // An area as a frontend from before `month_to_date` existed hands it back: no such
+        // key at all. It still loads, and its month is cut out of the daily series
+        // (September 1-3 here), never read as zero.
+        let window = serde_json::json!({ "cost": 0.0, "tokens": 0.0, "cache_read": 0.0, "models": [] });
+        let mut daily = vec![0.0; TREND_DAYS - 4];
+        daily.extend([40.0, 10.0, 20.0, 5.0]); // Aug 31, then Sep 1, 2 and 3 (today)
+        let older = serde_json::json!({
+            "area": "site/acme-portal",
+            "today": window, "yesterday": window, "last30": window,
+            "daily_cost": daily,
+        });
+        let area: AreaSpend = serde_json::from_value(older).expect("an older shape still loads");
+        assert_eq!(area.month_to_date, None);
+
+        let today = NaiveDate::from_ymd_opt(2026, 9, 3).unwrap();
+        let rows = rollup(&[area], &[rule("Acme", &["site/acme*"])], today);
+        assert_eq!(rows[0].month_to_date, 35.0, "Sep 1-3 only: Aug 31's 40 is last month");
     }
 
     #[test]

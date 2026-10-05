@@ -234,6 +234,7 @@ mod tests {
                         yesterday: Window::default(),
                         last30: Window::default(),
                         daily_cost: pad(tail),
+                        month_to_date: None,
                     })
                     .collect(),
             }],

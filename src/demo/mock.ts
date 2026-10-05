@@ -209,11 +209,19 @@ function clientRollup(areas: any[]) {
       row[k].cost += a[k].cost;
       row[k].tokens += a[k].tokens;
     }
-    const daily: number[] = a.daily_cost ?? [];
-    daily.forEach((c, i) => {
-      const d = new Date(now() - (daily.length - 1 - i) * 24 * HOUR);
-      if (d.getMonth() === month) row.monthToDate += c;
-    });
+    if (typeof a.month_to_date === "number") {
+      // The engine's own figure, summed from every day it read: the 30-slot series
+      // below is a day short on the 31st of a 31-day month.
+      row.monthToDate += a.month_to_date;
+    } else {
+      // An area with none (the committed fixture predates the field): cut the month
+      // out of the series.
+      const daily: number[] = a.daily_cost ?? [];
+      daily.forEach((c, i) => {
+        const d = new Date(now() - (daily.length - 1 - i) * 24 * HOUR);
+        if (d.getMonth() === month) row.monthToDate += c;
+      });
+    }
     row.areas.push(a.area);
   }
   const list = Object.values(rows).sort((a: any, b: any) => Number(a.client === "Unassigned") - Number(b.client === "Unassigned") || b.last30.cost - a.last30.cost);

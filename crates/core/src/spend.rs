@@ -161,12 +161,23 @@ pub struct AreaSpend {
     pub yesterday: Window,
     pub last30: Window,
     /// Dollars per day, oldest first with today last, like `daily_cost` on a
-    /// card. Lets a calendar month be cut out of the rolling window.
+    /// card. Only `TREND_DAYS` of them, so it cannot hold a whole calendar
+    /// month: see `month_to_date`.
     pub daily_cost: Vec<f64>,
     /// Last 7 days against the 7 before, like the card's. Recomputed after
     /// every scan, so a cache written before this field existed still loads.
     #[serde(default)]
     pub week: Option<WeekDelta>,
+    /// This calendar month so far, in dollars: every day from the 1st of the
+    /// month `today` falls in, through `today`. Summed from the scan's own
+    /// per-day map in the same pass as `daily_cost`, so it is complete on the
+    /// 31st of a 31-day month, when the 1st is 30 days back and one day past
+    /// the series. `Some` for every area a scan makes; `None` only for one
+    /// that did not come from a scan (an older frontend handing back a shape
+    /// from before this field existed), which `clients::rollup` then answers
+    /// by cutting the month out of `daily_cost`, never as zero.
+    #[serde(default)]
+    pub month_to_date: Option<f64>,
 }
 
 impl ProviderSpend {
@@ -3215,14 +3226,34 @@ fn pace_from_lines<'a>(lines: impl Iterator<Item = &'a str>, session_id: &str, n
     })
 }
 
-/// Today / yesterday / last-30-days totals for each key of a day map.
-fn windows_by_key(days: DayMap, today: i32) -> HashMap<String, ([Window; 3], Vec<f64>)> {
-    let mut out: HashMap<String, ([Window; 3], Vec<f64>)> = HashMap::new();
+/// The CE day number of the 1st of the month `today` (also a CE day number)
+/// falls in. A `today` that is no real date cannot come from the clock; it is
+/// answered as a month of one day rather than a panic in the refresh loop.
+fn first_of_month(today: i32) -> i32 {
+    NaiveDate::from_num_days_from_ce_opt(today).map_or(today, |d| today - d.day0() as i32)
+}
+
+/// For each key of a day map: its today / yesterday / last-30-days windows,
+/// its dollars per day over those 30 days (oldest first, today last), and its
+/// dollars for the calendar month so far.
+///
+/// The month is summed from the map, never cut out of the 30 slots: on the
+/// 31st of a 31-day month the 1st is 30 days back, one past the oldest slot.
+/// The map has every day of every log file the scan read (those written in the
+/// last 31 days), so the 1st is in it. As in every other window, a day after
+/// `today` (a log written when the clock ran ahead) is not counted.
+fn windows_by_key(days: DayMap, today: i32) -> HashMap<String, ([Window; 3], Vec<f64>, f64)> {
+    let month_start = first_of_month(today);
+    let mut out: HashMap<String, ([Window; 3], Vec<f64>, f64)> = HashMap::new();
     for ((day, key), (cost, tokens)) in days {
-        let (windows, daily) = out.entry(key).or_insert_with(|| (Default::default(), vec![0.0; TREND_DAYS]));
+        let (windows, daily, month_to_date) =
+            out.entry(key).or_insert_with(|| (Default::default(), vec![0.0; TREND_DAYS], 0.0));
         let idx = day - (today - TREND_DAYS as i32 + 1);
         if (0..TREND_DAYS as i32).contains(&idx) {
             daily[idx as usize] += cost;
+        }
+        if day >= month_start && day <= today {
+            *month_to_date += cost;
         }
         let bump = |w: &mut Window| {
             w.cost += cost;
@@ -3254,17 +3285,18 @@ fn project_spends(per_project: Vec<(String, FileData)>, today: i32) -> Vec<Proje
                 entry.1 += tokens;
             }
             let [today_w, yesterday, last30] =
-                windows_by_key(totals, today).remove("").map(|(w, _)| w).unwrap_or_default();
+                windows_by_key(totals, today).remove("").map(|(w, _, _)| w).unwrap_or_default();
             let mut areas: Vec<AreaSpend> = windows_by_key(data.areas, today)
                 .into_iter()
-                .filter(|(_, (w, _))| w[2].cost > 0.004 || w[2].tokens > 0.0)
-                .map(|(area, ([today, yesterday, last30], daily_cost))| AreaSpend {
+                .filter(|(_, (w, _, _))| w[2].cost > 0.004 || w[2].tokens > 0.0)
+                .map(|(area, ([today, yesterday, last30], daily_cost, month_to_date))| AreaSpend {
                     area,
                     today,
                     yesterday,
                     last30,
                     daily_cost,
                     week: None,
+                    month_to_date: Some(month_to_date),
                 })
                 .collect();
             areas.sort_by(|a, b| b.last30.cost.total_cmp(&a.last30.cost).then_with(|| a.area.cmp(&b.area)));
@@ -6969,6 +7001,7 @@ mod tests {
             last30: Window { cost, tokens: 0.0, cache_read: 0.0, models: Vec::new() },
             daily_cost: Vec::new(),
             week: None,
+            month_to_date: None,
         };
         let areas = [area("acme-portal/web", 9.0), area("northwind-api", 3.0), area("billing-tools", 6.0)];
         let rollup = clients::rollup(&areas, &rules, today_date);
@@ -7096,6 +7129,148 @@ mod tests {
         assert_eq!(areas[1].today.cost, 6.0);
         assert_eq!(areas[0].today.cost, 0.0);
         assert_eq!(areas[0].last30.cost, 9.0);
+    }
+
+    // ---- A client's month to date, from the scan to the rollup -------------
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).expect("a real date")
+    }
+
+    /// What one scan makes of work areas that spent `spend` (area, day, dollars) as
+    /// of `today`: the areas `clients::rollup` is handed. The project's own totals
+    /// hold the same dollars, like a real scan's.
+    fn scanned_areas(spend: &[(&str, NaiveDate, f64)], today: NaiveDate) -> Vec<AreaSpend> {
+        let mut data = FileData::default();
+        for (area, day, cost) in spend {
+            let day = day.num_days_from_ce();
+            let total = data.days.entry((day, "claude-opus-5".to_string())).or_insert((0.0, 0.0));
+            total.0 += cost;
+            total.1 += 10.0;
+            let share = data.areas.entry((day, area.to_string())).or_insert((0.0, 0.0));
+            share.0 += cost;
+            share.1 += 10.0;
+        }
+        project_spends(vec![("/w".into(), data)], today.num_days_from_ce())
+            .into_iter()
+            .flat_map(|p| p.areas)
+            .collect()
+    }
+
+    fn acme(monthly_budget: Option<f64>) -> ClientRule {
+        ClientRule { client: "Acme".to_string(), patterns: vec!["acme-portal".to_string()], monthly_budget }
+    }
+
+    #[test]
+    fn client_month_to_date_includes_the_first_on_the_thirty_first() {
+        // October has 31 days, so on the 31st the 1st is 30 days back: one day past the
+        // 30 slots an area's daily series holds. Spend on the last day of September
+        // (last month's, never counted), on the 1st, and today.
+        let today = date(2026, 10, 31);
+        let areas = scanned_areas(
+            &[
+                ("acme-portal", date(2026, 9, 30), 100.0),
+                ("acme-portal", date(2026, 10, 1), 20.0),
+                ("acme-portal", today, 4.0),
+            ],
+            today,
+        );
+        let rows = clients::rollup(&areas, &[acme(None)], today);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].client, "Acme");
+        assert_eq!(rows[0].month_to_date, 24.0, "October 1 (20) and October 31 (4), not September 30's 100");
+    }
+
+    fn days_before(day: NaiveDate, n: i32) -> NaiveDate {
+        NaiveDate::from_num_days_from_ce_opt(day.num_days_from_ce() - n).expect("a real date")
+    }
+
+    #[test]
+    fn month_to_date_on_the_first_counts_only_today() {
+        // The 1st has no earlier day in its own month: yesterday, the last day of the
+        // month before (a December 31st included), is that month's.
+        for today in [date(2026, 11, 1), date(2027, 1, 1)] {
+            let yesterday = days_before(today, 1);
+            let areas = scanned_areas(
+                &[("acme-portal", days_before(today, 2), 50.0), ("acme-portal", yesterday, 8.0), ("acme-portal", today, 3.0)],
+                today,
+            );
+            assert_eq!(areas[0].month_to_date, Some(3.0), "{today}: the scan's own figure");
+            let rows = clients::rollup(&areas, &[acme(None)], today);
+            assert_eq!(rows[0].month_to_date, 3.0, "{today}: only today's 3, not the 58 before it");
+
+            // Nothing spent yet today: a month of zero, not last month's last day.
+            let areas = scanned_areas(&[("acme-portal", yesterday, 8.0)], today);
+            assert_eq!(areas[0].month_to_date, Some(0.0), "{today}");
+            assert_eq!(clients::rollup(&areas, &[acme(None)], today)[0].month_to_date, 0.0, "{today}");
+        }
+    }
+
+    #[test]
+    fn shorter_months_give_the_same_month_to_date_as_before() {
+        // Whenever the 1st is still inside the 30 slots (February, a 30-day month, any
+        // day of a 31-day month before the 31st) the new sum and the old cut agree.
+        for today in [date(2027, 2, 28), date(2028, 2, 29), date(2026, 9, 30), date(2026, 10, 30), date(2026, 10, 15)] {
+            // This month's days cost their day number; the 40 days before cost 1000 a day
+            // each, so a day counted from the wrong month cannot hide in the total.
+            let spend: Vec<(&str, NaiveDate, f64)> = (0..40)
+                .map(|back| days_before(today, back))
+                .map(|day| ("acme-portal", day, if day.month() == today.month() { f64::from(day.day()) } else { 1000.0 }))
+                .collect();
+            let areas = scanned_areas(&spend, today);
+            let new = clients::rollup(&areas, &[acme(None)], today)[0].month_to_date;
+
+            // The old cut is what an area with no figure of its own falls back to.
+            let mut series_only = areas.clone();
+            series_only.iter_mut().for_each(|a| a.month_to_date = None);
+            let old = clients::rollup(&series_only, &[acme(None)], today)[0].month_to_date;
+
+            let month_so_far: f64 = (1..=today.day()).map(f64::from).sum();
+            assert_eq!(new, month_so_far, "{today}: the month so far");
+            assert_eq!(new, old, "{today}: what the series cut gave");
+        }
+    }
+
+    #[test]
+    fn a_budget_crossed_on_the_thirty_first_alerts() {
+        // Acme's budget is $100. The 1st cost 30 and the days up to the 30th another 60, so
+        // the month stood at 90 the evening before. Today costs 15: 105 crosses the budget,
+        // but a month without the 1st reads 75, and the month ended unreported.
+        let rules = [acme(Some(100.0))];
+        let spend = [
+            ("acme-portal", date(2026, 10, 1), 30.0),
+            ("acme-portal", date(2026, 10, 15), 60.0),
+            ("acme-portal", date(2026, 10, 31), 15.0),
+        ];
+        let eve = date(2026, 10, 30);
+        let rows = clients::rollup(&scanned_areas(&spend[..2], eve), &rules, eve);
+        assert_eq!(rows[0].month_to_date, 90.0);
+        assert!(clients::over_budget(&rows, &rules, eve, &mut Vec::new()).is_empty(), "90 of 100 on the 30th");
+
+        let today = date(2026, 10, 31);
+        let rows = clients::rollup(&scanned_areas(&spend, today), &rules, today);
+        let mut fired = Vec::new();
+        assert_eq!(clients::over_budget(&rows, &rules, today, &mut fired), [("Acme".to_string(), 105.0, 100.0)]);
+        assert_eq!(fired, ["Acme|2026-10"]);
+    }
+
+    #[test]
+    fn spend_after_today_is_not_month_to_date() {
+        // A log line dated after today (written while the clock ran ahead) is in no window,
+        // this month's included, whether it lands later in the month or in the next one.
+        let today = date(2026, 10, 15);
+        let areas = scanned_areas(
+            &[
+                ("acme-portal", date(2026, 10, 1), 1.0),
+                ("acme-portal", today, 2.0),
+                ("acme-portal", date(2026, 10, 20), 4.0),
+                ("acme-portal", date(2026, 11, 2), 8.0),
+            ],
+            today,
+        );
+        assert_eq!(areas[0].last30.cost, 3.0, "the days the 30-day window counts");
+        assert_eq!(areas[0].month_to_date, Some(3.0));
+        assert_eq!(clients::rollup(&areas, &[acme(None)], today)[0].month_to_date, 3.0);
     }
 
     #[test]

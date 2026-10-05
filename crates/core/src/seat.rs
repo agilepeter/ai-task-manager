@@ -426,6 +426,7 @@ mod tests {
                     yesterday: w(0.0),
                     last30: w(120.0),
                     daily_cost: vec![],
+                    month_to_date: None,
                 }],
             }],
         }];
