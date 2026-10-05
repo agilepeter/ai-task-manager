@@ -3,6 +3,7 @@ import { maybeFirstRunAudit, openAudit, reloadAudit, rerender as rerenderAudit, 
 import {
   agentWatchState,
   applyRescan,
+  changeLiveRule,
   LIVE_OPEN_PRESETS,
   LIVE_PACE_PRESETS,
   liveSelectValue,
@@ -11,7 +12,6 @@ import {
   openAgents,
   reloadAgents,
   rerender as rerenderAgents,
-  saveAgentLive,
   setupAgents,
 } from "./agents";
 import { rerender as rerenderAbout, setupAbout } from "./about";
@@ -4612,20 +4612,42 @@ function paintAgentLive(): void {
   };
   const hint = view && view.liveHint !== null ? t("settings.agentPaceHint", { pace: money(view.liveHint) }) : null;
   note("agent-pace-hint", paceRow, hint, "settings-note");
-  note("agent-live-error", openRow, view ? null : error || null, "settings-note lg-error");
+  note("agent-live-error", openRow, error || null, "settings-note lg-error");
 }
 
+/// The refusal this panel last wrote into the footer, so it is only ever
+/// cleared while it is still what the footer says.
+let agentLiveStatus = "";
+
+/// Everything the two dropdowns do that touches the DOM. What a change means,
+/// and what the select must show afterwards, is decided in src/agents.ts
+/// (changeLiveRule); this only reads the select, paints, and keeps focus.
 function setupAgentLive(): void {
   onAgentWatchChange(paintAgentLive);
-  const wire = (sel: string, key: "hourlyPaceUsd" | "maxMinutes") => {
+  const wire = (sel: string, figure: "hourlyPaceUsd" | "maxMinutes") => {
     const el = document.querySelector<HTMLSelectElement>(sel);
     el?.addEventListener("change", () => {
-      const change = { [key]: el.value === "" ? null : Number(el.value) };
-      void saveAgentLive(change).then((result) => {
-        // The select goes back to what is saved, and the refusal (already in
-        // the active language) goes where Settings reports a failed save.
-        if (result.outcome === "rejected") document.querySelector("#status")!.textContent = result.error;
-        if (result.outcome !== "saved" && result.outcome !== "stale") paintAgentLive();
+      // The save disables this select, and a disabled control drops focus:
+      // give it back once the answer is painted.
+      const hadFocus = document.activeElement === el;
+      void changeLiveRule(figure, el.value).then((result) => {
+        const status = document.querySelector("#status");
+        if (result.outcome === "rejected" && status) {
+          // Already in the active language; the select goes back to what is saved.
+          agentLiveStatus = result.error;
+          status.textContent = result.error;
+        } else if (result.outcome === "saved" && status && agentLiveStatus && status.textContent === agentLiveStatus) {
+          // The refusal is out of date once a save succeeds. Cleared only if
+          // it is still what the footer says; the next refresh writes its own line.
+          status.textContent = "";
+          agentLiveStatus = "";
+        }
+        if (result.outcome !== "saved") {
+          if (result.show === null) el.selectedIndex = -1;
+          else el.value = result.show;
+        }
+        paintAgentLive();
+        if (hadFocus) focusOrFallback(el);
       });
     });
   };

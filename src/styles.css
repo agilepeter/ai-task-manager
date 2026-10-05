@@ -1613,7 +1613,12 @@ select:focus-visible {
   background: var(--accent);
 }
 
-.rs-use:disabled {
+.rs-use:disabled,
+.ag-budget-row button:disabled,
+.ag-budget-add select:disabled,
+.ag-budget-add input:disabled,
+.ag-budget-add button:disabled,
+.setting-row select:disabled {
   opacity: 0.45;
   cursor: default;
 }

@@ -135,8 +135,7 @@ export const MAX_BUDGET_USD = 1_000_000;
 
 let watchView: AgentWatchView | null = null;
 let watchError = "";
-/** The rejection shown under the add row; cleared by the next success. */
-/** Either which of this view's own messages it is (translated when painted, so
+/** The note shown under the add row, cleared by the next success. Either which of this view's own messages it is (translated when painted, so
  *  a language switch changes it) or a refusal the backend already translated
  *  (shown as it came, and dropped on a language switch: it cannot be redone). */
 let budgetNote: { key: string } | { text: string } | null = null;
@@ -145,9 +144,17 @@ let budgetNote: { key: string } | { text: string } | null = null;
  *  saves are never built from the same view and no change is overwritten. */
 let saving = false;
 let budgetDraft: BudgetDraft = { agent: "", amount: "" };
-/** Counts every get_agent_watch / set_agent_watch call. An answer paints only
- *  when it belongs to the latest call: two saves can overlap, and the older
- *  answer describes a file that has since been overwritten. */
+/** True while an input method is composing text in the amount field. A redraw
+ *  replaces that field and would cut the composition off, so it waits. */
+let composing = false;
+let renderPending = false;
+/** True while keyboard focus is parked on the panel heading because the
+ *  control that had it was disabled by a save in flight. */
+let parkedFocus = false;
+/** Counts every get_agent_watch / set_agent_watch call. A load's answer paints
+ *  only when it belongs to the latest call: one that answers after a later
+ *  load, or after a save, describes a file that has since changed. (Saves
+ *  never overlap and loads are skipped during one, so a save has no check.) */
 let watchSeq = 0;
 function noteText(): string {
   return !budgetNote ? "" : "key" in budgetNote ? t(budgetNote.key) : budgetNote.text;
@@ -202,14 +209,25 @@ export function agentStats(inv: Inventory, running: RunningAgent[], spend: Agent
 /// Why an add was refused before any call: the translated message's key.
 export type BudgetInputProblem = "error.agentWatch.pick" | "error.agentWatch.figure";
 
+/// The agents a new budget may still be set for: every known name that has no
+/// budget yet. The picker offers exactly these, and Add accepts only these.
+export function freeAgentNames(view: AgentWatchView): string[] {
+  const taken = new Set(view.budgets.map((b) => b.agent));
+  return view.known.filter((n) => !taken.has(n));
+}
+
 /// The add row's own check, the same bounds the backend enforces, so a typo
-/// never costs a round trip: an agent must be picked, and the amount must be a
-/// whole number from 1 to 1,000,000. Pure.
-export function checkBudgetInput(agent: string, amountText: string): { ok: true; amount: number } | { ok: false; key: BudgetInputProblem } {
-  if (!agent) return { ok: false, key: "error.agentWatch.pick" };
-  const text = amountText.trim();
-  const amount = text === "" ? NaN : Number(text);
-  if (!Number.isInteger(amount) || amount < 1 || amount > MAX_BUDGET_USD) return { ok: false, key: "error.agentWatch.figure" };
+/// never costs a round trip: the agent must be one the picker offers (`free`),
+/// and the amount must be digits only, a whole number from 1 to 1,000,000. The
+/// text is normalised first so full-width digits typed through an input method
+/// count; `Number()` is deliberately not used, since it also reads "1e3",
+/// "0x10" and "1.0". Pure.
+export function checkBudgetInput(agent: string, amountText: string, free: readonly string[]): { ok: true; amount: number } | { ok: false; key: BudgetInputProblem } {
+  if (!agent || !free.includes(agent)) return { ok: false, key: "error.agentWatch.pick" };
+  const text = amountText.normalize("NFKC").trim();
+  if (!/^\d+$/.test(text)) return { ok: false, key: "error.agentWatch.figure" };
+  const amount = Number(text);
+  if (amount < 1 || amount > MAX_BUDGET_USD) return { ok: false, key: "error.agentWatch.figure" };
   return { ok: true, amount };
 }
 
@@ -243,25 +261,25 @@ export function liveSelectValue(saved: number | null, presets: readonly number[]
   return presets.includes(saved) ? String(saved) : null;
 }
 
-/// Finds one row's Remove button again after a redraw.
-function removeButtonSelector(agent: string): string {
-  return `[data-budget-remove="${agent.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`;
-}
+/// A control a keyboard step can hand focus to. A row is named by its agent,
+/// never by a selector built from that name: a file name may hold any
+/// character, and a selector made of one can throw.
+export type BudgetFocusTarget = { remove: string } | { picker: true };
 
 /// Where keyboard focus goes after a Remove, first match wins: the row that
 /// moved up into its place, else the row before it, else the agent picker.
 /// Nothing for a pointer user, who is left with nothing armed
 /// (src/tabbable.ts). `names` are the rows as they were before the removal.
-export function budgetRemoveFocus(names: string[], removed: string, byKeyboard: boolean): string[] {
+export function budgetRemoveFocus(names: string[], removed: string, byKeyboard: boolean): BudgetFocusTarget[] {
   if (!byKeyboard) return [];
-  const own = (n: string | undefined) => (n === undefined ? [] : [removeButtonSelector(n)]);
+  const own = (n: string | undefined): BudgetFocusTarget[] => (n === undefined ? [] : [{ remove: n }]);
   const at = names.indexOf(removed);
-  if (at < 0) return ["#agent-budget-pick"];
-  return [...own(names[at + 1]), ...(at > 0 ? own(names[at - 1]) : []), "#agent-budget-pick"];
+  if (at < 0) return [{ picker: true }];
+  return [...own(names[at + 1]), ...(at > 0 ? own(names[at - 1]) : []), { picker: true }];
 }
 
 /// The Budgets section: pure, takes the last view (null until the first
-/// answer, or after a failed load), the load error, the add row's draft and
+/// answer), the load error (with a view it is shown beside the controls), the add row's draft and
 /// the rejection to show. With no view there are no controls at all, so no
 /// payload can ever be built from an empty default and written over the
 /// user's budgets.
@@ -274,6 +292,8 @@ export function renderBudgetsSection(view: AgentWatchView | null, error: string,
     const body = error ? T("budgets.loadError", { error }) : t("detail.loading");
     return `${open}${head(null)}<p class="inv-empty">${esc(body)}</p></section>`;
   }
+  // A failed reload keeps the last good view and its controls; the error sits beside them.
+  const reloadError = error ? `<p class="lg-error" role="alert">${esc(T("budgets.loadError", { error }))}</p>` : "";
   const rows = view.budgets
     .map((b) => {
       const over = b.monthToDate >= b.monthlyBudget;
@@ -290,8 +310,7 @@ export function renderBudgetsSection(view: AgentWatchView | null, error: string,
       </div>`;
     })
     .join("");
-  const taken = new Set(view.budgets.map((b) => b.agent));
-  const free = view.known.filter((n) => !taken.has(n));
+  const free = freeAgentNames(view);
   const options = free
     .map((n) => `<option value="${esc(n)}"${n === draft.agent ? " selected" : ""}>${esc(n)}</option>`)
     .join("");
@@ -304,12 +323,12 @@ export function renderBudgetsSection(view: AgentWatchView | null, error: string,
           <select id="agent-budget-pick"${off} aria-label="${esc(T("budgets.pickAria"))}">
             <option value="" disabled${free.includes(draft.agent) ? "" : " selected"}>${esc(T("budgets.pick"))}</option>${options}
           </select>
-          <input id="agent-budget-amount"${off} type="number" min="1" max="${MAX_BUDGET_USD}" step="1" inputmode="numeric" placeholder="${esc(t("detail.client.budgetPh"))}" value="${esc(draft.amount)}" aria-label="${esc(T("budgets.amountAria"))}" />
+          <input id="agent-budget-amount"${off} type="text" inputmode="numeric" autocomplete="off" placeholder="${esc(t("detail.client.budgetPh"))}" value="${esc(draft.amount)}" aria-label="${esc(T("budgets.amountAria"))}" />
           <button class="inv-learn" id="agent-budget-add"${off}>${esc(t("ledger.add"))}</button>
         </div>`;
   const empty = view.budgets.length ? "" : `<p class="inv-empty">${esc(T("budgets.empty"))}</p>`;
   const noteLine = note ? `<p class="lg-error" role="alert">${esc(note)}</p>` : "";
-  return `${open}${head(view.budgets.length)}${rows}${empty}${addRow}${noteLine}</section>`;
+  return `${open}${head(view.budgets.length)}${reloadError}${rows}${empty}${addRow}${noteLine}</section>`;
 }
 
 /// The whole view's content, top to bottom, for a given snapshot of data --
@@ -534,7 +553,38 @@ function render(): void {
     el.innerHTML = `<p class="dt-empty">${esc(t("detail.loading"))}</p>`;
     return;
   }
+  if (composing) {
+    renderPending = true;
+    return;
+  }
+  // The amount field is replaced by this redraw, and a text field's caret
+  // lives in the element: remember it and put it back, or a redraw between
+  // two keystrokes would turn "25" into "52".
+  const active = document.activeElement as HTMLInputElement | null;
+  const caret = active && active.id === "agent-budget-amount" ? { start: active.selectionStart, end: active.selectionEnd } : null;
   el.innerHTML = renderAgentsView(inventory, runningAgents, runningAgentsError, agentSpend, agentSpendError, failingGuardrails, Date.now(), watchView, watchError, budgetDraft, noteText(), saving);
+  if (!caret) return;
+  const field = document.querySelector<HTMLInputElement>("#agent-budget-amount");
+  if (!field || field.disabled) return;
+  field.focus({ preventScroll: true });
+  if (caret.start !== null && caret.end !== null) field.setSelectionRange(caret.start, caret.end);
+}
+
+/// An input method starts or ends composing in the amount field. A redraw
+/// asked for meanwhile is held back and runs when the composition ends.
+export function noteComposition(on: boolean): void {
+  composing = on;
+  if (!on && renderPending) {
+    renderPending = false;
+    render();
+  }
+}
+
+/// Whether a key press in the amount field means Add: Enter, not a held-key
+/// repeat, and not the Enter that confirms an input method's composition
+/// (keyCode 229 is how some engines mark one that isComposing missed).
+export function enterAddsBudget(key: string, repeat: boolean, isComposing: boolean, keyCode: number, targetId: string): boolean {
+  return key === "Enter" && !repeat && !isComposing && keyCode !== 229 && targetId === "agent-budget-amount";
 }
 
 async function loadFailingGuardrails(): Promise<number> {
@@ -567,17 +617,23 @@ export function onAgentWatchChange(listener: () => void): void {
 }
 
 function announceWatch(): void {
+  // A drafted agent that is no longer offered (it has a budget now, or it left
+  // the known names) must not be sent: the picker shows the placeholder for it.
+  if (watchView && !freeAgentNames(watchView).includes(budgetDraft.agent)) budgetDraft = { ...budgetDraft, agent: "" };
   render();
   // forEach, not for-of: the test harness transpiles with no target, which
   // would silently skip every iteration over a Set.
   watchListeners.forEach((listener) => listener());
 }
 
-/// Fetches the saved watch. A failed load leaves NO view behind, so nothing
-/// can build a payload from an empty default; the error is shown instead.
+/// Fetches the saved watch. With no view ever loaded a failure leaves none, so
+/// nothing can build a payload from an empty default and only the error shows.
+/// With a good view already held, a failed reload keeps it (and its controls)
+/// and shows the error beside them: that view is still exactly what the
+/// backend last returned.
 ///
 /// While a save is in flight a load is skipped: that save's answer is the
-/// fresh view, and a load started now would make it count as stale.
+/// fresh view.
 export function loadAgentWatch(): Promise<void> {
   if (saving) return Promise.resolve();
   const seq = ++watchSeq;
@@ -590,7 +646,6 @@ export function loadAgentWatch(): Promise<void> {
     },
     (err) => {
       if (seq !== watchSeq) return;
-      watchView = null;
       watchError = String(err);
       announceWatch();
     },
@@ -601,31 +656,30 @@ export type WatchSave =
   | { outcome: "saved" }
   /** The backend refused; `error` is already translated and is shown as it is. */
   | { outcome: "rejected"; error: string }
-  /** A newer call has been made since, so this answer is dropped unseen. */
-  | { outcome: "stale" }
   /** Nothing has loaded yet: no call is made, because there is nothing to build from. */
   | { outcome: "notLoaded" }
   /** Another save is still in flight; nothing is sent. */
   | { outcome: "busy" };
 
 /// Sends a whole watch built from the last view the backend returned and
-/// paints the view that comes back, if no newer call has been made since.
-/// `beforePaint` runs only on success, just before the repaint.
+/// paints the view that comes back. One save at a time: while it is in flight
+/// the controls that could start another are disabled, and a second call
+/// sends nothing. `beforePaint` runs only on success, just before the repaint.
 export function saveAgentWatch(build: (last: AgentWatchView) => AgentWatchPayload, beforePaint?: () => void): Promise<WatchSave> {
   if (saving) return Promise.resolve({ outcome: "busy" });
   const last = watchView;
   if (!last) return Promise.resolve({ outcome: "notLoaded" });
-  const seq = ++watchSeq;
+  // Built before the flag is set: a builder that throws must not leave every
+  // control disabled for good.
+  const payload = build(last);
+  // A load already in flight describes the file as it was before this save.
+  watchSeq += 1;
   saving = true;
   // Repaint now, so every control that could start a second save is disabled.
   announceWatch();
-  return invoke<AgentWatchView>("set_agent_watch", { watch: build(last) }).then(
+  return invoke<AgentWatchView>("set_agent_watch", { watch: payload }).then(
     (view): WatchSave => {
       saving = false;
-      if (seq !== watchSeq) {
-        announceWatch();
-        return { outcome: "stale" };
-      }
       watchView = view;
       watchError = "";
       budgetNote = null;
@@ -636,7 +690,7 @@ export function saveAgentWatch(build: (last: AgentWatchView) => AgentWatchPayloa
     (err): WatchSave => {
       saving = false;
       announceWatch();
-      return seq !== watchSeq ? { outcome: "stale" } : { outcome: "rejected", error: String(err) };
+      return { outcome: "rejected", error: String(err) };
     },
   );
 }
@@ -647,56 +701,94 @@ export function saveAgentLive(change: Partial<LiveRuleSetting>): Promise<WatchSa
   return saveAgentWatch((last) => livePayload(last, change));
 }
 
+/// A Settings dropdown changed: which figure, and the select's value ("" is
+/// Off). Returns what happened, the backend's refusal if there was one, and the
+/// value the select must show now (what is saved, which after a refusal is the
+/// old figure), so src/main.ts only reads the DOM and paints.
+export async function changeLiveRule(figure: keyof LiveRuleSetting, value: string): Promise<{ outcome: WatchSave["outcome"]; error: string; show: string | null }> {
+  const result = await saveAgentLive({ [figure]: value === "" ? null : Number(value) });
+  const live = watchView?.watch.live;
+  const presets = figure === "hourlyPaceUsd" ? LIVE_PACE_PRESETS : LIVE_OPEN_PRESETS;
+  return { outcome: result.outcome, error: result.outcome === "rejected" ? result.error : "", show: live ? liveSelectValue(live[figure], presets) : null };
+}
+
 /// Remembers what the add row holds, so a redraw (a background refresh, a
 /// locale switch) does not lose a half-typed budget.
 export function noteBudgetDraft(field: keyof BudgetDraft, value: string): void {
   budgetDraft = { ...budgetDraft, [field]: value };
 }
 
+function inBudgets(el: Element | null): boolean {
+  return el?.closest?.('[data-section="agent-budgets"]') != null;
+}
+
+/// A save in flight disables the control a keyboard user pressed, and a
+/// disabled control cannot keep focus; in the macOS webview focus that falls
+/// to nothing can leave Tab dead. So focus waits on the panel heading, a place
+/// that is always focusable, until the answer is painted.
+function parkFocus(): void {
+  const heading = document.querySelector<HTMLElement>("#agents-heading");
+  if (!heading) return;
+  heading.focus();
+  parkedFocus = true;
+}
+
 /// After a keyboard step the redraw has destroyed the control that had focus.
-/// Focus moves only when it fell to nothing or is still inside this section:
-/// a user who has since gone elsewhere keeps their place.
-function focusFirstMatch(selectors: string[]): void {
+/// Focus moves only when it fell to nothing, is parked on the heading, or is
+/// still inside this section: a user who has since gone elsewhere keeps their
+/// place.
+function focusFirstMatch(targets: BudgetFocusTarget[]): void {
   const active = document.activeElement as HTMLElement | null;
-  const lost = !active || active === document.body || active.closest?.('[data-section="agent-budgets"]') != null;
+  const lost = !active || active === document.body || inBudgets(active) || (parkedFocus && active.id === "agents-heading");
+  parkedFocus = false;
   if (!lost) return;
-  const found = selectors.map((s) => document.querySelector<HTMLElement>(s)).find((el) => el);
+  const find = (target: BudgetFocusTarget): HTMLElement | null =>
+    "picker" in target
+      ? document.querySelector<HTMLElement>("#agent-budget-pick")
+      : Array.from(document.querySelectorAll<HTMLElement>("[data-budget-remove]")).find((b) => b.dataset.budgetRemove === target.remove) ?? null;
+  const found = targets.map(find).find((el) => el);
   if (found) focusOrFallback(found);
 }
 
 /// The Add button, or Enter in the amount field. `byKeyboard` is false for a
 /// pointer click, which leaves nothing focused.
 export async function addBudget(byKeyboard: boolean): Promise<void> {
-  const checked = checkBudgetInput(budgetDraft.agent, budgetDraft.amount);
+  const checked = checkBudgetInput(budgetDraft.agent, budgetDraft.amount, watchView ? freeAgentNames(watchView) : []);
   if (!checked.ok) {
     budgetNote = { key: checked.key };
     render();
-    if (byKeyboard) focusFirstMatch(["#agent-budget-pick"]);
+    if (byKeyboard) focusFirstMatch([{ picker: true }]);
     return;
   }
   const agent = budgetDraft.agent;
-  const result = await saveAgentWatch(
+  const hadFocus = byKeyboard && inBudgets(document.activeElement);
+  const pending = saveAgentWatch(
     (last) => budgetPayload(last, { add: { agent, monthlyBudget: checked.amount } }),
     () => { budgetDraft = { agent: "", amount: "" }; },
   );
+  if (hadFocus && saving) parkFocus();
+  const result = await pending;
   if (result.outcome === "rejected") {
     budgetNote = { text: result.error };
     render();
   }
-  if (byKeyboard && (result.outcome === "saved" || result.outcome === "rejected")) focusFirstMatch(["#agent-budget-pick"]);
+  if (byKeyboard && (result.outcome === "saved" || result.outcome === "rejected")) focusFirstMatch([{ picker: true }]);
 }
 
 /// A row's Remove button.
 export async function removeBudget(agent: string, byKeyboard: boolean): Promise<void> {
   const names = (watchView?.budgets ?? []).map((b) => b.agent);
-  const result = await saveAgentWatch((last) => budgetPayload(last, { remove: agent }));
+  const hadFocus = byKeyboard && inBudgets(document.activeElement);
+  const pending = saveAgentWatch((last) => budgetPayload(last, { remove: agent }));
+  if (hadFocus && saving) parkFocus();
+  const result = await pending;
   if (result.outcome === "rejected") {
     budgetNote = { text: result.error };
     render();
   }
   if (!byKeyboard) return;
   if (result.outcome === "saved") focusFirstMatch(budgetRemoveFocus(names, agent, true));
-  if (result.outcome === "rejected") focusFirstMatch([removeButtonSelector(agent)]);
+  if (result.outcome === "rejected") focusFirstMatch([{ remove: agent }]);
 }
 
 /// The four invoke() calls this view's data comes from, fired together --
@@ -770,6 +862,8 @@ function close(): void {
 /// #agents-open-btn on its own.
 export function openAgents(opener_: HTMLElement | null = null): void {
   opener = opener_;
+  composing = false;
+  renderPending = false;
   document.body.classList.add("agents-open");
   syncPanels();
   loadError = "";
@@ -888,10 +982,15 @@ export function setupAgents(h: AgentsHost): void {
   body?.addEventListener("change", noteDraft);
   body?.addEventListener("keydown", (e) => {
     const ke = e as KeyboardEvent;
-    if (ke.key !== "Enter" || ke.repeat || (ke.target as HTMLElement).id !== "agent-budget-amount") return;
+    if (!enterAddsBudget(ke.key, ke.repeat, ke.isComposing, ke.keyCode, (ke.target as HTMLElement).id)) return;
     ke.preventDefault();
     void addBudget(true);
   });
+  const composition = (on: boolean) => (e: Event) => {
+    if ((e.target as HTMLElement).id === "agent-budget-amount") noteComposition(on);
+  };
+  body?.addEventListener("compositionstart", composition(true));
+  body?.addEventListener("compositionend", composition(false));
   document.addEventListener(
     "keydown",
     (e) => {
