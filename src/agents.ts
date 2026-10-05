@@ -545,11 +545,16 @@ function render(): void {
   if (!isOpen()) return;
   const el = document.querySelector<HTMLElement>("#agents-body");
   if (!el) return;
+  // These two replace the whole body and destroy the amount field, and a
+  // destroyed field usually delivers no compositionend: the gate must not be
+  // left shut for every redraw that follows.
   if (loadError) {
+    endCompositionGate();
     el.innerHTML = renderLoadError(loadError);
     return;
   }
   if (!inventory) {
+    endCompositionGate();
     el.innerHTML = `<p class="dt-empty">${esc(t("detail.loading"))}</p>`;
     return;
   }
@@ -570,6 +575,14 @@ function render(): void {
   if (caret.start !== null && caret.end !== null) field.setSelectionRange(caret.start, caret.end);
 }
 
+/// Opens the redraw gate without redrawing: used wherever the field is gone or
+/// has lost focus, so a composition that will never report its end cannot hold
+/// back every later redraw (a save's result, a language switch).
+function endCompositionGate(): void {
+  composing = false;
+  renderPending = false;
+}
+
 /// An input method starts or ends composing in the amount field. A redraw
 /// asked for meanwhile is held back and runs when the composition ends.
 export function noteComposition(on: boolean): void {
@@ -578,6 +591,16 @@ export function noteComposition(on: boolean): void {
     renderPending = false;
     render();
   }
+}
+
+/// The composition ended, or the field lost focus (which ends one too): the
+/// field's own value is what was committed. Some engines deliver the final
+/// text in an input event after compositionend, and that event lands on the
+/// field this redraw is about to replace, so the value is taken now, before
+/// the gate opens.
+export function finishComposition(fieldValue: string): void {
+  noteBudgetDraft("amount", fieldValue);
+  noteComposition(false);
 }
 
 /// Whether a key press in the amount field means Add: Enter, not a held-key
@@ -646,6 +669,10 @@ export function loadAgentWatch(): Promise<void> {
     },
     (err) => {
       if (seq !== watchSeq) return;
+      // The last good view stays, and a later save writes the whole watch from
+      // it. That is safe: this app is the only writer of the file, and both
+      // places that edit it (the budgets and the Settings dropdowns) share
+      // this one copy, so the kept view is never behind a change either made.
       watchError = String(err);
       announceWatch();
     },
@@ -701,13 +728,28 @@ export function saveAgentLive(change: Partial<LiveRuleSetting>): Promise<WatchSa
   return saveAgentWatch((last) => livePayload(last, change));
 }
 
+/// Whether a Settings dropdown takes focus back after its save: only if it had
+/// focus before, Settings is still open, and focus is now nowhere, on the body,
+/// or still on that select. Focus the user has moved elsewhere is left alone.
+/// The same "lost or ours" rule focusFirstMatch follows in this view. Pure.
+export function selectTakesFocusBack(hadFocus: boolean, settingsOpen: boolean, focusIsNowhere: boolean, focusIsOnSelect: boolean): boolean {
+  return hadFocus && settingsOpen && (focusIsNowhere || focusIsOnSelect);
+}
+
 /// A Settings dropdown changed: which figure, and the select's value ("" is
 /// Off). Returns what happened, the backend's refusal if there was one, and the
 /// value the select must show now (what is saved, which after a refusal is the
 /// old figure), so src/main.ts only reads the DOM and paints.
 export async function changeLiveRule(figure: keyof LiveRuleSetting, value: string): Promise<{ outcome: WatchSave["outcome"]; error: string; show: string | null }> {
-  const result = await saveAgentLive({ [figure]: value === "" ? null : Number(value) });
-  const live = watchView?.watch.live;
+  // Never rejects: a payload builder that throws must still put the select
+  // back to what is saved, not leave it on a value that was never saved.
+  let result: WatchSave;
+  try {
+    result = await saveAgentLive({ [figure]: value === "" ? null : Number(value) });
+  } catch (err) {
+    result = { outcome: "rejected", error: String(err) };
+  }
+  const live = watchView?.watch?.live;
   const presets = figure === "hourlyPaceUsd" ? LIVE_PACE_PRESETS : LIVE_OPEN_PRESETS;
   return { outcome: result.outcome, error: result.outcome === "rejected" ? result.error : "", show: live ? liveSelectValue(live[figure], presets) : null };
 }
@@ -833,6 +875,7 @@ function loadData(): void {
 }
 
 function close(): void {
+  endCompositionGate();
   document.body.classList.remove("agents-open");
   // src/panels.ts is the sole writer of `inert` on panels and the
   // background now -- see that module's own header for why this is called
@@ -986,11 +1029,11 @@ export function setupAgents(h: AgentsHost): void {
     ke.preventDefault();
     void addBudget(true);
   });
-  const composition = (on: boolean) => (e: Event) => {
-    if ((e.target as HTMLElement).id === "agent-budget-amount") noteComposition(on);
-  };
-  body?.addEventListener("compositionstart", composition(true));
-  body?.addEventListener("compositionend", composition(false));
+  const isAmount = (e: Event) => (e.target as HTMLElement).id === "agent-budget-amount";
+  body?.addEventListener("compositionstart", (e) => { if (isAmount(e)) noteComposition(true); });
+  body?.addEventListener("compositionend", (e) => { if (isAmount(e)) finishComposition((e.target as HTMLInputElement).value); });
+  // Leaving the field ends a composition whether or not an end was reported.
+  body?.addEventListener("focusout", (e) => { if (isAmount(e)) finishComposition((e.target as HTMLInputElement).value); });
   document.addEventListener(
     "keydown",
     (e) => {

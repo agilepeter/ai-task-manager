@@ -12,6 +12,7 @@ import {
   openAgents,
   reloadAgents,
   rerender as rerenderAgents,
+  selectTakesFocusBack,
   setupAgents,
 } from "./agents";
 import { rerender as rerenderAbout, setupAbout } from "./about";
@@ -4647,7 +4648,8 @@ function setupAgentLive(): void {
           else el.value = result.show;
         }
         paintAgentLive();
-        if (hadFocus) focusOrFallback(el);
+        const active = document.activeElement;
+        if (selectTakesFocusBack(hadFocus, document.body.classList.contains("settings-open"), !active || active === document.body, active === el)) focusOrFallback(el);
       });
     });
   };

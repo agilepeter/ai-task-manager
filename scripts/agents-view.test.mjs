@@ -1554,3 +1554,88 @@ test("a payload builder that throws does not leave the controls disabled", async
     delete globalThis.invoke;
   }
 });
+
+test("a composition cannot hold redraws back for good", async () => {
+  const { openAgents, applyRescan, loadAgentWatch, noteComposition, setActiveLocale } = await freshAgentsModule();
+  setActiveLocale("en");
+  const doc = makeFakeDocument();
+  globalThis.document = doc;
+  const state = { view: watchView() };
+  globalThis.invoke = panelInvoke(state);
+  const body = () => doc.elements.get("#agents-body").innerHTML;
+  const rescan = (over) => ({ inventory: inventory(), loadError: "", runningAgents: [], runningAgentsError: "", agentSpend: [], agentSpendError: "", ...over });
+  try {
+    openAgents();
+    await flushMicrotasks();
+
+    // A composition is under way when a rescan arrives whose load failed: the
+    // body is replaced by the error and the amount field is destroyed, so no
+    // compositionend will ever come.
+    noteComposition(true);
+    applyRescan(rescan({ inventory: null, loadError: "scan failed" }));
+    assert.ok(body().includes("scan failed"));
+
+    // The next redraws must still paint.
+    applyRescan(rescan({ inventory: inventory({ agents: [definition({ name: "after-composition" })] }) }));
+    assert.ok(body().includes("after-composition"), "a destroyed field must not leave redraws held back");
+    state.view = watchView({ rows: [["saved-after", 0, 5]], known: ["saved-after"] });
+    await loadAgentWatch();
+    assert.ok(body().includes("saved-after"), "a save's result must paint");
+  } finally {
+    doc.body.classList.remove("agents-open");
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
+
+test("the text a composition commits reaches the draft", async () => {
+  const { openAgents, loadAgentWatch, noteComposition, finishComposition, setActiveLocale } = await freshAgentsModule();
+  setActiveLocale("en");
+  const doc = makeFakeDocument();
+  globalThis.document = doc;
+  const state = { view: watchView() };
+  globalThis.invoke = panelInvoke(state);
+  try {
+    openAgents();
+    await flushMicrotasks();
+    const body = () => doc.elements.get("#agents-body").innerHTML;
+
+    noteComposition(true);
+    state.view = watchView({ rows: [["x", 0, 5]], known: ["x", "y"] });
+    await loadAgentWatch(); // held back
+    finishComposition("２５"); // the field's value at compositionend
+    assert.match(body(), /id="agent-budget-amount"[^>]*value="２５"/, "the committed text must be in the redrawn field");
+  } finally {
+    doc.body.classList.remove("agents-open");
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
+
+test("a settings dropdown takes focus back only when focus was lost", async () => {
+  const { selectTakesFocusBack } = await freshAgentsModule();
+  assert.equal(selectTakesFocusBack(true, true, true, false), true, "focus fell to nothing");
+  assert.equal(selectTakesFocusBack(true, true, false, true), true, "focus is still on the select");
+  assert.equal(selectTakesFocusBack(true, true, false, false), false, "the user moved elsewhere: leave it");
+  assert.equal(selectTakesFocusBack(true, false, true, false), false, "Settings was closed meanwhile");
+  assert.equal(selectTakesFocusBack(false, true, true, false), false, "it never had focus");
+});
+
+test("a failed changeLiveRule puts the dropdown back", async () => {
+  const { loadAgentWatch, changeLiveRule, agentWatchState, setActiveLocale } = await freshAgentsModule();
+  setActiveLocale("en");
+  globalThis.document = makeFakeDocument();
+  // A view whose watch is unusable makes the payload builder throw.
+  const broken = { ...watchView({ live: { hourlyPaceUsd: 25, maxMinutes: null } }), watch: null };
+  globalThis.invoke = async () => broken;
+  try {
+    await loadAgentWatch();
+    const result = await changeLiveRule("hourlyPaceUsd", "50");
+    assert.equal(result.outcome, "rejected", "a throw must come back as a result, not as an unhandled rejection");
+    assert.equal(result.show, null, "the select is put back to what is saved (nothing usable here, so blank)");
+    assert.equal(agentWatchState().saving, false);
+  } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
