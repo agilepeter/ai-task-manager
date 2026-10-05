@@ -10,9 +10,9 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use crate::changes::{self, Snapshot};
 use crate::i18n::Msg;
 use crate::inventory::{McpServer, Opportunity};
-use crate::spend::OTHER_MCP_SERVER;
 
 /// Below this many calls in the 30-day window, a server's numbers are too
 /// thin to mean anything -- a handful of one-off calls says nothing about
@@ -22,9 +22,34 @@ pub const MIN_CALLS: u64 = 20;
 /// look.
 pub const HEAVY_RESULT_BYTES: u64 = 2 * 1024 * 1024;
 
-/// Days of Claude Code logs, and of unbroken configuration, a "no calls in 30
-/// days" verdict needs. The strings say 30 days in words.
+/// The window a "no tool calls" verdict is about: the span the call counts
+/// cover (`spend::TREND_DAYS`, which `mcp_usage_for_window` sums), the span a
+/// server must have been configured for, and the number the finding's strings
+/// say in words. The assertion below keeps the first from drifting away from
+/// this one; `the_unused_strings_say_the_window_the_rule_uses` keeps the
+/// strings from drifting away from it.
 pub const UNUSED_NEEDS_DAYS: i64 = 30;
+const _: () = assert!(UNUSED_NEEDS_DAYS == crate::spend::TREND_DAYS as i64);
+
+/// How far back the logs must reach before zero calls means anything. Not the
+/// whole window: Claude Code deletes logs older than its `cleanupPeriodDays`
+/// (30 by default) and this app scans only recently changed files, so a log
+/// line from exactly 30 days ago is there only if something happened to be
+/// written on that very day, and the finding would come and go with the day
+/// of the week. Three weeks shows that old logs are really being kept; the
+/// retention setting says whether they are kept for the whole window.
+pub const UNUSED_NEEDS_LOG_DAYS: i64 = 21;
+
+/// The client whose servers have call counts at all. The one place its name is
+/// written for this module's logic.
+const CLAUDE_CODE: &str = "Claude Code";
+
+/// Where calls from a file that names too many distinct servers are folded
+/// (see `spend::mcp_key_for`): one shared bucket instead of one key per
+/// server. A configured server's key can never be this, since a logged key
+/// holds only `[A-Za-z0-9_-]`. The value is stored in users' scan caches, so
+/// it must not change.
+pub const OTHER_MCP_SERVER: &str = "(other)";
 
 const MCP_LEARN: &str = "https://staas.fund/mcp/";
 
@@ -55,14 +80,15 @@ const MAX_SERVER_KEY: usize = 64;
 /// `__` runs the tool name itself carries). `"mcp__my_server__get__thing"`
 /// is server `"my_server"`, tool `"get__thing"`; `"mcp__a__b__c"` is server
 /// `"a"`. The one case this cannot get right: a configured server whose own
-/// `normalized(name)` itself contains `__` reads identically to a shorter
-/// server name followed by a tool part, and nothing in the tool name says
-/// which one Claude Code meant -- `attach` below refuses a figure to any
-/// such server rather than guess. `None` for anything not shaped like an
-/// MCP tool call at all, for a name with no tool part, and for a server
-/// part that is empty, longer than `MAX_SERVER_KEY`, or holds a character
-/// `normalized` would never have produced -- a hostile or corrupted log
-/// line must not mint a server name this app goes on to display or persist.
+/// `normalized(name)` itself contains `__`, or ends in `_`, reads identically
+/// to a shorter server name followed by a tool part, and nothing in the tool
+/// name says which one Claude Code meant -- `figure_keys` below refuses a
+/// figure to any such server rather than guess. `None` for anything not
+/// shaped like an MCP tool call at all, for a name with no tool part, and for
+/// a server part that is empty, longer than `MAX_SERVER_KEY`, or holds a
+/// character `normalized` would never have produced -- a hostile or
+/// corrupted log line must not mint a server name this app goes on to
+/// display or persist.
 pub fn server_of(tool_name: &str) -> Option<String> {
     let rest = tool_name.strip_prefix("mcp__")?;
     let (server, tool) = rest.split_once("__")?;
@@ -108,29 +134,64 @@ pub fn normalized(config_name: &str) -> String {
     collapsed.trim_matches('_').to_string()
 }
 
-/// For each configured server, in order, the key its calls would sit under in
-/// the logs, or `None` when the logs cannot hold a figure for it. This is the
-/// one place those refusals are stated, for `attach` and `unused` alike.
-/// Only Claude Code servers have figures. Two configured Claude Code servers
-/// that normalize to the same string cannot be told apart in the logs, so
-/// neither gets one: showing either one's number on both would be a guess
-/// dressed up as a fact. Same for a server whose own normalized name contains
-/// `__`: `server_of` splits a tool name at the FIRST `__` after the `mcp__`
-/// prefix, so such a name reads identically to a shorter server name plus a
-/// tool part, and nothing says which one a log line meant.
+/// `normalized` with each character outside the Basic Multilingual Plane
+/// (an emoji, say) replaced twice, once per UTF-16 unit it takes, the way a
+/// JavaScript regex without the `u` flag walks a string. `normalized` replaces
+/// such a character once. Which of the two Claude Code does is not known here,
+/// so a name where they differ (`my`, one such character, `server` is
+/// `my_server` or `my__server`) is read both ways, and both are kept.
+fn normalized_per_utf16_unit(config_name: &str) -> String {
+    let by_unit: String = config_name.chars().flat_map(|c| std::iter::repeat_n(c, c.len_utf16())).collect();
+    normalized(&by_unit)
+}
+
+/// A tool name's tool part for the probe below: any non-empty one.
+const PROBE_TOOL: &str = "t";
+
+/// Every key the calls of a server called `config_name` could be logged
+/// under: for each way Claude Code might spell the name, what `server_of`
+/// reads back from the tool name it would build (`mcp__<spelling>__<tool>`),
+/// `None` when `server_of` rejects it and the call is never counted at all. A
+/// spelling that ends in `_`, holds `__`, is empty or is too long reads back
+/// as something other than itself, or as nothing.
+fn logged_keys(config_name: &str) -> BTreeSet<Option<String>> {
+    [normalized(config_name), normalized_per_utf16_unit(config_name)]
+        .iter()
+        .map(|spelling| server_of(&format!("mcp__{spelling}__{PROBE_TOOL}")))
+        .collect()
+}
+
+/// For each configured server, in order, the key its calls sit under in the
+/// logs, or `None` when that key is not known to be its alone. This is the one
+/// place those refusals are stated, for `attach` and `unused` alike.
+///
+/// A key is known only when the calls are logged under exactly the name the
+/// config gives it: every spelling Claude Code might use (`logged_keys`) reads
+/// back as `normalized(name)`, none is rejected, and no other configured
+/// Claude Code server's calls could be logged under it too. So `My Server!`
+/// (its calls land under `My_Server`, not `My_Server_`), `a__b` (under `a`), a
+/// name that is empty or longer than `MAX_SERVER_KEY`, and a name whose
+/// spelling depends on how a character outside the Basic Multilingual Plane
+/// is replaced all have no figure: reading the config key would show no calls
+/// for a server that was called, or credit it with another server's calls.
+/// `foo` and `foo!` have none either, since `foo!`'s calls are logged under
+/// `foo`. A number there would be a guess dressed up as a fact. Only Claude
+/// Code servers have figures.
 fn figure_keys(servers: &[McpServer]) -> Vec<Option<String>> {
-    let mut counts: HashMap<String, usize> = HashMap::new();
-    for s in servers.iter().filter(|s| s.client == "Claude Code") {
-        *counts.entry(normalized(&s.name)).or_insert(0) += 1;
+    let candidates: Vec<Option<BTreeSet<Option<String>>>> =
+        servers.iter().map(|s| (s.client == CLAUDE_CODE).then(|| logged_keys(&s.name))).collect();
+    let mut claims: HashMap<&str, usize> = HashMap::new();
+    for key in candidates.iter().flatten().flatten().flatten() {
+        *claims.entry(key.as_str()).or_insert(0) += 1;
     }
     servers
         .iter()
-        .map(|s| {
-            if s.client != "Claude Code" {
-                return None;
-            }
-            let key = normalized(&s.name);
-            (!key.contains("__") && counts.get(&key).copied() == Some(1)).then_some(key)
+        .zip(&candidates)
+        .map(|(s, logged)| {
+            let logged = logged.as_ref()?;
+            let own = normalized(&s.name);
+            let read_back_as_itself = logged.len() == 1 && logged.contains(&Some(own.clone()));
+            (read_back_as_itself && claims.get(own.as_str()) == Some(&1)).then_some(own)
         })
         .collect()
 }
@@ -150,11 +211,13 @@ pub fn attach(servers: &mut [McpServer], by_server: &HashMap<String, McpUsage>) 
     }
 }
 
-/// Names of the Claude Code servers that can be said to have had no calls in
-/// the last 30 days, sorted. It says so only when it is known; any doubt
-/// returns nothing:
-/// - the logs reach back `UNUSED_NEEDS_DAYS` days (`days_covered`), or zero
-///   calls may just mean the logs are young;
+/// Names of the Claude Code servers that can be said to have had no tool
+/// calls in the last `UNUSED_NEEDS_DAYS`, sorted. It says so only when it is
+/// known; any doubt returns nothing:
+/// - the logs reach back `UNUSED_NEEDS_LOG_DAYS` (`days_covered`), which shows
+///   that old logs are really being kept;
+/// - Claude Code's own retention keeps logs for the whole window
+///   (`retention_covers_window`), or the oldest calls may have been deleted;
 /// - the server was configured the whole window (`configured_throughout`,
 ///   from the setup history; `None` when no snapshot is old enough), or zero
 ///   calls also describes a server added yesterday;
@@ -163,14 +226,18 @@ pub fn attach(servers: &mut [McpServer], by_server: &HashMap<String, McpUsage>) 
 /// - some configured Claude Code server with a figure was called, or zero may
 ///   only mean the logs are not being read;
 /// - the server can have a figure at all (`figure_keys`).
-pub fn unused(
+pub(crate) fn unused(
     servers: &[McpServer],
     by_server: &HashMap<String, McpUsage>,
     days_covered: i64,
+    retention_covers_window: bool,
     configured_throughout: Option<&HashSet<String>>,
 ) -> Vec<String> {
     let Some(throughout) = configured_throughout else { return Vec::new() };
-    if days_covered < UNUSED_NEEDS_DAYS || by_server.get(OTHER_MCP_SERVER).is_some_and(|u| u.calls > 0) {
+    if days_covered < UNUSED_NEEDS_LOG_DAYS
+        || !retention_covers_window
+        || by_server.get(OTHER_MCP_SERVER).is_some_and(|u| u.calls > 0)
+    {
         return Vec::new();
     }
     let keys = figure_keys(servers);
@@ -185,6 +252,23 @@ pub fn unused(
         .map(|(s, _)| s.name.clone())
         .collect();
     names.into_iter().collect()
+}
+
+/// `unused` from the setup's own history: the servers `history` (the dated
+/// snapshots of the setup's shape, as `changes::load_from` reads them) holds
+/// for the whole `UNUSED_NEEDS_DAYS` ending `today` (`YYYY-MM-DD`, local).
+/// The one function that states the whole rule, so the caller has nothing to
+/// get wrong: it only supplies what was measured.
+pub fn unused_from_history(
+    servers: &[McpServer],
+    by_server: &HashMap<String, McpUsage>,
+    days_covered: i64,
+    retention_covers_window: bool,
+    history: &[Snapshot],
+    today: &str,
+) -> Vec<String> {
+    let throughout = changes::configured_throughout(history, today, UNUSED_NEEDS_DAYS, CLAUDE_CODE);
+    unused(servers, by_server, days_covered, retention_covers_window, throughout.as_ref())
 }
 
 /// MB under 1 GB, then GB -- every heavy server is already past
@@ -420,11 +504,30 @@ mod tests {
         names.iter().map(|n| n.to_string()).collect()
     }
 
+    /// The tool name Claude Code builds for a server's tool, under each spelling
+    /// of the server's name it might use.
+    fn tool_names(config_name: &str) -> Vec<String> {
+        let mut spellings = vec![normalized(config_name), normalized_per_utf16_unit(config_name)];
+        spellings.dedup();
+        spellings.iter().map(|spelling| format!("mcp__{spelling}__search")).collect()
+    }
+
+    /// Every string of up to `max_len` of the given symbols, the empty one included.
+    fn all_names(symbols: &[&str], max_len: usize) -> Vec<String> {
+        let mut all = vec![String::new()];
+        let mut level = all.clone();
+        for _ in 0..max_len {
+            level = level.iter().flat_map(|n| symbols.iter().map(move |sym| format!("{n}{sym}"))).collect();
+            all.extend(level.iter().cloned());
+        }
+        all
+    }
+
     #[test]
     fn a_called_server_is_not_unused() {
         let servers = cc(&["busy", "idle"]);
         let all = throughout(&["busy", "idle"]);
-        let got = unused(&servers, &usage(&[("busy", 3)]), DAYS, Some(&all));
+        let got = unused(&servers, &usage(&[("busy", 3)]), DAYS, true, Some(&all));
         assert_eq!(got, vec!["idle".to_string()], "only the server with no calls is named");
     }
 
@@ -432,18 +535,95 @@ mod tests {
     fn a_server_without_a_figure_is_never_called_unused() {
         let all = throughout(&["busy", "acme search", "acme!search", "my__server"]);
         let servers = cc(&["busy", "acme search", "acme!search", "my__server"]);
-        let got = unused(&servers, &usage(&[("busy", 3)]), DAYS, Some(&all));
+        let got = unused(&servers, &usage(&[("busy", 3)]), DAYS, true, Some(&all));
         assert!(got.is_empty(), "two servers with one normalized name, and a name holding `__`, have no figure: {got:?}");
     }
 
     #[test]
-    fn unused_needs_thirty_days_of_logs() {
+    fn a_figure_key_is_always_where_the_calls_land() {
+        let long = "x".repeat(70);
+        // (config name, the key its calls are logged under, when that is its own).
+        let table: [(&str, Option<&str>); 12] = [
+            ("busy", Some("busy")),
+            ("My Server!", None),         // normalizes to `My_Server_`; the calls land under `My_Server`
+            ("x.", None),                 // `x_`: the calls land under `x`
+            ("a__b", None),               // the calls land under `a`
+            ("_x", Some("_x")),           // a leading underscore reads back whole
+            ("@scope/pkg", Some("_scope_pkg")),
+            ("a.b", Some("a_b")),
+            ("claude.ai Google Drive", Some("claude_ai_Google_Drive")),
+            (long.as_str(), None),        // longer than a key can be: the calls are never counted
+            ("my\u{1F600}server", None),   // `my_server` or `my__server`, depending on the replacement
+            ("\u{1F600}rest", None),       // `_rest`, or `__rest`, which `server_of` rejects: its calls may never be counted
+            ("", None),                   // nothing to read back
+        ];
+        for (name, expected) in table {
+            assert_eq!(figure_keys(&cc(&[name]))[0].as_deref(), expected, "{name:?}");
+        }
+        // Two servers whose calls land under one key have no figure each; one of them is not even the key's own.
+        assert_eq!(figure_keys(&cc(&["foo", "foo!"])), [None, None]);
+        assert_eq!(figure_keys(&cc(&["foo", "bar"])), [Some("foo".to_string()), Some("bar".to_string())]);
+        // Another client's server of the same name does not make a Claude Code one ambiguous.
+        assert_eq!(figure_keys(&[server("foo", "Claude Code"), server("foo!", "Cursor")])[0].as_deref(), Some("foo"));
+
+        // Whatever the names, a figure key is where that server's own calls land, under either spelling of
+        // the name, and where no other configured server's calls land.
+        let landing = |name: &str| tool_names(name).iter().map(|tool| server_of(tool)).collect::<Vec<_>>();
+        let mut singles = all_names(&["a", "_", ".", "-", " ", "\u{1F600}"], 4);
+        singles.extend(all_names(&["a", "_", ".", "\u{1F600}"], 3).iter().map(|n| format!("claude.ai {n}")));
+        for name in &singles {
+            if let Some(key) = &figure_keys(&cc(&[name]))[0] {
+                let lands = landing(name);
+                assert!(lands.iter().all(|l| l.as_deref() == Some(key.as_str())), "{name:?} is read as {key}, but lands under {lands:?}");
+            }
+        }
+        let pairs = all_names(&["a", "_", ".", "\u{1F600}"], 3);
+        for first in &pairs {
+            for second in &pairs {
+                let keys = figure_keys(&cc(&[first, second]));
+                for (own, other, key) in [(first, second, &keys[0]), (second, first, &keys[1])] {
+                    let Some(key) = key else { continue };
+                    let lands = landing(other);
+                    assert!(lands.iter().all(|l| l.as_deref() != Some(key.as_str())), "{own:?} is read as {key}, but {other:?} lands there too");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unused_needs_three_weeks_of_logs() {
         let servers = cc(&["busy", "idle"]);
         let all = throughout(&["busy", "idle"]);
         let by = usage(&[("busy", 3)]);
-        assert!(unused(&servers, &by, DAYS - 1, Some(&all)).is_empty(), "29 days of logs is not enough");
-        assert_eq!(unused(&servers, &by, DAYS, Some(&all)), vec!["idle".to_string()]);
-        assert!(unused(&servers, &by, 0, Some(&all)).is_empty());
+        assert!(unused(&servers, &by, 20, true, Some(&all)).is_empty(), "20 days of logs is not enough");
+        assert_eq!(unused(&servers, &by, 21, true, Some(&all)), vec!["idle".to_string()], "21 days is three weeks");
+        assert!(unused(&servers, &by, 0, true, Some(&all)).is_empty());
+    }
+
+    #[test]
+    fn a_short_log_retention_setting_means_no_verdict() {
+        let servers = cc(&["busy", "idle"]);
+        let all = throughout(&["busy", "idle"]);
+        let by = usage(&[("busy", 3)]);
+        let verdict = |settings: &str| {
+            let retention = crate::inventory::log_retention_from(&[settings]);
+            unused(&servers, &by, DAYS, retention.covers(UNUSED_NEEDS_DAYS), Some(&all))
+        };
+        let idle = vec!["idle".to_string()];
+        // No key means Claude Code's own default, 30 days, which covers the window.
+        assert_eq!(verdict("{}"), idle);
+        assert_eq!(verdict(r#"{"cleanupPeriodDays": 30}"#), idle);
+        assert_eq!(verdict(r#"{"cleanupPeriodDays": 90}"#), idle);
+        for days in ["29", "7", "0", "-1"] {
+            assert!(verdict(&format!(r#"{{"cleanupPeriodDays": {days}}}"#)).is_empty(), "{days} days keeps logs for less than the window");
+        }
+        // A value that is not a whole number of days is not known, whatever it looks like.
+        for odd in [r#""90""#, "29.5", "30.5", "null", "true", "[90]"] {
+            assert!(verdict(&format!(r#"{{"cleanupPeriodDays": {odd}}}"#)).is_empty(), "{odd} is not a whole number of days");
+        }
+        // A settings file that cannot be read as an object says nothing about the key.
+        assert!(verdict("not json").is_empty());
+        assert!(verdict("[]").is_empty());
     }
 
     #[test]
@@ -451,19 +631,19 @@ mod tests {
         let servers = cc(&["busy", "idle"]);
         let by = usage(&[("busy", 3)]);
         // Added inside the window, or removed and re-added inside it: not in the set the history returns.
-        assert!(unused(&servers, &by, DAYS, Some(&throughout(&["busy"]))).is_empty());
-        assert!(unused(&servers, &by, DAYS, Some(&throughout(&[]))).is_empty());
+        assert!(unused(&servers, &by, DAYS, true, Some(&throughout(&["busy"]))).is_empty());
+        assert!(unused(&servers, &by, DAYS, true, Some(&throughout(&[]))).is_empty());
         // No snapshot old enough: no verdict for anyone.
-        assert!(unused(&servers, &by, DAYS, None).is_empty());
+        assert!(unused(&servers, &by, DAYS, true, None).is_empty());
     }
 
     #[test]
     fn unused_needs_another_server_to_have_been_called() {
         let servers = cc(&["a", "b"]);
         let all = throughout(&["a", "b"]);
-        assert!(unused(&servers, &HashMap::new(), DAYS, Some(&all)).is_empty(), "no call anywhere: the logs may not be read");
+        assert!(unused(&servers, &HashMap::new(), DAYS, true, Some(&all)).is_empty(), "no call anywhere: the logs may not be read");
         // A call to a server nothing configures says nothing about the configured ones.
-        assert!(unused(&servers, &usage(&[("gone", 9)]), DAYS, Some(&all)).is_empty());
+        assert!(unused(&servers, &usage(&[("gone", 9)]), DAYS, true, Some(&all)).is_empty());
     }
 
     #[test]
@@ -471,19 +651,81 @@ mod tests {
         let servers = cc(&["busy", "idle"]);
         let all = throughout(&["busy", "idle"]);
         let by = usage(&[("busy", 3), (OTHER_MCP_SERVER, 1)]);
-        assert!(unused(&servers, &by, DAYS, Some(&all)).is_empty(), "some server's calls are not attributed");
+        assert!(unused(&servers, &by, DAYS, true, Some(&all)).is_empty(), "some server's calls are not attributed");
         let by = usage(&[("busy", 3), (OTHER_MCP_SERVER, 0)]);
-        assert_eq!(unused(&servers, &by, DAYS, Some(&all)), vec!["idle".to_string()], "an empty bucket hides nothing");
+        assert_eq!(unused(&servers, &by, DAYS, true, Some(&all)), vec!["idle".to_string()], "an empty bucket hides nothing");
+    }
+
+    #[test]
+    fn the_overflow_key_is_the_one_scan_caches_already_hold() {
+        assert_eq!(OTHER_MCP_SERVER, "(other)", "stored in users' scan caches: changing it would orphan what they hold");
     }
 
     #[test]
     fn a_server_of_another_client_is_never_judged() {
         let servers = vec![server("busy", "Claude Code"), server("idle", "Claude Desktop"), server("idle2", "Cursor")];
         let all = throughout(&["busy", "idle", "idle2"]);
-        assert!(unused(&servers, &usage(&[("busy", 3)]), DAYS, Some(&all)).is_empty());
+        assert!(unused(&servers, &usage(&[("busy", 3)]), DAYS, true, Some(&all)).is_empty());
         // And a call figure for the name does not make another client's server count as the called one.
         let servers = vec![server("busy", "Claude Desktop"), server("idle", "Claude Code")];
-        assert!(unused(&servers, &usage(&[("busy", 3)]), DAYS, Some(&all)).is_empty());
+        assert!(unused(&servers, &usage(&[("busy", 3)]), DAYS, true, Some(&all)).is_empty());
+    }
+
+    /// One snapshot per day for the 31 days ending `2026-10-05`, oldest first, each
+    /// holding the Claude Code servers `holds(days_ago)` returns.
+    fn thirty_one_days(holds: impl Fn(i64) -> Vec<&'static str>) -> Vec<Snapshot> {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+        (0..=30)
+            .rev()
+            .map(|ago| Snapshot {
+                taken: (today - chrono::Duration::days(ago)).format("%Y-%m-%d").to_string(),
+                servers: holds(ago)
+                    .into_iter()
+                    .map(|name| changes::SnapServer {
+                        name: name.into(),
+                        client: "Claude Code".into(),
+                        transport: "stdio".into(),
+                        package: None,
+                        pinned: None,
+                    })
+                    .collect(),
+                agents: Vec::new(),
+                skills: Vec::new(),
+                hook_events: Vec::new(),
+                deny: 0,
+                allow: 0,
+                deny_covers_shell: false,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_whole_rule_from_snapshots_and_logs() {
+        let today = "2026-10-05";
+        let servers = cc(&["busy", "idle"]);
+        let by = usage(&[("busy", 3)]);
+        let idle = vec!["idle".to_string()];
+        let both = |_ago: i64| vec!["busy", "idle"];
+        let history = thirty_one_days(both);
+        assert_eq!(history.len(), 31);
+        // Configured for 31 days, zero calls, logs and retention reach the window: named.
+        assert_eq!(unused_from_history(&servers, &by, 30, true, &history, today), idle);
+
+        // The snapshot 30 days old does not hold it: it may have been added since, so it is not named.
+        let added_later = thirty_one_days(|ago| if ago == 30 { vec!["busy"] } else { vec!["busy", "idle"] });
+        assert!(unused_from_history(&servers, &by, 30, true, &added_later, today).is_empty());
+        // Nor when it is missing from any snapshot since.
+        let removed_and_re_added = thirty_one_days(|ago| if ago == 12 { vec!["busy"] } else { vec!["busy", "idle"] });
+        assert!(unused_from_history(&servers, &by, 30, true, &removed_and_re_added, today).is_empty());
+        // A history only 30 days long has no snapshot old enough: no verdict for anyone.
+        assert!(unused_from_history(&servers, &by, 30, true, &history[1..], today).is_empty());
+
+        // Everything else in order but the retention setting, or the log coverage: nobody.
+        assert!(unused_from_history(&servers, &by, 30, false, &history, today).is_empty(), "short retention");
+        assert!(unused_from_history(&servers, &by, 20, true, &history, today).is_empty(), "logs reach back 20 days");
+        // The whole rule judges only Claude Code's servers.
+        let mixed = vec![server("busy", "Claude Code"), server("idle", "Claude Desktop")];
+        assert!(unused_from_history(&mixed, &by, 30, true, &history, today).is_empty());
     }
 
     #[test]
@@ -493,11 +735,42 @@ mod tests {
         let found = unused_opportunities(&names);
         assert_eq!(found.len(), 1);
         assert_eq!((found[0].id.as_str(), found[0].kind.as_str()), ("mcp-unused", "learn"));
-        assert_eq!(found[0].title, "3 MCP servers had no calls in the last 30 days");
+        assert_eq!(found[0].title, "3 MCP servers had no tool calls in the last 30 days");
         assert_eq!(found[0].title_msg.count, Some(3));
         assert!(found[0].detail.contains("alpha, beta, gamma"), "{}", found[0].detail);
-        assert_eq!(unused_opportunities(&names[..1])[0].title, "1 MCP server had no calls in the last 30 days");
+        assert_eq!(unused_opportunities(&names[..1])[0].title, "1 MCP server had no tool calls in the last 30 days");
         assert_eq!(found[0].learn_url.as_deref(), Some(MCP_LEARN));
+    }
+
+    #[test]
+    fn the_unused_strings_say_the_window_the_rule_uses() {
+        let found = unused_opportunities(&["alpha".to_string()]);
+        let days = format!("{UNUSED_NEEDS_DAYS} days");
+        assert!(found[0].title.contains(&days), "{}", found[0].title);
+        assert!(found[0].detail.contains(&days), "{}", found[0].detail);
+    }
+
+    #[test]
+    fn the_unused_finding_reads_whole_in_every_language_and_size() {
+        use crate::i18n::{render, LOCALES};
+        for locale in LOCALES {
+            for count in [1usize, 2, 5, 21] {
+                let names: Vec<String> = (1..=count).map(|i| format!("srv{i}")).collect();
+                let found = &unused_opportunities(&names)[0];
+                let detail_msg = found.detail_msg.as_ref().expect("the finding has a detail");
+                let (title, detail) = (render(locale, &found.title_msg), render(locale, detail_msg));
+                for text in [&title, &detail] {
+                    assert!(!text.contains('{') && !text.contains('}') && !text.contains("finding."), "{locale} {count}: {text}");
+                    assert!(text.contains(&UNUSED_NEEDS_DAYS.to_string()), "{locale} {count} does not say the window: {text}");
+                }
+                assert!(title.contains(&count.to_string()), "{locale} {count}: {title}");
+                assert!(detail.contains("srv1") && detail.contains(&format!("srv{count}")), "{locale} {count}: {detail}");
+                if *locale != "en" {
+                    assert_ne!(title, render("en", &found.title_msg), "{locale} {count} title still reads in English");
+                    assert_ne!(detail, render("en", detail_msg), "{locale} {count} detail still reads in English");
+                }
+            }
+        }
     }
 
     #[test]

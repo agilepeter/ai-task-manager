@@ -18,6 +18,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use crate::clients::{self, ClientRule};
+use crate::mcp_usage::OTHER_MCP_SERVER;
 use crate::pricing;
 use crate::providers;
 
@@ -205,7 +206,6 @@ const UNSORTED_AREA: &str = "(unsorted)";
 /// `mcp_usage::server_of`'s own refusal, so only the *count* of distinct
 /// servers needs a cap here, not the length of each one.
 const MAX_MCP_SERVERS_PER_FILE: usize = MAX_AREAS_PER_FILE;
-pub(crate) const OTHER_MCP_SERVER: &str = "(other)";
 
 /// Fixed bucket for model names refused by the two caps above. Spend and
 /// token totals stay exact — only the per-model attribution merges.
@@ -8471,5 +8471,80 @@ mod tests {
         let maps = [day(today - 5), day(today - 44), day(today - 1)];
         assert_eq!(scan_covers_days_from(maps.iter(), today), 45, "the earliest file wins");
         assert_eq!(scan_covers_days_from([day(today + 3)].iter(), today), 0, "a day after today is not coverage");
+    }
+
+    #[test]
+    fn a_called_server_with_an_awkward_name_is_never_named_unused() {
+        use crate::inventory::McpServer;
+        use crate::mcp_usage::{attach, normalized, unused, McpUsage};
+        let server = |name: &str| McpServer {
+            name: name.into(),
+            client: "Claude Code".into(),
+            scope: "user".into(),
+            project: None,
+            transport: "stdio".into(),
+            target: "npx".into(),
+            package: None,
+            env_count: 0,
+            pin_to: None,
+            source_file: None,
+            usage: None,
+        };
+        // What the scan makes of one call to each tool name, through the real line parser and the real window sum.
+        let counted = |tools: &[String]| {
+            let mut st = ClaudeFileState::default();
+            let mut data = FileData::default();
+            for (i, tool) in tools.iter().enumerate() {
+                let line = mcp_tool_use_line("2026-07-10T10:00:00Z", &format!("msg_{i}"), &format!("req_{i}"), &format!("toolu_{i}"), tool);
+                claude_line(&mut st, &line, &mut data);
+            }
+            let today = data.mcp.keys().map(|(day, _)| *day).max().expect("the calls were counted");
+            mcp_usage_for_window([&data.mcp].into_iter(), today)
+        };
+        // The tool name Claude Code builds: `mcp__` + the normalized name + `__` + the tool.
+        let tool = |name: &str| format!("mcp__{}__search", normalized(name));
+        let throughout: HashSet<String> = ["busy", "foo", "foo!", "My Server!"].iter().map(|n| n.to_string()).collect();
+
+        // `My Server!` normalizes to `My_Server_`, so its calls are logged under `My_Server`: it was called, and
+        // must not read as a server with no calls.
+        let by_server = counted(&[tool("busy"), tool("My Server!")]);
+        assert_eq!(by_server.get("My_Server").map(|u| u.calls), Some(1), "the calls land under the shorter key");
+        let mut servers = vec![server("busy"), server("My Server!")];
+        assert!(unused(&servers, &by_server, 30, true, Some(&throughout)).is_empty(), "the server was called");
+        attach(&mut servers, &by_server);
+        assert_eq!(servers[0].usage.map(|u| u.calls), Some(1));
+        assert_eq!(servers[1].usage, None, "no figure rather than a wrong one");
+
+        // `foo!`'s calls are logged under `foo`: neither is named, and `foo` is not shown them as its own.
+        let by_server = counted(&[tool("busy"), tool("foo!")]);
+        let mut servers = vec![server("busy"), server("foo"), server("foo!")];
+        assert!(unused(&servers, &by_server, 30, true, Some(&throughout)).is_empty(), "foo! was called, foo may have been");
+        attach(&mut servers, &by_server);
+        assert_eq!((servers[1].usage, servers[2].usage), (None, None));
+
+        // Any awkward name, called once, is never named unused and never shown a number but its own. A name with
+        // a character outside the Basic Multilingual Plane is logged under either spelling.
+        let long = "x".repeat(70);
+        let awkward: [(&str, Vec<String>); 11] = [
+            ("My Server!", vec![tool("My Server!")]),
+            ("x.", vec![tool("x.")]),
+            ("a__b", vec![tool("a__b")]),
+            ("_x", vec![tool("_x")]),
+            ("@scope/pkg", vec![tool("@scope/pkg")]),
+            ("a.b", vec![tool("a.b")]),
+            ("claude.ai Google Drive", vec![tool("claude.ai Google Drive")]),
+            (long.as_str(), vec![tool(&long)]),
+            ("my\u{1F600}server", vec!["mcp__my_server__search".into()]),
+            ("my\u{1F600}server", vec!["mcp__my__server__search".into()]),
+            ("", vec![tool("")]),
+        ];
+        for (name, tools) in awkward {
+            let by_server = counted(&[vec![tool("busy")], tools.clone()].concat());
+            let all: HashSet<String> = ["busy", name].iter().map(|n| n.to_string()).collect();
+            let mut servers = vec![server("busy"), server(name)];
+            assert!(unused(&servers, &by_server, 30, true, Some(&all)).is_empty(), "{name:?} was called as {tools:?}");
+            attach(&mut servers, &by_server);
+            assert!(matches!(servers[1].usage, None | Some(McpUsage { calls: 1, .. })), "{name:?} shows {:?}", servers[1].usage);
+        }
     }
 }

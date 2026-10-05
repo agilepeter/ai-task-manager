@@ -167,7 +167,10 @@ fn days_between(from: &str, to: &str) -> Option<i64> {
 /// holds, and that every snapshot taken after it holds too: the ones that
 /// were configured the whole time. `None` when no snapshot is that old, or
 /// when a snapshot's date cannot be read -- the history cannot vouch for
-/// anything then, and a caller treats that as "not known".
+/// anything then, and a caller treats that as "not known". Every snapshot dated
+/// on or after the start counts, in any order: a second one on the same day,
+/// or one dated in the future by a clock that ran ahead, can only remove
+/// servers from the answer.
 pub fn configured_throughout(snapshots: &[Snapshot], today: &str, days: i64, client: &str) -> Option<HashSet<String>> {
     let mut dated: Vec<(chrono::NaiveDate, &Snapshot)> = Vec::new();
     for s in snapshots {
@@ -1071,6 +1074,18 @@ mod tests {
             with("2026-10-05", &["a", "b", "c", "late", "young", "new"]),
         ];
         assert_eq!(configured_throughout(&history, today, 30, "Claude Code"), Some(set(&["a", "c", "late"])));
+
+        // The order the snapshots come in does not matter.
+        let reversed: Vec<Snapshot> = history.iter().rev().cloned().collect();
+        assert_eq!(configured_throughout(&reversed, today, 30, "Claude Code"), Some(set(&["a", "c", "late"])));
+
+        // Two snapshots on one day are both applied, so a server only one of them holds is out.
+        let twice = [with("2026-09-05", &["a", "b"]), with("2026-09-05", &["a"]), with("2026-10-05", &["a", "b"])];
+        assert_eq!(configured_throughout(&twice, today, 30, "Claude Code"), Some(set(&["a"])));
+
+        // A snapshot dated in the future (a clock that ran ahead) holding no servers leaves none: it can only remove.
+        let ahead = [with("2026-09-05", &["a", "b"]), with("2026-12-01", &[])];
+        assert_eq!(configured_throughout(&ahead, today, 30, "Claude Code"), Some(set(&[])));
 
         // A server of another client is not counted for this client.
         let mut other = with("2026-09-01", &["a"]);

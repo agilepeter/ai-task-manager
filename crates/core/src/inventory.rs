@@ -391,6 +391,78 @@ pub fn hooks_from(settings: &Value) -> Vec<HookEvent> {
     out
 }
 
+/// Days Claude Code keeps a session log when no settings file says otherwise.
+const DEFAULT_LOG_RETENTION_DAYS: i64 = 30;
+
+/// How long Claude Code keeps its session logs, from the one number
+/// `cleanupPeriodDays` in its settings. Claude Code deletes a log that has
+/// not been written to for longer than that, at startup, so it decides how
+/// far back any count read from the logs can possibly reach. This is the
+/// only thing read from a settings file for it: that one key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogRetention {
+    /// No file sets it, so Claude Code's own default applies.
+    Default,
+    /// The smallest whole number of days any file sets.
+    Days(i64),
+    /// A file holds the key with something that is not a whole number of days,
+    /// or is not a settings object at all, or could not be read: what Claude
+    /// Code does then is not known.
+    Unknown,
+}
+
+impl LogRetention {
+    /// Whether a log written `days` ago is still kept: the logs reach back at
+    /// least that far. Never for `Unknown`.
+    pub fn covers(self, days: i64) -> bool {
+        match self {
+            LogRetention::Default => DEFAULT_LOG_RETENTION_DAYS >= days,
+            LogRetention::Days(kept) => kept >= days,
+            LogRetention::Unknown => false,
+        }
+    }
+}
+
+/// `cleanupPeriodDays` as a whole number of days. A float with no fraction
+/// (`30.0`) is one, a string, a boolean, null or `29.5` is not.
+fn whole_days(value: &Value) -> Option<i64> {
+    let Value::Number(n) = value else { return None };
+    n.as_i64().or_else(|| n.as_f64().filter(|f| f.fract() == 0.0).map(|f| f as i64))
+}
+
+/// The smallest `cleanupPeriodDays` the given settings files set, each given
+/// as its text. The smallest, not the one that wins by precedence, because the
+/// answer only has to be safe: logs are kept at least that long. A text that
+/// does not parse as a JSON object, or a key holding anything but a whole
+/// number, makes the whole answer `Unknown`.
+pub fn log_retention_from(settings_texts: &[&str]) -> LogRetention {
+    let mut smallest: Option<i64> = None;
+    for text in settings_texts {
+        let Ok(Value::Object(settings)) = serde_json::from_str::<Value>(text) else {
+            return LogRetention::Unknown;
+        };
+        let Some(setting) = settings.get("cleanupPeriodDays") else { continue };
+        let Some(days) = whole_days(setting) else { return LogRetention::Unknown };
+        smallest = Some(smallest.map_or(days, |s| s.min(days)));
+    }
+    smallest.map_or(LogRetention::Default, LogRetention::Days)
+}
+
+/// `log_retention_from` over the one Claude Code settings file `scan` already
+/// reads for permissions and hooks: `settings.json` in Claude Code's config
+/// folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`). No such file means nothing
+/// sets it; one that is there but cannot be read is not known.
+pub fn claude_log_retention() -> LogRetention {
+    let path = claude_dir().join("settings.json");
+    if !path.exists() {
+        return LogRetention::Default;
+    }
+    match read_capped(&path, MAX_CONFIG_BYTES) {
+        Some(text) => log_retention_from(&[&text]),
+        None => LogRetention::Unknown,
+    }
+}
+
 const MCP_TRUST_INDEX: &str = "https://staas.fund/mcp/";
 const CLASSROOM: &str = "https://staas.fund/classroom/";
 
@@ -1400,5 +1472,37 @@ mod tests {
         assert_eq!(skills[0].project.as_deref(), Some("/p"));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_log_retention_reader_takes_one_number_and_the_smallest() {
+        use LogRetention::{Days, Default, Unknown};
+        let read = |texts: &[&str]| log_retention_from(texts);
+        assert_eq!(read(&[]), Default, "no settings file means nothing sets it");
+        assert_eq!(read(&["{}"]), Default);
+        // Everything else in a settings file is ignored, whatever it holds.
+        assert_eq!(read(&[r#"{"model": "m", "permissions": {"deny": ["Bash"]}, "hooks": {}}"#]), Default);
+        assert_eq!(read(&[r#"{"cleanupPeriodDays": 90}"#]), Days(90));
+        assert_eq!(read(&[r#"{"cleanupPeriodDays": 0}"#]), Days(0));
+        assert_eq!(read(&[r#"{"cleanupPeriodDays": 30.0}"#]), Days(30), "a whole number written as a float is a whole number");
+        // The smallest across files, whichever has it and whichever order.
+        assert_eq!(read(&[r#"{"cleanupPeriodDays": 90}"#, r#"{"cleanupPeriodDays": 7}"#]), Days(7));
+        assert_eq!(read(&[r#"{"cleanupPeriodDays": 7}"#, r#"{"cleanupPeriodDays": 90}"#]), Days(7));
+        assert_eq!(read(&["{}", r#"{"cleanupPeriodDays": 45}"#]), Days(45));
+        // One file the key cannot be read from makes the answer not known, even beside a plain one.
+        for odd in [r#"{"cleanupPeriodDays": "7"}"#, r#"{"cleanupPeriodDays": 7.5}"#, r#"{"cleanupPeriodDays": null}"#, "not json", "[]", ""] {
+            assert_eq!(read(&[odd]), Unknown, "{odd}");
+            assert_eq!(read(&[r#"{"cleanupPeriodDays": 90}"#, odd]), Unknown, "{odd} beside a number");
+        }
+    }
+
+    #[test]
+    fn log_retention_covers_a_window_it_keeps_logs_for() {
+        use LogRetention::{Days, Default, Unknown};
+        assert!(Default.covers(30), "the default keeps 30 days");
+        assert!(!Default.covers(31));
+        assert!(Days(30).covers(30) && Days(90).covers(30));
+        assert!(!Days(29).covers(30) && !Days(0).covers(30) && !Days(-1).covers(30));
+        assert!(!Unknown.covers(1) && !Unknown.covers(30));
     }
 }
