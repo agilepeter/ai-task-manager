@@ -1,0 +1,54 @@
+# Known vulnerabilities in the dependencies this project ships.
+#
+# An advisory is published against code that did not change, so a check that
+# only runs on a push stays green for as long as nobody touches a lockfile.
+# The weekly run is the one that matters; the push run catches a bad update
+# on the way in.
+#
+# Fails on a vulnerability. Unmaintained, unsound and yanked crates print as
+# warnings and do not fail the run: the ones present today belong to Tauri's
+# own dependency tree (the Linux gtk bindings, which no release here builds,
+# and the unic Unicode tables behind URL patterns) and cannot be moved from
+# this repository. If one ever has to be waived, name it in .cargo/audit.toml
+# with the reason beside it, never with a flag in this file.
+name: Audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.lock"
+      - "package-lock.json"
+      - ".cargo/audit.toml"
+      - ".github/workflows/audit.yml"
+  schedule:
+    - cron: "23 9 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Unpinned on purpose: the advisory database changes format over time
+      # and an old cargo-audit stops being able to read it.
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Rust dependencies
+        run: cargo audit
+      # Only what ends up in the app. The build tools are not shipped, and
+      # their advisories are about dev servers nobody here exposes.
+      - name: npm dependencies that ship
+        if: ${{ !cancelled() }}
+        run: npm audit --omit=dev

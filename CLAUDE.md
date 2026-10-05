@@ -461,3 +461,13 @@ each push: Rust or manifest changes run the Windows build and tests (about 15 mi
 billing); UI changes run a one-minute Linux type-check, build and `npm test`. Do not widen
 the Windows job to UI paths. `scripts/**` routes to the frontend job, because the frontend
 tests live there and went unrun for weeks when nothing referenced them.
+
+`.github/workflows/audit.yml` is separate on purpose: it runs `cargo audit` and
+`npm audit --omit=dev` when a lockfile changes and every Monday, because an advisory is
+published against code that did not change and a push-only check would never see it. It
+fails on a vulnerability; unmaintained, unsound and yanked crates are warnings (today all
+of them sit in Tauri's own tree and cannot be moved from here). A waiver goes in
+`.cargo/audit.toml` with its reason, never as a flag in the workflow. When it goes red:
+`cargo update -p <crate>` alone can stop short of the fixed version without saying why (the
+fix may need a newer sibling crate), so use `--precise <fixed version>`, then read which
+crates the lockfile moved, not whether the command exited 0.
