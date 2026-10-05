@@ -217,15 +217,17 @@ function clientRollup(areas: any[]) {
       row[k].tokens += a[k].tokens;
     }
     const figure = a.month_to_date;
-    if (figure && typeof figure.cost === "number" && figure.month === thisMonth) {
-      // The engine's own figure for this month, summed from every day it read: the
-      // 30-slot series below is a day short on the 31st of a 31-day month. A figure
-      // for another month is not this month's (a fixture is frozen at one date, the
-      // viewer's clock is not), and counts as none.
-      row.monthToDate += figure.cost;
+    if (figure && typeof figure.cost === "number") {
+      // The engine's own figure, summed from every day it read: the 30-slot series
+      // below is a day short on the 31st of a 31-day month. It counts only for the
+      // month it is for. One for another month is zero here, as in the engine: its
+      // scan ended before this month began, so it holds none of this month's spend.
+      // (A fixture with figures in it is frozen at one month, so in every other
+      // month it reads zero until it is regenerated.)
+      if (figure.month === thisMonth) row.monthToDate += figure.cost;
     } else {
-      // An area with no figure for this month (the committed fixture predates the
-      // field): cut the month out of the series.
+      // An area with no figure at all (the committed fixture predates the field):
+      // cut the month out of the series.
       const daily: number[] = a.daily_cost ?? [];
       daily.forEach((c, i) => {
         const d = new Date(now() - (daily.length - 1 - i) * 24 * HOUR);

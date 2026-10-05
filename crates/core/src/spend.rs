@@ -188,11 +188,13 @@ pub struct AreaSpend {
     /// is handed to a rollup made just after, and last month's total read as
     /// the new month's would be wrong by a whole month, and could raise a
     /// budget alert that then hides the real one. `clients::rollup` uses it
-    /// only when that month is `today`'s, and otherwise cuts the month out of
-    /// `daily_cost`. `Some` for every area a scan makes; `None` only for one
-    /// that did not come from a scan (an older frontend handing back a shape
-    /// from before this field existed), which the rollup answers from
-    /// `daily_cost` too, never as zero.
+    /// only when that month is `today`'s, and counts a figure for any other
+    /// month as zero: the usual one is an earlier month's, from a scan that
+    /// ended before this month began and so holds none of its spend. `Some`
+    /// for every area a scan makes; `None` only for one that did not come
+    /// from a scan (an older frontend handing back a shape from before this
+    /// field existed), which the rollup answers by cutting the month out of
+    /// `daily_cost`, never as zero.
     ///
     /// An area with no spend in the last `TREND_DAYS` days is not listed at
     /// all, so an area used on the 1st and idle since is missing from the
@@ -7292,46 +7294,57 @@ mod tests {
     fn a_month_figure_from_another_month_is_not_used() {
         // Areas scanned on October 31st and handed to a rollup made on November 1st (the
         // frontend still holds the last scan, or the scan ran across midnight): the figure
-        // they carry is October's, and November has not spent anything in that scan.
+        // they carry is October's. That scan ended before November began, so it holds none of
+        // November's spend: the month is zero, not October's 30, and not the 6 a cut of the
+        // series would book to November 1st out of October 31st.
         let scanned_on = date(2026, 10, 31);
         let areas = scanned_areas(
-            &[("acme-portal", date(2026, 10, 1), 20.0), ("acme-portal", date(2026, 10, 30), 4.0)],
+            &[
+                ("acme-portal", date(2026, 10, 1), 20.0),
+                ("acme-portal", date(2026, 10, 30), 4.0),
+                ("acme-portal", scanned_on, 6.0),
+            ],
             scanned_on,
         );
-        assert_eq!(areas[0].month_to_date, Some(MonthSpend { month: "2026-10".into(), cost: 24.0 }));
+        assert_eq!(areas[0].month_to_date, Some(MonthSpend { month: "2026-10".into(), cost: 30.0 }));
         let rows = clients::rollup(&areas, &[acme(None)], scanned_on);
-        assert_eq!(rows[0].month_to_date, 24.0, "on the day it was scanned, the figure is the month");
+        assert_eq!(rows[0].month_to_date, 30.0, "on the day it was scanned, the figure is the month");
 
-        let today = date(2026, 11, 1);
-        let rows = clients::rollup(&areas, &[acme(None)], today);
-        assert_eq!(rows[0].month_to_date, 0.0, "November, from the series: not October's 24");
+        let rows = clients::rollup(&areas, &[acme(None)], date(2026, 11, 1));
+        assert_eq!(rows[0].month_to_date, 0.0, "November, from a scan that ended in October");
 
-        // A series that is up to date says what November has spent, and a figure labelled
-        // with October does not displace it.
-        let mut fresh = scanned_areas(&[("acme-portal", date(2026, 10, 30), 4.0), ("acme-portal", today, 3.0)], today);
-        fresh[0].month_to_date = Some(MonthSpend { month: "2026-10".into(), cost: 500.0 });
-        assert_eq!(clients::rollup(&fresh, &[acme(None)], today)[0].month_to_date, 3.0, "November's 3, from the series");
+        // Another month in the other direction (a clock set back since the scan) is no better a
+        // guide to this one, and reads the same.
+        let november = date(2026, 11, 1);
+        let areas = scanned_areas(&[("acme-portal", november, 3.0)], november);
+        assert_eq!(clients::rollup(&areas, &[acme(None)], november)[0].month_to_date, 3.0);
+        assert_eq!(clients::rollup(&areas, &[acme(None)], scanned_on)[0].month_to_date, 0.0, "October, from a November scan");
     }
 
     #[test]
     fn a_scan_that_straddles_the_first_does_not_alert_with_last_months_total() {
-        // Acme's budget is $100 and October closed at 105, so October's alert has fired. A scan
-        // reads its days a little before midnight on October 31st; the alert pass that follows
-        // takes its date from the clock a little after, on November 1st.
+        // Acme's budget is $100. October closed at 240, and October 31st alone, the day the scan
+        // ends, cost more than the whole budget (150), so October's alert has fired. A scan reads
+        // its days a little before midnight on October 31st; the alert pass that follows takes
+        // its date from the clock a little after, on November 1st.
         let rules = [acme(Some(100.0))];
         let scanned_on = date(2026, 10, 31);
         let areas = scanned_areas(
             &[
                 ("acme-portal", date(2026, 10, 1), 30.0),
                 ("acme-portal", date(2026, 10, 15), 60.0),
-                ("acme-portal", scanned_on, 15.0),
+                ("acme-portal", scanned_on, 150.0),
             ],
             scanned_on,
         );
         let today = date(2026, 11, 1);
         let rows = clients::rollup(&areas, &rules, today);
+        assert_eq!(rows[0].month_to_date, 0.0, "nothing of November is in a scan from October");
         let mut fired = vec!["Acme|2026-10".to_string()];
-        assert!(clients::over_budget(&rows, &rules, today, &mut fired).is_empty(), "October's 105 is not November's");
+        assert!(
+            clients::over_budget(&rows, &rules, today, &mut fired).is_empty(),
+            "neither October's 240 nor October 31st's 150, booked to November 1st, is November's"
+        );
         assert!(fired.is_empty(), "no mark for November, and October's is cleared: {fired:?}");
 
         // November's own alert is not suppressed: a scan taken in November that finds the

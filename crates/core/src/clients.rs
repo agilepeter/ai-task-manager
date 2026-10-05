@@ -39,7 +39,8 @@ pub struct ClientSpend {
     pub yesterday: Window,
     pub last30: Window,
     /// This calendar month so far: each area's own figure from the scan when
-    /// it is for this month, otherwise a cut of its daily series.
+    /// it is for this month, nothing for one from another month, and a cut of
+    /// its daily series for an area that has no figure.
     pub month_to_date: f64,
     /// The areas that rolled up here, largest first.
     pub areas: Vec<String>,
@@ -108,16 +109,13 @@ fn add(into: &mut Window, from: &Window) {
 }
 
 /// Sum of the daily series over the days that fall in `today`'s month: the
-/// answer for an area whose scan figure is missing or is for another month,
-/// and only for that. `daily` is oldest first with today last, like every
-/// trend in the app.
+/// answer for an area that carries no scan figure at all, and only for that.
+/// `daily` is oldest first with today last, like every trend in the app.
 ///
 /// Short by one day on the 31st of a 31-day month. The series holds
 /// `TREND_DAYS` (30) days, so the 1st is one past its oldest slot. That is why
 /// the scan sums the month itself (`AreaSpend::month_to_date`); this only
-/// stands in when that figure cannot be used. A series scanned before midnight
-/// on the 1st is read as ending today, so it counts its last day or so as the
-/// new month's: a day's spend in place of a whole month's.
+/// stands in for an area that did not come from a scan.
 fn month_to_date_from_series(daily: &[f64], today: NaiveDate) -> f64 {
     let n = daily.len();
     daily
@@ -136,9 +134,11 @@ fn month_to_date_from_series(daily: &[f64], today: NaiveDate) -> f64 {
 /// Every dollar lands in exactly one row.
 ///
 /// An area's month to date is the figure its scan computed when that figure
-/// is for `today`'s month, and a cut of its daily series otherwise: the figure
-/// is a number fixed at scan time, so one from before midnight on the 1st must
-/// not be read as the new month's (see `AreaSpend::month_to_date`). A work
+/// is for `today`'s month, and zero when it is for another: the scan behind an
+/// earlier month's figure ended before this month began, so it holds none of
+/// this month's spend, and a cut of its series would read that scan's last day
+/// as today's and book yesterday's spend to the new month. Only an area with
+/// no figure at all takes that cut (see `AreaSpend::month_to_date`). A work
 /// area with no spend in the last `TREND_DAYS` days is not in `areas`, so its
 /// earlier spend this month is not in the month to date.
 pub fn rollup(areas: &[AreaSpend], rules: &[ClientRule], today: NaiveDate) -> Vec<ClientSpend> {
@@ -169,7 +169,8 @@ pub fn rollup(areas: &[AreaSpend], rules: &[ClientRule], today: NaiveDate) -> Ve
         add(&mut row.last30, &area.last30);
         row.month_to_date += match &area.month_to_date {
             Some(figure) if figure.month == this_month => figure.cost,
-            _ => month_to_date_from_series(&area.daily_cost, today),
+            Some(_) => 0.0,
+            None => month_to_date_from_series(&area.daily_cost, today),
         };
         row.areas.push(area.area.clone());
     }

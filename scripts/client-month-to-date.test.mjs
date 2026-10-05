@@ -3,15 +3,16 @@
 // 31-day month, so the frontend must never rebuild it from `daily_cost` when the scan
 // has already given the figure. The figure is `{ month: "YYYY-MM", cost }`: it is a
 // number fixed at scan time, so it says which month it is for, and it is used only
-// while that is the current month. Two places in the frontend handle it:
+// while that is the current month; one for another month counts as zero, because its
+// scan ended before this month began. Two places in the frontend handle it:
 //
 //  - the detail page hands the areas it received straight back to the `client_rollup`
 //    and `export_clients_csv` commands, and a copy rebuilt field by field would drop
 //    `month_to_date` and send the backend down its fallback;
-//  - the browser demo's stand-in for `client_rollup` (src/demo/mock.ts) adds the figure
-//    up itself when it is for the current month, and otherwise falls back to its own cut
-//    of the series (an area with none, or one for another month: the committed fixture
-//    predates the field, and a regenerated one is frozen at one date).
+//  - the browser demo's stand-in for `client_rollup` (src/demo/mock.ts) does what the
+//    backend does: it adds the figure up when it is for the current month, counts one for
+//    another month as zero, and cuts its own month out of the series only for an area
+//    with no figure at all (the committed fixture predates the field).
 //
 // Same combined-module technique as scripts/detail-focus.test.mjs.
 import assert from "node:assert/strict";
@@ -90,11 +91,20 @@ test("the demo rollup uses the month figure the scan computed", async (t) => {
   assert.equal(missing["Northwind"].monthToDate, 15);
   assert.equal(missing["Acme Co"].monthToDate, 15);
 
-  // A figure for another month is not this month's, however it got here: the series is read
-  // instead, and neither September's total nor a bare number from an older build is used.
-  const other = rows([area("acme-portal", { month_to_date: { month: "2026-09", cost: 999 } }), area("northwind-api", { month_to_date: 999 })]);
-  assert.equal(other["Acme Co"].monthToDate, 15);
-  assert.equal(other["Northwind"].monthToDate, 15);
+  // A figure for another month counts as zero: its scan ended before this month began, so
+  // it holds none of this month's spend, and a cut of the series (15) would book that
+  // scan's last day to the new month. Neither September's 999 nor the cut is used, and a
+  // later month's figure reads the same.
+  const other = rows([
+    area("acme-portal", { month_to_date: { month: "2026-09", cost: 999 } }),
+    area("acme-portal/web", { month_to_date: { month: "2026-11", cost: 5 } }),
+  ]);
+  assert.equal(other["Acme Co"].monthToDate, 0);
+
+  // Only an area with no figure at all takes the cut; a bare number, the shape of an older
+  // build, is not a figure either.
+  const older = rows([area("northwind-api", { month_to_date: 999 })]);
+  assert.equal(older["Northwind"].monthToDate, 15);
 
   // The engine writes the month as two digits, and a single-digit month must still match.
   setClock(t, 2026, 3, 5);
