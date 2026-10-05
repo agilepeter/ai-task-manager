@@ -165,12 +165,13 @@ fn days_between(from: &str, to: &str) -> Option<i64> {
 
 /// The servers of `client` that the newest snapshot at least `days` old
 /// holds, and that every snapshot taken after it holds too: the ones that
-/// were configured the whole time. `None` when no snapshot is that old, or
-/// when a snapshot's date cannot be read -- the history cannot vouch for
-/// anything then, and a caller treats that as "not known". Every snapshot dated
-/// on or after the start counts, in any order: a second one on the same day,
-/// or one dated in the future by a clock that ran ahead, can only remove
-/// servers from the answer.
+/// were in the setup the whole time. A snapshot keeps a server's name and
+/// client but not its scope, so this cannot say which scope it had. `None`
+/// when no snapshot is that old, or when a snapshot's date cannot be read --
+/// the history cannot vouch for anything then, and a caller treats that as
+/// "not known". Every snapshot dated on or after the start counts, in any
+/// order: a second one on the same day, or one dated in the future by a clock
+/// that ran ahead, can only remove servers from the answer.
 pub fn configured_throughout(snapshots: &[Snapshot], today: &str, days: i64, client: &str) -> Option<HashSet<String>> {
     let mut dated: Vec<(chrono::NaiveDate, &Snapshot)> = Vec::new();
     for s in snapshots {
@@ -187,6 +188,36 @@ pub fn configured_throughout(snapshots: &[Snapshot], today: &str, days: i64, cli
         });
     }
     kept
+}
+
+/// A history of one snapshot a day for the `days + 1` days ending `today`
+/// (oldest first), each holding the Claude Code servers `holds` names for that
+/// many days ago. For tests of anything that reads the history.
+#[cfg(test)]
+pub(crate) fn daily_history<S: Into<String>>(today: &str, days: i64, holds: impl Fn(i64) -> Vec<S>) -> Vec<Snapshot> {
+    let today = chrono::NaiveDate::parse_from_str(today, "%Y-%m-%d").expect("a test date");
+    (0..=days)
+        .rev()
+        .map(|ago| Snapshot {
+            taken: (today - chrono::Duration::days(ago)).format("%Y-%m-%d").to_string(),
+            servers: holds(ago)
+                .into_iter()
+                .map(|name| SnapServer {
+                    name: name.into(),
+                    client: "Claude Code".into(),
+                    transport: "stdio".into(),
+                    package: None,
+                    pinned: None,
+                })
+                .collect(),
+            agents: Vec::new(),
+            skills: Vec::new(),
+            hook_events: Vec::new(),
+            deny: 0,
+            allow: 0,
+            deny_covers_shell: false,
+        })
+        .collect()
 }
 
 /// Today's setup, reduced to the shape a snapshot keeps. Every field here
@@ -734,6 +765,7 @@ mod tests {
                 env_count: 0,
                 pin_to: None,
                 source_file: None,
+                switched_off_in_a_project: false,
                 usage: None,
             }],
             agents: vec![crate::inventory::Definition { name: "reviewer".into(), scope: "user".into(), project: None, model: None, tools: None }],
@@ -1052,54 +1084,60 @@ mod tests {
 
     #[test]
     fn configured_throughout_needs_every_snapshot_since() {
+        // The window the unused-server rule asks about, so the dates below follow it.
+        let window = crate::mcp_usage::UNUSED_WINDOW_DAYS;
+        let today = "2026-10-05";
+        let ago = |days: i64| {
+            let today = chrono::NaiveDate::parse_from_str(today, "%Y-%m-%d").unwrap();
+            (today - chrono::Duration::days(days)).format("%Y-%m-%d").to_string()
+        };
         let with = |taken: &str, names: &[&str]| Snapshot {
             servers: names.iter().map(|n| server(n, None, None)).collect(),
             ..empty_snapshot(taken)
         };
-        let today = "2026-10-05";
         let set = |names: &[&str]| -> HashSet<String> { names.iter().map(|n| n.to_string()).collect() };
 
-        // The start is the NEWEST snapshot at least 30 days old: 2026-09-05 is exactly 30 days back,
-        // 2026-08-20 is older, and 2026-09-06 is 29 days back, one day too young.
+        // The start is the NEWEST snapshot at least `window` days old: one exactly that old, older ones before
+        // it, and one a day too young.
         //   late   was added after the oldest snapshot but is in the start and every later one: counts.
         //   young  first appears one day inside the window: does not.
         //   gone   is in the oldest snapshot only: does not.
         //   b      is in the first and the last snapshot but missing from one between: does not.
         //   new    is in today's snapshot only: does not.
         let history = [
-            with("2026-08-20", &["gone", "a", "b", "c"]),
-            with("2026-09-05", &["a", "b", "c", "late"]),
-            with("2026-09-06", &["a", "b", "c", "late", "young"]),
-            with("2026-09-20", &["a", "c", "late", "young"]),
-            with("2026-10-05", &["a", "b", "c", "late", "young", "new"]),
+            with(&ago(window + 15), &["gone", "a", "b", "c"]),
+            with(&ago(window), &["a", "b", "c", "late"]),
+            with(&ago(window - 1), &["a", "b", "c", "late", "young"]),
+            with(&ago(window - 11), &["a", "c", "late", "young"]),
+            with(today, &["a", "b", "c", "late", "young", "new"]),
         ];
-        assert_eq!(configured_throughout(&history, today, 30, "Claude Code"), Some(set(&["a", "c", "late"])));
+        assert_eq!(configured_throughout(&history, today, window, "Claude Code"), Some(set(&["a", "c", "late"])));
 
         // The order the snapshots come in does not matter.
         let reversed: Vec<Snapshot> = history.iter().rev().cloned().collect();
-        assert_eq!(configured_throughout(&reversed, today, 30, "Claude Code"), Some(set(&["a", "c", "late"])));
+        assert_eq!(configured_throughout(&reversed, today, window, "Claude Code"), Some(set(&["a", "c", "late"])));
 
         // Two snapshots on one day are both applied, so a server only one of them holds is out.
-        let twice = [with("2026-09-05", &["a", "b"]), with("2026-09-05", &["a"]), with("2026-10-05", &["a", "b"])];
-        assert_eq!(configured_throughout(&twice, today, 30, "Claude Code"), Some(set(&["a"])));
+        let twice = [with(&ago(window), &["a", "b"]), with(&ago(window), &["a"]), with(today, &["a", "b"])];
+        assert_eq!(configured_throughout(&twice, today, window, "Claude Code"), Some(set(&["a"])));
 
         // A snapshot dated in the future (a clock that ran ahead) holding no servers leaves none: it can only remove.
-        let ahead = [with("2026-09-05", &["a", "b"]), with("2026-12-01", &[])];
-        assert_eq!(configured_throughout(&ahead, today, 30, "Claude Code"), Some(set(&[])));
+        let ahead = [with(&ago(window), &["a", "b"]), with("2026-12-01", &[])];
+        assert_eq!(configured_throughout(&ahead, today, window, "Claude Code"), Some(set(&[])));
 
         // A server of another client is not counted for this client.
-        let mut other = with("2026-09-01", &["a"]);
+        let mut other = with(&ago(window + 4), &["a"]);
         other.servers.push(SnapServer { client: "Cursor".into(), ..server("x", None, None) });
-        assert_eq!(configured_throughout(&[other], today, 30, "Claude Code"), Some(set(&["a"])));
+        assert_eq!(configured_throughout(&[other], today, window, "Claude Code"), Some(set(&["a"])));
 
         // No snapshot that old: no answer at all, not an empty set.
-        let young = [with("2026-09-06", &["a"]), with("2026-10-05", &["a"])];
-        assert_eq!(configured_throughout(&young, today, 30, "Claude Code"), None);
-        assert_eq!(configured_throughout(&[], today, 30, "Claude Code"), None);
+        let young = [with(&ago(window - 1), &["a"]), with(today, &["a"])];
+        assert_eq!(configured_throughout(&young, today, window, "Claude Code"), None);
+        assert_eq!(configured_throughout(&[], today, window, "Claude Code"), None);
 
         // A date that cannot be read means the history cannot vouch for anything.
-        let broken = [with("2026-08-01", &["a"]), with("not a date", &["a"])];
-        assert_eq!(configured_throughout(&broken, today, 30, "Claude Code"), None);
-        assert_eq!(configured_throughout(&history, "garbage", 30, "Claude Code"), None);
+        let broken = [with(&ago(window + 4), &["a"]), with("not a date", &["a"])];
+        assert_eq!(configured_throughout(&broken, today, window, "Claude Code"), None);
+        assert_eq!(configured_throughout(&history, "garbage", window, "Claude Code"), None);
     }
 }

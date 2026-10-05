@@ -992,6 +992,7 @@ mod tests {
             env_count: 0,
             pin_to: None,
             source_file: None,
+            switched_off_in_a_project: false,
             usage: None,
         }
     }

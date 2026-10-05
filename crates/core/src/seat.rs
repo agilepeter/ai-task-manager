@@ -383,6 +383,7 @@ mod tests {
                 env_count: 2,
                 pin_to: None,
                 source_file: Some("/Users/dana/work/acme-portal/.mcp.json".into()),
+                switched_off_in_a_project: false,
                 // Numbers no other field in these fixtures has, so finding
                 // either in a report means this field crossed over.
                 usage: Some(crate::mcp_usage::McpUsage { calls: 7_301_993, result_bytes: 8_804_177_231 }),

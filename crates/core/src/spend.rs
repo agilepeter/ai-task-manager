@@ -23,6 +23,9 @@ use crate::pricing;
 use crate::providers;
 
 pub const TREND_DAYS: usize = 30;
+// The "no tool calls in the last N days" claim is read from the 30-day call sums
+// (`mcp_usage_30d`), so its window has to fit inside them.
+const _: () = assert!(crate::mcp_usage::UNUSED_WINDOW_DAYS <= TREND_DAYS as i64);
 
 /// Parses `AITM_TODAY`'s raw value as an ISO `YYYY-MM-DD` date -- the one
 /// shape scripts/make-demo-fixture.py ever writes. Kept separate from the
@@ -459,6 +462,19 @@ const PERSIST_VERSION: u32 = 12;
 /// Set when any file was (re)parsed this run — nothing changed, nothing saved.
 static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Whether the last walk of Claude Code's own `projects` folder saw all of it
+/// (see `recent_jsonl_files_within`). False until a walk has finished, so a
+/// count read before any scan is never taken for a complete one.
+///
+/// Not flagged, on purpose: a line over `MAX_LINE_BYTES` is skipped inside a
+/// file that is otherwise read. A file is parsed once and then served from the
+/// cache, so a flag set while parsing would not be seen again on later scans,
+/// and a per-file flag would change the cache's shape. It does not matter for
+/// the counts the flag guards: the lines that run over are huge tool results,
+/// and the line that carries an MCP tool call is the model's own message,
+/// which is small.
+static CLAUDE_WALK_COMPLETE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Paths seen by file_days() this collect() run. Entries for paths nobody
 /// scanned anymore (deleted logs, disabled providers) are dropped on save,
 /// so the cache can't grow without bound.
@@ -875,7 +891,11 @@ fn oversized_log(path: &Path, size: u64) {
     );
 }
 
-/// All .jsonl files under `root` modified in the last 31 days.
+/// All .jsonl files under `root` modified in the last 31 days, and whether the
+/// walk saw everything it was meant to: `false` when it skipped something that
+/// could have been a log (see `recent_jsonl_files_within`). Most callers only
+/// want the files and ignore the answer.
+///
 /// Symlinks and junctions are followed throughout: directories are resolved
 /// through links when recursing, and the recency check below reads the
 /// *target* file's mtime — a link's own (usually ancient) timestamp must not
@@ -884,7 +904,18 @@ fn oversized_log(path: &Path, size: u64) {
 /// Because links are followed, the walk is iterative and bounded: it stops at
 /// `MAX_SCAN_DEPTH` levels, visits at most `MAX_SCAN_DIRS` directories, and
 /// skips canonical paths already seen, so a link cycle can't spin forever.
-fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
+fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) -> bool {
+    recent_jsonl_files_within(root, out, MAX_SCAN_DIRS)
+}
+
+/// `recent_jsonl_files` with the directory cap given, so a test can reach it
+/// without making twenty thousand directories. The answer is `false` when the
+/// walk stopped at the directory cap, did not go below `MAX_SCAN_DEPTH`, could
+/// not list a directory or stat an entry, or skipped a file over
+/// `MAX_LOG_FILE_BYTES`: any of those can hide a log, and a count taken from
+/// the logs is then not known to be complete. A file older than 31 days is
+/// out of the scan by design and is not a skip.
+fn recent_jsonl_files_within(root: &Path, out: &mut Vec<PathBuf>, max_dirs: usize) -> bool {
     let cutoff = SystemTime::now() - Duration::from_secs(31 * 86_400);
     // Canonical paths of link targets already entered. Cycles and aliases can
     // only form through links, so plain directories skip the canonicalize —
@@ -893,6 +924,7 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
     let mut seen: HashSet<PathBuf> = HashSet::new();
     let mut stack: Vec<(PathBuf, usize)> = Vec::new();
     let mut dirs_visited = 0usize;
+    let mut complete = true;
     // Set when any link is traversed: a link can alias a subtree that is
     // also reached directly, so only then do the collected files need a
     // canonical-identity dedup (below). Link-free trees pay nothing.
@@ -904,31 +936,46 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
 
     while let Some((dir, depth)) = stack.pop() {
         dirs_visited += 1;
-        if dirs_visited > MAX_SCAN_DIRS {
+        if dirs_visited > max_dirs {
             eprintln!(
-                "[aitm] spend: scan of {} stopped after {MAX_SCAN_DIRS} directories — results may be partial",
+                "[aitm] spend: scan of {} stopped after {max_dirs} directories — results may be partial",
                 root.display()
             );
-            return;
+            return false;
         }
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
-        for entry in entries.flatten() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            complete = false;
+            continue;
+        };
+        for entry in entries {
+            let Ok(entry) = entry else {
+                complete = false;
+                continue;
+            };
             let path = entry.path();
             // The listing itself carries the entry type (free on Windows —
             // no extra stat). Symlinks/junctions report as symlink here, not
             // as their target type.
-            let Ok(ftype) = entry.file_type() else { continue };
+            let Ok(ftype) = entry.file_type() else {
+                complete = false;
+                continue;
+            };
             if ftype.is_dir() {
                 if depth + 1 > MAX_SCAN_DEPTH {
+                    complete = false;
                     continue;
                 }
                 stack.push((path, depth + 1));
             } else if ftype.is_symlink() {
                 // Links still resolve (relocated logs must be found), but
                 // only they pay for canonicalize and the seen-set gate.
-                let Ok(meta) = fs::metadata(&path) else { continue };
+                let Ok(meta) = fs::metadata(&path) else {
+                    complete = false;
+                    continue;
+                };
                 if meta.is_dir() {
                     if depth + 1 > MAX_SCAN_DEPTH {
+                        complete = false;
                         continue;
                     }
                     let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
@@ -943,15 +990,20 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
                     // hide a recently written log.
                     if meta.len() > MAX_LOG_FILE_BYTES {
                         oversized_log(&path, meta.len());
+                        complete = false;
                         continue;
                     }
                     followed_link = true;
                     out.push(path);
                 }
             } else if path.extension().is_some_and(|e| e == "jsonl") {
-                let Ok(meta) = entry.metadata() else { continue };
+                let Ok(meta) = entry.metadata() else {
+                    complete = false;
+                    continue;
+                };
                 if meta.len() > MAX_LOG_FILE_BYTES {
                     oversized_log(&path, meta.len());
+                    complete = false;
                     continue;
                 }
                 if meta.modified().map(|m| m >= cutoff).unwrap_or(true) {
@@ -975,6 +1027,7 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
             }
         }
     }
+    complete
 }
 
 /// A later write that only appended bytes. Session logs are JSONL; a
@@ -2768,36 +2821,53 @@ pub fn mcp_usage_30d() -> HashMap<String, crate::mcp_usage::McpUsage> {
     mcp_usage_for_window(map.values().map(|e| &e.data.mcp), today)
 }
 
-/// How many days back the given files' spend reaches, counting today as the
-/// first: 0 when there is none. The earliest day any file carries is the
-/// evidence; a day after `today` (a clock behind the log's) is not counted.
-/// Takes `today` and the maps as parameters so a test can pick both.
-fn scan_covers_days_from<'a>(day_maps: impl Iterator<Item = &'a DayMap>, today: i32) -> i64 {
-    day_maps
-        .flat_map(|m| m.keys().map(|(day, _)| *day))
-        .filter(|day| *day <= today)
-        .min()
-        .map_or(0, |first| i64::from(today - first) + 1)
+/// For how many days the scan can show that Claude Code's logs are kept: the
+/// largest age, in days, of the last activity of a scanned Claude Code log
+/// (`today` minus the newest day its spend carries); `None` when there is no
+/// such log, or when the walk that found them skipped something
+/// (`scan_complete` false).
+///
+/// Claude Code deletes a session log once it has sat idle longer than its
+/// retention period. A log last active A days ago that is still on disk was
+/// kept at every clean-up since, so the retention period was then at least as
+/// long as the idle time that log had; any log active more recently had been
+/// idle no longer at each of them, so it was kept too. No log active within
+/// the last A days has been deleted by age, whatever the setting is or was,
+/// and no settings file needs reading. It is the LAST day that counts: a long
+/// session started 40 days ago and written to today says nothing about 40
+/// days. Only Claude Code's own session logs count, `<project>/<session>.jsonl`
+/// directly in a project folder under the projects `root`: another tool's logs
+/// prove nothing about Claude Code's retention, and a transcript deeper down
+/// (a session's own `subagents/`) can outlive its own idleness because it goes
+/// with its session, so its age shows nothing.
+fn logs_kept_days_among<'a>(
+    root: &Path,
+    scan_complete: bool,
+    files: impl Iterator<Item = (&'a PathBuf, &'a DayMap)>,
+    today: i32,
+) -> Option<i64> {
+    if !scan_complete {
+        return None;
+    }
+    files
+        .filter(|(path, _)| path.strip_prefix(root).is_ok_and(|below| below.components().count() == 2))
+        .filter_map(|(_, days)| days.keys().map(|(day, _)| *day).max())
+        .map(|last| i64::from(today) - i64::from(last))
+        .max()
 }
 
-/// `scan_covers_days_from` over only the scan cache's Claude Code files: one
-/// folder or deeper under the projects `root`, the same test `claude_sessions`
-/// and `session_path_among` apply. The cache holds other tools' logs too, and
-/// counting one of those would let forty days of Codex logs vouch for ten days
-/// of Claude Code's, so a server would be called unused on ten days of
-/// evidence.
-fn scan_covers_days_among<'a>(root: &Path, files: impl Iterator<Item = (&'a PathBuf, &'a DayMap)>, today: i32) -> i64 {
-    scan_covers_days_from(files.filter(|(path, _)| project_of(root, path).is_some()).map(|(_, days)| days), today)
-}
-
-/// How many days back the scan's Claude Code log activity reaches, today
-/// included; 0 when there is none. Read from the scan cache, never a rescan.
-pub fn scan_covers_days() -> i64 {
+/// `logs_kept_days_among` over the files the last scan saw. The scan cache also
+/// holds entries for logs that have since gone (it is only pruned when it is
+/// saved), and a deleted log must not prove that logs are kept: only paths
+/// touched by the current run count. Reads only; never a rescan.
+pub fn logs_kept_days() -> Option<i64> {
     let root = claude_projects_root();
     load_persisted_cache();
     let today = today_days_from_ce();
-    let Ok(map) = cache().lock() else { return 0 };
-    scan_covers_days_among(&root, map.iter().map(|(path, e)| (path, &e.data.days)), today)
+    let complete = CLAUDE_WALK_COMPLETE.load(std::sync::atomic::Ordering::Relaxed);
+    let touched = touched().lock().ok()?;
+    let map = cache().lock().ok()?;
+    logs_kept_days_among(&root, complete, map.iter().filter(|(path, _)| touched.contains(*path)).map(|(path, e)| (path, &e.data.days)), today)
 }
 
 // ---------------------------------------------------------------------------
@@ -3208,13 +3278,14 @@ fn project_spends(per_project: Vec<(String, FileData)>, today: i32) -> Vec<Proje
 }
 
 fn claude(extra: FileData) -> (ProviderSpend, FileData, FileData, FileData) {
-    let root = std::env::var("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".claude"))
-        .join("projects");
+    let root = claude_projects_root();
 
     let mut files = Vec::new();
-    recent_jsonl_files(&root, &mut files);
+    // Not complete while the walk runs, and then whatever the walk says: a
+    // reader never sees the answer of a walk that is half done.
+    CLAUDE_WALK_COMPLETE.store(false, std::sync::atomic::Ordering::Relaxed);
+    let complete = recent_jsonl_files(&root, &mut files);
+    CLAUDE_WALK_COMPLETE.store(complete, std::sync::atomic::Ordering::Relaxed);
     let mut all = FileData::default();
     let mut by_project: HashMap<String, FileData> = HashMap::new();
     for file in files {
@@ -8434,49 +8505,123 @@ mod tests {
         }
     }
 
-    #[test]
-    fn only_claude_code_logs_count_as_coverage() {
-        let today = 739_100;
-        let root = Path::new("/home/me/.claude/projects");
-        let file = |path: PathBuf, day: i32| {
-            let mut days = DayMap::new();
-            days.insert((day, "claude-sonnet-5".to_string()), (1.0, 10.0));
-            (path, days)
-        };
-        let claude = file(root.join("-work-acme").join("a.jsonl"), today - 9); // 10 days of coverage
-        let subagent = file(root.join("-work-acme").join("s-1").join("subagents").join("b.jsonl"), today - 19); // 20
-        let codex = file(PathBuf::from("/home/me/.codex/sessions/2026/09/rollout.jsonl"), today - 39); // 40
-        let loose = file(root.join("loose.jsonl"), today - 49); // 50, but no project's log
-        let covers = |files: &[&(PathBuf, DayMap)]| scan_covers_days_among(root, files.iter().map(|f| (&f.0, &f.1)), today);
-
-        assert_eq!(covers(&[&claude, &codex]), 10, "forty days of another tool's logs do not stretch ten days of Claude Code's");
-        assert_eq!(covers(&[&codex]), 0, "no Claude Code logs, no coverage, whatever else the scan has seen");
-        assert_eq!(covers(&[&claude, &subagent, &codex]), 20, "a subagent transcript deeper under the root is Claude Code activity too");
-        assert_eq!(covers(&[&claude, &loose]), 10, "a file directly in the projects root belongs to no project, as for sessions");
-        assert_eq!(covers(&[]), 0);
+    /// A day map holding one priced day for each given day number.
+    fn spend_days(days: &[i32]) -> DayMap {
+        days.iter().map(|d| ((*d, "claude-sonnet-5".to_string()), (1.0, 10.0))).collect()
     }
 
     #[test]
-    fn scan_covers_days_counts_from_the_earliest_log_day() {
+    fn only_claude_code_logs_count_as_kept() {
         let today = 739_100;
-        let day = |d: i32| {
-            let mut m = DayMap::new();
-            m.insert((d, "claude-sonnet-5".to_string()), (1.0, 10.0));
-            m
+        let root = Path::new("/home/me/.claude/projects");
+        let claude = (root.join("-work-acme").join("a.jsonl"), spend_days(&[today - 10])); // last active 10 days ago
+        let subagent = (root.join("-work-acme").join("s-1").join("subagents").join("b.jsonl"), spend_days(&[today - 20]));
+        let codex = (PathBuf::from("/home/me/.codex/sessions/2026/09/rollout.jsonl"), spend_days(&[today - 40]));
+        let loose = (root.join("loose.jsonl"), spend_days(&[today - 50])); // no project's log
+        let kept = |files: &[&(PathBuf, DayMap)]| logs_kept_days_among(root, true, files.iter().map(|f| (&f.0, &f.1)), today);
+
+        assert_eq!(kept(&[&claude, &codex]), Some(10), "another tool's older log says nothing about Claude Code's retention");
+        assert_eq!(kept(&[&codex]), None, "no Claude Code log, nothing shown, whatever else the scan has seen");
+        assert_eq!(kept(&[&claude, &subagent]), Some(10), "a subagent transcript goes with its session: its age shows nothing");
+        assert_eq!(kept(&[&subagent]), None);
+        assert_eq!(kept(&[&claude, &loose]), Some(10), "a file directly in the projects root belongs to no project, as for sessions");
+        assert_eq!(kept(&[]), None);
+        // A log with no priced day says nothing about when it was last active.
+        let blank = (root.join("-work-acme").join("e.jsonl"), DayMap::new());
+        assert_eq!(kept(&[&blank]), None);
+        // The newest day is the one that counts, and a day after today (a clock behind the log's) is not skipped.
+        let ahead = (root.join("-work-acme").join("f.jsonl"), spend_days(&[today - 30, today + 2]));
+        assert_eq!(kept(&[&ahead]), Some(-2));
+    }
+
+    #[test]
+    fn logs_must_be_demonstrably_kept_for_the_window() {
+        use crate::mcp_usage::{unused_from_history, McpUsage, UNUSED_WINDOW_DAYS};
+        let today = 739_100;
+        let root = Path::new("/home/me/.claude/projects");
+        // A setup that would let the rule name `idle`, if the logs show their retention.
+        let servers = crate::inventory::mcp_from_claude_json(&json!({"mcpServers": {"busy": {"command": "npx"}, "idle": {"command": "npx"}}}));
+        let by_server: HashMap<String, McpUsage> = HashMap::from([("busy".to_string(), McpUsage { calls: 3, result_bytes: 10 })]);
+        let history = crate::changes::daily_history("2026-10-05", UNUSED_WINDOW_DAYS, |_| vec!["busy", "idle"]);
+        let verdict = |files: &[(PathBuf, DayMap)]| {
+            let kept = logs_kept_days_among(root, true, files.iter().map(|(path, days)| (path, days)), today);
+            unused_from_history(&servers, &by_server, kept, &history, "2026-10-05")
         };
-        assert_eq!(scan_covers_days_from(std::iter::empty(), today), 0, "no activity at all");
-        assert_eq!(scan_covers_days_from([DayMap::new()].iter(), today), 0, "a file with no days says nothing");
-        assert_eq!(scan_covers_days_from([day(today)].iter(), today), 1, "today alone is one day");
-        assert_eq!(scan_covers_days_from([day(today - 29)].iter(), today), 30);
-        let maps = [day(today - 5), day(today - 44), day(today - 1)];
-        assert_eq!(scan_covers_days_from(maps.iter(), today), 45, "the earliest file wins");
-        assert_eq!(scan_covers_days_from([day(today + 3)].iter(), today), 0, "a day after today is not coverage");
+        let log = |ago: i32| (root.join("-work-acme").join(format!("session-{ago}.jsonl")), spend_days(&[today - ago]));
+
+        assert!(verdict(&[log(20)]).is_empty(), "the oldest log was last active 20 days ago: one day short of the window");
+        assert_eq!(verdict(&[log(21)]), ["idle"], "last active 21 days ago, and still there");
+        assert_eq!(verdict(&[log(3), log(25), log(9)]), ["idle"], "the oldest surviving log is what shows it");
+        // A long session begun 40 days ago and written to today shows nothing about 40 days: its last activity is today.
+        let long_lived = (root.join("-work-acme").join("long.jsonl"), spend_days(&[today - 40, today - 12, today]));
+        assert!(verdict(std::slice::from_ref(&long_lived)).is_empty());
+        assert!(verdict(&[long_lived, log(5)]).is_empty());
+        // Another tool's old log is not Claude Code's.
+        let codex = (PathBuf::from("/home/me/.codex/sessions/2026/09/rollout.jsonl"), spend_days(&[today - 25]));
+        assert!(verdict(&[log(5), codex]).is_empty());
+        assert!(verdict(&[]).is_empty(), "no log at all");
+    }
+
+    #[test]
+    fn a_partial_scan_means_no_verdict() {
+        use crate::mcp_usage::{unused_from_history, McpUsage, UNUSED_WINDOW_DAYS};
+        let base = std::env::temp_dir().join(format!("pane-scan-partial-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let tree = |name: &str| {
+            let dir = base.join(name);
+            fs::create_dir_all(dir.join("p1")).unwrap();
+            fs::write(dir.join("p1").join("a.jsonl"), "{}\n").unwrap();
+            dir
+        };
+        let walk = |dir: &Path, max_dirs: usize| recent_jsonl_files_within(dir, &mut Vec::new(), max_dirs);
+
+        // A walk that saw everything says so, or the cases below prove nothing.
+        let whole = tree("whole");
+        assert!(walk(&whole, 100));
+        // Each way of skipping something that could be a log.
+        let wide = tree("wide");
+        fs::create_dir_all(wide.join("p2")).unwrap();
+        fs::create_dir_all(wide.join("p3")).unwrap();
+        assert!(!walk(&wide, 2), "stopped at the directory cap");
+        assert!(walk(&wide, 100));
+        let deep = tree("deep");
+        let mut below = deep.clone();
+        for i in 0..MAX_SCAN_DEPTH + 2 {
+            below = below.join(format!("d{i}"));
+        }
+        fs::create_dir_all(&below).unwrap();
+        assert!(!walk(&deep, 100), "did not go below the depth cap");
+        let huge = tree("huge");
+        fs::File::create(huge.join("p1").join("huge.jsonl")).unwrap().set_len(MAX_LOG_FILE_BYTES + 1).unwrap();
+        assert!(!walk(&huge, 100), "skipped a file over the size cap");
+        assert!(!walk(&base.join("missing"), 100), "could not list the folder at all");
+        #[cfg(unix)]
+        {
+            let linked = tree("linked");
+            std::os::unix::fs::symlink(base.join("nowhere"), linked.join("p1").join("moved.jsonl")).unwrap();
+            assert!(!walk(&linked, 100), "a link that leads nowhere may be a log on a drive that is not there");
+        }
+        let _ = fs::remove_dir_all(&base);
+
+        // The measure and the rule keep to it: logs that would show 25 days show nothing from a partial scan.
+        let today = 739_100;
+        let root = Path::new("/home/me/.claude/projects");
+        let old_log = (root.join("-work-acme").join("old.jsonl"), spend_days(&[today - 25]));
+        let kept = |complete: bool| logs_kept_days_among(root, complete, [&old_log].into_iter().map(|f| (&f.0, &f.1)), today);
+        assert_eq!(kept(true), Some(25));
+        assert_eq!(kept(false), None);
+        let servers = crate::inventory::mcp_from_claude_json(&json!({"mcpServers": {"busy": {"command": "npx"}, "idle": {"command": "npx"}}}));
+        let by_server: HashMap<String, McpUsage> = HashMap::from([("busy".to_string(), McpUsage { calls: 3, result_bytes: 10 })]);
+        let history = crate::changes::daily_history("2026-10-05", UNUSED_WINDOW_DAYS, |_| vec!["busy", "idle"]);
+        assert_eq!(unused_from_history(&servers, &by_server, kept(true), &history, "2026-10-05"), ["idle"], "complete: named");
+        assert!(unused_from_history(&servers, &by_server, kept(false), &history, "2026-10-05").is_empty(), "partial: nobody");
     }
 
     #[test]
     fn a_called_server_with_an_awkward_name_is_never_named_unused() {
         use crate::inventory::McpServer;
-        use crate::mcp_usage::{attach, normalized, unused, McpUsage};
+        use crate::mcp_usage::{attach, normalized, unused_from_history, McpUsage, UNUSED_WINDOW_DAYS};
+        const TODAY: &str = "2026-10-05";
         let server = |name: &str| McpServer {
             name: name.into(),
             client: "Claude Code".into(),
@@ -8488,6 +8633,7 @@ mod tests {
             env_count: 0,
             pin_to: None,
             source_file: None,
+            switched_off_in_a_project: false,
             usage: None,
         };
         // What the scan makes of one call to each tool name, through the real line parser and the real window sum.
@@ -8501,16 +8647,21 @@ mod tests {
             let today = data.mcp.keys().map(|(day, _)| *day).max().expect("the calls were counted");
             mcp_usage_for_window([&data.mcp].into_iter(), today)
         };
+        // The rule, given these servers and calls, with every other condition in order.
+        let named = |servers: &[McpServer], by_server: &HashMap<String, McpUsage>| {
+            let names: Vec<&str> = servers.iter().map(|s| s.name.as_str()).collect();
+            let history = crate::changes::daily_history(TODAY, UNUSED_WINDOW_DAYS, |_| names.clone());
+            unused_from_history(servers, by_server, Some(UNUSED_WINDOW_DAYS), &history, TODAY)
+        };
         // The tool name Claude Code builds: `mcp__` + the normalized name + `__` + the tool.
         let tool = |name: &str| format!("mcp__{}__search", normalized(name));
-        let throughout: HashSet<String> = ["busy", "foo", "foo!", "My Server!"].iter().map(|n| n.to_string()).collect();
 
         // `My Server!` normalizes to `My_Server_`, so its calls are logged under `My_Server`: it was called, and
         // must not read as a server with no calls.
         let by_server = counted(&[tool("busy"), tool("My Server!")]);
         assert_eq!(by_server.get("My_Server").map(|u| u.calls), Some(1), "the calls land under the shorter key");
         let mut servers = vec![server("busy"), server("My Server!")];
-        assert!(unused(&servers, &by_server, 30, true, Some(&throughout)).is_empty(), "the server was called");
+        assert!(named(&servers, &by_server).is_empty(), "the server was called");
         attach(&mut servers, &by_server);
         assert_eq!(servers[0].usage.map(|u| u.calls), Some(1));
         assert_eq!(servers[1].usage, None, "no figure rather than a wrong one");
@@ -8518,7 +8669,7 @@ mod tests {
         // `foo!`'s calls are logged under `foo`: neither is named, and `foo` is not shown them as its own.
         let by_server = counted(&[tool("busy"), tool("foo!")]);
         let mut servers = vec![server("busy"), server("foo"), server("foo!")];
-        assert!(unused(&servers, &by_server, 30, true, Some(&throughout)).is_empty(), "foo! was called, foo may have been");
+        assert!(named(&servers, &by_server).is_empty(), "foo! was called, foo may have been");
         attach(&mut servers, &by_server);
         assert_eq!((servers[1].usage, servers[2].usage), (None, None));
 
@@ -8540,9 +8691,8 @@ mod tests {
         ];
         for (name, tools) in awkward {
             let by_server = counted(&[vec![tool("busy")], tools.clone()].concat());
-            let all: HashSet<String> = ["busy", name].iter().map(|n| n.to_string()).collect();
             let mut servers = vec![server("busy"), server(name)];
-            assert!(unused(&servers, &by_server, 30, true, Some(&all)).is_empty(), "{name:?} was called as {tools:?}");
+            assert!(named(&servers, &by_server).is_empty(), "{name:?} was called as {tools:?}");
             attach(&mut servers, &by_server);
             assert!(matches!(servers[1].usage, None | Some(McpUsage { calls: 1, .. })), "{name:?} shows {:?}", servers[1].usage);
         }

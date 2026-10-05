@@ -608,8 +608,7 @@ fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     let unused = mcp_usage::unused_from_history(
         &inv.mcp_servers,
         &mcp_by_server,
-        spend::scan_covers_days(),
-        inventory::claude_log_retention().covers(mcp_usage::UNUSED_NEEDS_DAYS),
+        spend::logs_kept_days(),
         &changes::load_from(&providers::config_dir()),
         &today,
     );

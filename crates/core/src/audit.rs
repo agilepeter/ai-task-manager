@@ -586,7 +586,7 @@ mod tests {
         McpServer {
             name: name.into(), client: "Claude Code".into(), scope: "user".into(), project: None, transport: "stdio".into(),
             target: "npx".into(), package: package.map(str::to_string), env_count: 0, pin_to: None, source_file: None,
-            usage: None,
+            switched_off_in_a_project: false, usage: None,
         }
     }
 
