@@ -448,6 +448,7 @@
   "detail.week.fromDays.one": "À partir de {n} jour de mesures sur cet ordinateur, sur les quatre dernières semaines au maximum.",
   "detail.week.fromDays.other": "À partir de {n} jours de mesures sur cet ordinateur, sur les quatre dernières semaines au maximum.",
   "detail.limitTime.line": "{metric} : à 100% {times} au cours des 30 derniers jours, {total} au total",
+  "detail.limitTime.lineNoTime": "{metric} : à 100% {times} au cours des 30 derniers jours",
   "detail.now.resetsIn": "se réinitialise dans {time}",
   "detail.now.resettingNow": "réinitialisation en cours",
   "detail.now.empty": "Aucune mesure en direct.",

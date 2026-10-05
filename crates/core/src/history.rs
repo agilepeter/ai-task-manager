@@ -132,26 +132,45 @@ pub fn limit_samples_at(
     provider: Option<&str>,
     since: i64,
 ) -> rusqlite::Result<Vec<(String, String, LimitReadings)>> {
-    let mut stmt = conn.prepare(
-        "SELECT provider, metric, at, used, resets_at FROM samples
-         WHERE at >= ?1 AND (?2 IS NULL OR provider = ?2) ORDER BY provider, metric, at",
-    )?;
-    let rows = stmt.query_map(params![since, provider], |row| {
+    Ok(group_limit_rows(flat_limit_rows(conn, provider, since)?))
+}
+
+/// One provider is looked up through `samples_lookup` (provider, metric, at);
+/// a single statement with `?2 IS NULL OR provider = ?2` would stop SQLite
+/// using that index, so the two shapes are two statements.
+const ONE_PROVIDER_SQL: &str = "SELECT provider, metric, at, used, resets_at FROM samples
+     WHERE provider = ?1 AND at >= ?2 ORDER BY metric, at";
+const ALL_PROVIDERS_SQL: &str = "SELECT provider, metric, at, used, resets_at FROM samples
+     WHERE at >= ?1 ORDER BY provider, metric, at";
+
+type FlatRow = (String, String, (i64, f64, Option<i64>));
+
+/// The rows exactly as the database returns them, in order. Kept apart from
+/// the grouping so the process-wide store's lock can be released before any
+/// further work is done on them.
+fn flat_limit_rows(conn: &Connection, provider: Option<&str>, since: i64) -> rusqlite::Result<Vec<FlatRow>> {
+    let map = |row: &rusqlite::Row| -> rusqlite::Result<FlatRow> {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             (row.get::<_, i64>(2)?, row.get::<_, f64>(3)?, row.get::<_, Option<i64>>(4)?),
         ))
-    })?;
+    };
+    match provider {
+        Some(p) => conn.prepare(ONE_PROVIDER_SQL)?.query_map(params![p, since], map)?.collect(),
+        None => conn.prepare(ALL_PROVIDERS_SQL)?.query_map(params![since], map)?.collect(),
+    }
+}
+
+fn group_limit_rows(rows: Vec<FlatRow>) -> Vec<(String, String, LimitReadings)> {
     let mut out: Vec<(String, String, LimitReadings)> = Vec::new();
-    for row in rows {
-        let (provider, metric, reading) = row?;
+    for (provider, metric, reading) in rows {
         match out.last_mut() {
             Some((p, m, readings)) if *p == provider && *m == metric => readings.push(reading),
             _ => out.push((provider, metric, vec![reading])),
         }
     }
-    Ok(out)
+    out
 }
 
 /// When in the week a limit gets used: points of the limit burned in each
@@ -257,13 +276,17 @@ pub fn series(provider: &str, since: i64) -> Vec<Series> {
         .unwrap_or_default()
 }
 
-/// `limit_samples_at` against the process-wide store; empty when it cannot be read.
+/// `limit_samples_at` against the process-wide store; empty when it cannot be
+/// read. The store's lock covers only reading the flat rows out of SQLite: it
+/// is released before they are grouped, so the recorder and every other reader
+/// are never made to wait on thirty days of readings being shaped.
 pub fn limit_samples(provider: Option<&str>, since: i64) -> Vec<(String, String, LimitReadings)> {
-    store()
+    let rows = store()
         .lock()
         .ok()
-        .and_then(|guard| guard.as_ref().and_then(|conn| limit_samples_at(conn, provider, since).ok()))
-        .unwrap_or_default()
+        .and_then(|guard| guard.as_ref().and_then(|conn| flat_limit_rows(conn, provider, since).ok()))
+        .unwrap_or_default();
+    group_limit_rows(rows)
 }
 
 #[cfg(test)]
@@ -397,6 +420,20 @@ mod tests {
         assert_eq!(all[0].2.len(), 3);
         assert_eq!(all[1].2, [(20 * MIN, 70.0, Some(5))]);
         assert!(limit_samples_at(&conn, Some("nobody"), 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn one_provider_is_read_through_the_index() {
+        let conn = db();
+        let plan: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {ONE_PROVIDER_SQL}"))
+            .unwrap()
+            .query_map(params!["claude", 0_i64], |row| row.get::<_, String>(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let plan = plan.join(" | ");
+        assert!(plan.contains("samples_lookup"), "a provider page would scan every reading: {plan}");
     }
 
     #[test]

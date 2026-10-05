@@ -75,3 +75,12 @@ test("a hostile metric label in the limit time line renders as text", async () =
   assert.ok(html.includes("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;&#39;&amp;"), html);
   assert.equal((html.match(/</g) ?? []).length, 4, "only the wrapper div and the one paragraph, opened and closed");
 });
+
+test("a limit reached with no counted time shows no duration", async () => {
+  const { limitTimeSection, setActiveLocale } = await loadDetailModule();
+  setActiveLocale("en");
+  const lines = (rows) => [...limitTimeSection(rows).matchAll(/<p>(.*?)<\/p>/g)].map((m) => m[1]);
+  assert.deepEqual(lines([row("Weekly", 1, 0)]), ["Weekly: at 100% 1 time in the last 30 days"]);
+  assert.deepEqual(lines([{ ...row("Weekly", 2, 0), totalMs: 59_999 }]), ["Weekly: at 100% 2 times in the last 30 days"]);
+  assert.deepEqual(lines([row("Weekly", 1, 1)]), ["Weekly: at 100% 1 time in the last 30 days, 1m in all"], "a whole minute is shown");
+});

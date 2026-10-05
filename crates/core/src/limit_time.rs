@@ -16,14 +16,14 @@ use serde::Serialize;
 pub(crate) const FINDING_IDS: &[&str] = &["limit-time"];
 
 /// A reading at or above this is a limit that has been reached.
-pub const AT_LIMIT: f64 = 100.0;
+const AT_LIMIT: f64 = 100.0;
 /// Two readings further apart than this say nothing about the time between
 /// them. The same rule the burn profile uses for "when was it used".
-pub const MAX_GAP_MS: i64 = 90 * 60_000;
+const MAX_GAP_MS: i64 = 90 * 60_000;
 /// The span the page and the finding look back over.
 pub const WINDOW_MS: i64 = 30 * 24 * 3_600_000;
 /// A limit's total at 100 percent that is worth a finding.
-pub const FINDING_AT_MS: i64 = 2 * 3_600_000;
+const FINDING_AT_MS: i64 = 2 * 3_600_000;
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +51,14 @@ pub struct LimitTime {
 ///
 /// A pair further apart than the gap ends the stretch. Out-of-order readings
 /// count nothing and end it; a reset time already past is simply not between.
+///
+/// Two things are left uncounted on purpose, because both would be a guess:
+/// - A limit at 100 percent now, with no later reading, adds one time but no
+///   time after its last reading: nothing is measured up to the present.
+/// - A stretch that began before the window is counted from its first reading
+///   inside the window, since what came earlier was never read.
+///
+/// Both under-report rather than invent time nobody observed.
 pub fn from_points(provider: &str, metric: &str, points: &[(i64, f64, Option<i64>)]) -> Option<LimitTime> {
     let (mut times, mut total, mut longest) = (0u32, 0i64, 0i64);
     let (mut open, mut run) = (false, 0i64);
@@ -91,6 +99,17 @@ pub fn from_points(provider: &str, metric: &str, points: &[(i64, f64, Option<i64
     (times > 0).then(|| LimitTime { provider: provider.to_string(), metric: metric.to_string(), times, total_ms: total, longest_ms: longest })
 }
 
+/// The one order limits are listed and chosen in: most time at the limit, then
+/// the longest single stretch, then provider, then metric. It is total, so a
+/// tie never depends on the order the database happened to return rows in.
+pub fn order(a: &LimitTime, b: &LimitTime) -> std::cmp::Ordering {
+    b.total_ms
+        .cmp(&a.total_ms)
+        .then_with(|| b.longest_ms.cmp(&a.longest_ms))
+        .then_with(|| a.provider.cmp(&b.provider))
+        .then_with(|| a.metric.cmp(&b.metric))
+}
+
 /// At most one finding, present only when some limit spent `FINDING_AT_MS` or
 /// more at 100 percent. The title is a count of such limits and nothing else:
 /// titles leave the machine in the seat report, and a provider, a card or a
@@ -99,7 +118,7 @@ pub fn from_points(provider: &str, metric: &str, points: &[(i64, f64, Option<i64
 /// each language words it itself; which limit it was is on the provider's page.
 pub fn opportunities(rows: &[LimitTime]) -> Vec<Opportunity> {
     let over: Vec<&LimitTime> = rows.iter().filter(|r| r.total_ms >= FINDING_AT_MS).collect();
-    let Some(top) = over.iter().copied().max_by_key(|r| r.total_ms) else {
+    let Some(top) = over.iter().copied().min_by(|a, b| order(a, b)) else {
         return Vec::new();
     };
     let (title, detail) = messages(top, over.len());
@@ -299,16 +318,65 @@ mod tests {
                         assert!(!text.contains("While a limit is at 100%"), "{locale} detail still reads in English: {text}");
                         assert_ne!(i18n::render(locale, &title_msg), i18n::render("en", &title_msg), "{locale} title still reads in English");
                     }
-                    if std::env::var("SHOW_LIMIT_TIME").is_ok() {
-                        eprintln!("[{locale}] {name} x{times}: {text}");
-                    }
                     let title = i18n::render(locale, &title_msg);
                     assert!(!title.contains('{') && !title.contains("finding."), "{locale}: {title}");
-                    if std::env::var("SHOW_LIMIT_TIME").is_ok() {
-                        eprintln!("[{locale}] title x{times}: {title}");
-                    }
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_reset_on_either_reading_is_not_between_them() {
+        // Reset at A's own instant: not strictly after it, so the whole gap counts.
+        let at_a = [pt_reset(0, 100.0, 0), pt(60, 100.0)];
+        assert_eq!(from_points("p", "s", &at_a).unwrap().total_ms, 60 * MIN);
+        // Reset at A's instant and B below: nothing is known, nothing counts.
+        let at_a_drop = [pt_reset(0, 100.0, 0), pt(60, 50.0)];
+        assert_eq!(from_points("p", "s", &at_a_drop).unwrap().total_ms, 0);
+        // Reset at B's instant and B below: not strictly before B, so nothing counts.
+        let at_b_drop = [pt_reset(0, 100.0, 60), pt(60, 50.0)];
+        assert_eq!(from_points("p", "s", &at_b_drop).unwrap().total_ms, 0);
+        // Readings exactly 90 minutes apart still count; 90 minutes and a millisecond do not.
+        let edge = [pt(0, 100.0), pt(90, 100.0)];
+        assert_eq!(from_points("p", "s", &edge).unwrap().total_ms, 90 * MIN);
+    }
+
+    #[test]
+    fn a_shuffled_series_gives_a_fixed_answer() {
+        // Minutes 0, 30, 20, 20, 50 all at the limit, no resets. Pairs: 0->30 counts 30;
+        // 30->20 goes backwards and ends the run; 20->20 counts nothing; 20->50 counts 30.
+        let points = [pt(0, 100.0), pt(30, 100.0), pt(20, 100.0), pt(20, 100.0), pt(50, 100.0)];
+        let got = from_points("p", "s", &points).unwrap();
+        assert_eq!((got.times, got.total_ms, got.longest_ms), (2, 60 * MIN, 30 * MIN));
+    }
+
+    #[test]
+    fn ties_pick_the_same_limit_every_time() {
+        let row = |provider: &str, metric: &str, total: i64, longest: i64| LimitTime {
+            provider: provider.into(),
+            metric: metric.into(),
+            times: 1,
+            total_ms: total,
+            longest_ms: longest,
+        };
+        let mut rows = vec![
+            row("b", "Weekly", 3 * HOUR, HOUR),
+            row("a", "Weekly", 3 * HOUR, HOUR),
+            row("a", "Session", 3 * HOUR, HOUR),
+            row("z", "Session", 3 * HOUR, 2 * HOUR),
+            row("z", "Weekly", 4 * HOUR, 0),
+        ];
+        rows.sort_by(order);
+        let names: Vec<(&str, &str)> = rows.iter().map(|r| (r.provider.as_str(), r.metric.as_str())).collect();
+        assert_eq!(names, [("z", "Weekly"), ("z", "Session"), ("a", "Session"), ("a", "Weekly"), ("b", "Weekly")]);
+        // The finding takes the first of that order whichever way the rows arrive.
+        let forward = opportunities(&rows);
+        rows.reverse();
+        let backward = opportunities(&rows);
+        assert_eq!(forward[0].detail_msg, backward[0].detail_msg);
+        let tied = [row("b", "Weekly", 3 * HOUR, HOUR), row("a", "Weekly", 3 * HOUR, 2 * HOUR)];
+        let flipped = [tied[1].clone(), tied[0].clone()];
+        assert_eq!(opportunities(&tied)[0].detail_msg, opportunities(&flipped)[0].detail_msg);
+        assert_eq!(opportunities(&tied)[0].detail_msg.as_ref().unwrap().vars.len(), 3);
     }
 }

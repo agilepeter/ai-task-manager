@@ -30,7 +30,7 @@ interface BurnProfile {
 }
 
 /** One limit that reached 100 percent in the last 30 days (get_limit_time). */
-export interface LimitTime {
+interface LimitTime {
   provider: string;
   metric: string;
   times: number;
@@ -259,8 +259,14 @@ function resetText(ms: number): string {
 /// original look ("2h 5m", not "2h 05m").
 function until(ms: number): string {
   const left = ms - Date.now();
-  if (left <= 0) return t("time.mins", { m: 0 });
-  const m = Math.floor(left / 60_000);
+  return minutesText(left <= 0 ? 0 : Math.floor(left / 60_000));
+}
+
+/// Whole minutes as the locale's own days-and-hours, hours-and-minutes or
+/// minutes, from the `time.*` keys. The one copy in this file; the similar
+/// ones in inventory.ts and main.ts follow slightly different rules and are
+/// deliberately left as they are.
+function minutesText(m: number): string {
   if (m >= 1440) return t("time.daysHours", { d: Math.floor(m / 1440), h: Math.floor((m % 1440) / 60) });
   if (m >= 60) return t("time.hoursMins", { h: Math.floor(m / 60), m: m % 60 });
   return t("time.mins", { m });
@@ -399,15 +405,6 @@ function wireCrosshair(root: HTMLElement): void {
 // Time at the limit
 // ---------------------------------------------------------------------------
 
-/// A length of time through the same `time.*` keys `until()` uses, whole
-/// minutes, so every unit word and its order are the locale's own.
-function spanText(ms: number): string {
-  const m = Math.max(0, Math.floor(ms / 60_000));
-  if (m >= 1440) return t("time.daysHours", { d: Math.floor(m / 1440), h: Math.floor((m % 1440) / 60) });
-  if (m >= 60) return t("time.hoursMins", { h: Math.floor(m / 60), m: m % 60 });
-  return t("time.mins", { m });
-}
-
 /// One line per limit that reached 100 percent, most time first, under the
 /// forecast. Nothing at all (no heading, no "never" line) when none did.
 /// Each line is one translated sentence; the count and the duration are
@@ -417,11 +414,14 @@ export function limitTimeSection(rows: LimitTime[]): string {
   if (!lines.length) return "";
   return `<div class="dt-forecast dt-limit-time">${lines
     .map((r) => {
-      const text = t("detail.limitTime.line", {
-        metric: displayMetricLabel(r.metric),
-        times: plural("unit.times", r.times),
-        total: spanText(r.totalMs),
-      });
+      const metric = displayMetricLabel(r.metric);
+      const times = plural("unit.times", r.times);
+      // A limit seen at 100 percent once, with nothing measured around it,
+      // has no duration to show: "0m in all" would claim it was measured.
+      const text =
+        r.totalMs < 60_000
+          ? t("detail.limitTime.lineNoTime", { metric, times })
+          : t("detail.limitTime.line", { metric, times, total: minutesText(Math.floor(r.totalMs / 60_000)) });
       return `<p>${esc(text)}</p>`;
     })
     .join("")}</div>`;
@@ -1250,6 +1250,8 @@ async function loadHistory(): Promise<void> {
     historyFor = id;
   } catch {
     history = [];
+    // An older answer must not stay on screen as if it were current.
+    limitTimes.delete(id);
   }
   loading = false;
   render(true);

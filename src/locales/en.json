@@ -448,6 +448,7 @@
   "detail.week.fromDays.one": "From {n} day of readings on this computer, over the last four weeks at most.",
   "detail.week.fromDays.other": "From {n} days of readings on this computer, over the last four weeks at most.",
   "detail.limitTime.line": "{metric}: at 100% {times} in the last 30 days, {total} in all",
+  "detail.limitTime.lineNoTime": "{metric}: at 100% {times} in the last 30 days",
   "detail.now.resetsIn": "resets in {time}",
   "detail.now.resettingNow": "resetting now",
   "detail.now.empty": "No live readings.",

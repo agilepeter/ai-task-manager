@@ -448,6 +448,7 @@
   "detail.week.fromDays.one": "Aus {n} Tag an Messungen auf diesem Computer, über höchstens die letzten vier Wochen.",
   "detail.week.fromDays.other": "Aus {n} Tagen an Messungen auf diesem Computer, über höchstens die letzten vier Wochen.",
   "detail.limitTime.line": "{metric}: {times} bei 100% in den letzten 30 Tagen, insgesamt {total}",
+  "detail.limitTime.lineNoTime": "{metric}: {times} bei 100% in den letzten 30 Tagen",
   "detail.now.resetsIn": "setzt sich in {time} zurück",
   "detail.now.resettingNow": "wird gerade zurückgesetzt",
   "detail.now.empty": "Keine Live-Messungen.",

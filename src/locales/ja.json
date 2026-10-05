@@ -445,6 +445,7 @@
   "detail.week.hardestWithReset": "これまでで最も消費が多い時間帯：{day} の {hour} 頃。次回のリセット：{resetDay} {resetHour}（枠で表示）。",
   "detail.week.fromDays.other": "このコンピューターで記録された直近最大 4 週間分、{n} 日間のデータに基づきます。",
   "detail.limitTime.line": "{metric}：直近 30 日間で {times} 100% に達し、合計 {total}",
+  "detail.limitTime.lineNoTime": "{metric}：直近 30 日間で {times} 100% に達しました",
   "detail.now.resetsIn": "{time}後にリセット",
   "detail.now.resettingNow": "リセット中",
   "detail.now.empty": "リアルタイムデータはありません。",

@@ -876,6 +876,27 @@ mod tests {
     }
 
     #[test]
+    fn duration_msg_picks_the_unit_by_size() {
+        let shape = |minutes: u64| {
+            let m = duration_msg(minutes);
+            let vars: Vec<String> = m
+                .vars
+                .iter()
+                .map(|(k, v)| match v {
+                    Var::Text(t) => format!("{k}={t}"),
+                    Var::Msg(_) => format!("{k}=msg"),
+                })
+                .collect();
+            format!("{} {}", m.key, vars.join(","))
+        };
+        assert_eq!(shape(0), "time.mins m=1", "under a minute reads as one");
+        assert_eq!(shape(59), "time.mins m=59");
+        assert_eq!(shape(60), "time.hoursMins h=1,m=0");
+        assert_eq!(shape(1439), "time.hoursMins h=23,m=59");
+        assert_eq!(shape(1440), "time.daysHours d=1,h=0");
+    }
+
+    #[test]
     fn render_falls_back_to_english_then_the_key() {
         let dicts = scratch_dict();
         // "enOnly" has no ru forms at all: candidates enOnly.few and

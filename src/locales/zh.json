@@ -445,6 +445,7 @@
   "detail.week.hardestWithReset": "目前消耗最多的时段：{day} {hour} 前后。下次重置：{resetDay} {resetHour}（已标出）。",
   "detail.week.fromDays.other": "基于本机 {n} 天的记录，最长回溯四周。",
   "detail.limitTime.line": "{metric}：过去 30 天{times}达到 100%，累计 {total}",
+  "detail.limitTime.lineNoTime": "{metric}：过去 30 天{times}达到 100%",
   "detail.now.resetsIn": "{time}后重置",
   "detail.now.resettingNow": "正在重置",
   "detail.now.empty": "暂无实时数据。",

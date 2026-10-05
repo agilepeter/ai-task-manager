@@ -533,7 +533,7 @@ fn limit_time_rows(provider: Option<&str>, since: i64) -> Vec<limit_time::LimitT
         .iter()
         .filter_map(|(provider, metric, points)| limit_time::from_points(provider, metric, points))
         .collect();
-    rows.sort_by(|a, b| b.total_ms.cmp(&a.total_ms).then_with(|| a.metric.cmp(&b.metric)));
+    rows.sort_by(limit_time::order);
     rows
 }
 

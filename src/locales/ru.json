@@ -451,6 +451,7 @@
   "detail.week.fromDays.few": "На основе {n} дней наблюдений на этом компьютере, максимум за последние четыре недели.",
   "detail.week.fromDays.many": "На основе {n} дней наблюдений на этом компьютере, максимум за последние четыре недели.",
   "detail.limitTime.line": "{metric}: на уровне 100% было {times} за последние 30 дней, всего {total}",
+  "detail.limitTime.lineNoTime": "{metric}: на уровне 100% было {times} за последние 30 дней",
   "detail.now.resetsIn": "сброс через {time}",
   "detail.now.resettingNow": "сброс сейчас",
   "detail.now.empty": "Нет актуальных данных.",
