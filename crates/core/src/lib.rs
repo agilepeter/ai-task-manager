@@ -2,6 +2,7 @@
 //! setup, with no UI and no Tauri. The tray app is one consumer; a headless
 //! per-seat agent is meant to be another.
 
+pub mod agent_watch;
 pub mod alerts;
 pub mod audit;
 pub mod changes;

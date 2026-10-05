@@ -36,12 +36,20 @@ const T = (k: string, v?: Record<string, string | number>) => t(`agents.${k}`, v
 /// core: "agents-none", "agents-model-unset" and "agent-unused" come from
 /// crates/core/src/inventory.rs's FINDING_IDS (the custom-agent findings);
 /// "subagent-share" comes from crates/core/src/coaching.rs's FINDING_IDS
-/// (the one usage-coaching finding that is about agents). Every other id in
+/// (the one usage-coaching finding that is about agents); "agent-over-budget"
+/// and "agent-runaway" come from crates/core/src/agent_watch.rs. Every other id in
 /// either registry is about MCP servers, permissions or usage patterns that
 /// have nothing to do with agents, so it stays out of this list. Exported so
 /// scripts/agent-id-registries.test.mjs can check this set against the Rust
 /// source directly, rather than trusting this comment to stay accurate.
-export const AGENT_FINDING_IDS = new Set(["agents-none", "agents-model-unset", "agent-unused", "subagent-share"]);
+export const AGENT_FINDING_IDS = new Set([
+  "agents-none",
+  "agents-model-unset",
+  "agent-unused",
+  "subagent-share",
+  "agent-over-budget",
+  "agent-runaway",
+]);
 
 /// The Audit's own agent guardrail checks (crates/core/src/audit.rs's
 /// agent_checks()) that can actually fail: "agent-tools" and "deny-shell".

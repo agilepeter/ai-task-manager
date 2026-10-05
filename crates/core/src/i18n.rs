@@ -725,6 +725,7 @@ mod tests {
             .chain(crate::drift::FINDING_IDS)
             .chain(crate::changes::FINDING_IDS)
             .chain(crate::mcp_usage::FINDING_IDS)
+            .chain(crate::agent_watch::FINDING_IDS)
             .map(|id| format!("finding.{id}"))
             .collect();
         prefixes.extend(crate::audit::CHECK_KEYS.iter().map(|k| k.to_string()));
@@ -777,6 +778,8 @@ mod tests {
             .chain(crate::digest::DIGEST_KEYS)
             .chain(crate::diagnose::HINT_KEYS)
             .chain(NOTIFY_KEYS)
+            .chain(crate::agent_watch::NOTIFY_KEYS)
+            .chain(crate::agent_watch::ERROR_KEYS)
             .chain(crate::pin::ERROR_KEYS)
             .chain(crate::procs::ERROR_KEYS)
             .chain(crate::ledger::ERROR_KEYS)
@@ -806,6 +809,7 @@ mod tests {
             .chain(crate::drift::FINDING_IDS)
             .chain(crate::changes::FINDING_IDS)
             .chain(crate::mcp_usage::FINDING_IDS)
+            .chain(crate::agent_watch::FINDING_IDS)
             .map(|id| format!("finding.{id}."))
             .collect();
         let check_prefixes: Vec<String> = crate::audit::CHECK_KEYS.iter().map(|k| format!("{k}.")).collect();
@@ -817,13 +821,14 @@ mod tests {
         let alert_keys = crate::alerts::ALERT_KEYS;
         let digest_keys = crate::digest::DIGEST_KEYS;
         let hint_keys = crate::diagnose::HINT_KEYS;
-        let notify_keys = NOTIFY_KEYS;
+        let notify_keys: Vec<&str> = NOTIFY_KEYS.iter().chain(crate::agent_watch::NOTIFY_KEYS).copied().collect();
         let error_keys: Vec<&str> = crate::pin::ERROR_KEYS
             .iter()
             .chain(crate::procs::ERROR_KEYS)
             .chain(crate::ledger::ERROR_KEYS)
             .chain(crate::trust::ERROR_KEYS)
             .chain(crate::changes::ERROR_KEYS)
+            .chain(crate::agent_watch::ERROR_KEYS)
             .chain(EXPORT_ERROR_KEYS)
             .copied()
             .collect();
@@ -845,7 +850,7 @@ mod tests {
             } else if key.starts_with("digest.") {
                 assert!(exact_or_prefix(digest_keys, key), "orphan digest key: {key}");
             } else if key.starts_with("notify.") {
-                assert!(exact_or_prefix(notify_keys, key), "orphan notify key: {key}");
+                assert!(exact_or_prefix(&notify_keys, key), "orphan notify key: {key}");
             } else if key.starts_with("hint.") {
                 assert!(exact_or_prefix(hint_keys, key), "orphan hint key: {key}");
             } else if key.starts_with("error.") {

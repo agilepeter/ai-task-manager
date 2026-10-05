@@ -2683,20 +2683,49 @@ fn agent_spend_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, days: u
 /// each subagent-transcript entry to the shape `agent_spend_from` groups
 /// over, and hands it off.
 pub fn agent_spend(days: u32) -> Vec<AgentSpend> {
-    load_persisted_cache();
-    let today = today_days_from_ce();
-    // Scoped so the cache lock is held only long enough to copy entries out
-    // of it -- `agent_spend_from` below does its own (unrelated) work and
-    // has no business running while the cache stays locked.
-    let entries: Vec<PersistEntry> = {
-        let Ok(map) = cache().lock() else { return Vec::new() };
-        map.values()
-            .filter(|e| e.data.parent_session.is_some())
-            .map(|e| to_agent_entry(&e.data, e.claude.clone(), e.mtime))
-            .collect()
-    };
+    let entries = subagent_entries();
     let rules = clients::load_from(&clients::path());
-    agent_spend_from(entries.iter(), days, today, &rules)
+    agent_spend_from(entries.iter(), days, today_days_from_ce(), &rules)
+}
+
+/// Every cached subagent transcript, copied out of the scan cache. The cache
+/// lock is held only long enough to copy: the grouping that follows does its
+/// own work and has no business running while the cache stays locked.
+fn subagent_entries() -> Vec<PersistEntry> {
+    load_persisted_cache();
+    let Ok(map) = cache().lock() else { return Vec::new() };
+    map.values()
+        .filter(|e| e.data.parent_session.is_some())
+        .map(|e| to_agent_entry(&e.data, e.claude.clone(), e.mtime))
+        .collect()
+}
+
+/// The calendar month so far, not a rolling 30 days: from the 1st of
+/// `today`'s month through `today`, which is exactly `today.day()` days of
+/// the per-day series, whatever the month's length. Pure, so a test can pick
+/// any `today`.
+fn agent_spend_month_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, today: NaiveDate, rules: &[ClientRule]) -> Vec<AgentSpend> {
+    agent_spend_from(entries, today.day(), today.num_days_from_ce(), rules)
+}
+
+/// Subagent spend for this calendar month so far, by agent name.
+pub fn agent_spend_month() -> Vec<AgentSpend> {
+    let entries = subagent_entries();
+    let rules = clients::load_from(&clients::path());
+    agent_spend_month_from(entries.iter(), today_naive_date(), &rules)
+}
+
+/// Test seam for the month window: one agent's per-day costs, run through the
+/// same grouping `agent_spend_month` uses, with `today` chosen by the caller.
+#[cfg(test)]
+pub(crate) fn month_spend_from_daily(agent: &str, daily: &[(NaiveDate, f64)], today: NaiveDate) -> Vec<AgentSpend> {
+    let entry = PersistEntry {
+        parent_session: Some("sess-fixture".to_string()),
+        agent: Some(agent.to_string()),
+        days: daily.iter().map(|(d, c)| (d.num_days_from_ce(), "claude-haiku-4-5".to_string(), *c, 10.0)).collect(),
+        ..Default::default()
+    };
+    agent_spend_month_from([entry].iter(), today, &[])
 }
 
 /// The pure aggregation behind `mcp_usage_30d`: sums each entry's own `mcp`

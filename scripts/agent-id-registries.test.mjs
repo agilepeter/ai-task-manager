@@ -2,7 +2,7 @@
 // Opportunities the Agents view's "Worth a look" section shows) and
 // AGENT_GUARDRAIL_CHECK_IDS (which Audit checks count into its
 // failing-guardrail line). Both are copied from ids the Rust core actually
-// defines (crates/core/src/inventory.rs and coaching.rs's FINDING_IDS test
+// defines (crates/core/src/inventory.rs, coaching.rs and agent_watch.rs's FINDING_IDS test
 // registries, and crates/core/src/audit.rs's agent_checks()), so they can go
 // stale the moment Rust adds or renames an agent-related id without the
 // TypeScript side changing to match. This reads the Rust sources as plain
@@ -66,13 +66,16 @@ async function loadAgentIdSets() {
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 
-test("AGENT_FINDING_IDS matches, in both directions, every 'agent' id in inventory.rs's and coaching.rs's FINDING_IDS", async () => {
+test("AGENT_FINDING_IDS matches, in both directions, every 'agent' id in inventory.rs's, coaching.rs's and agent_watch.rs's FINDING_IDS", async () => {
   const inventoryRs = await rustSource("crates/core/src/inventory.rs");
   const coachingRs = await rustSource("crates/core/src/coaching.rs");
+  const agentWatchRs = await rustSource("crates/core/src/agent_watch.rs");
   const rustIds = new Set(
-    [...findingIdsArray(inventoryRs, "inventory.rs"), ...findingIdsArray(coachingRs, "coaching.rs")].filter((id) =>
-      id.includes("agent"),
-    ),
+    [
+      ...findingIdsArray(inventoryRs, "inventory.rs"),
+      ...findingIdsArray(coachingRs, "coaching.rs"),
+      ...findingIdsArray(agentWatchRs, "agent_watch.rs"),
+    ].filter((id) => id.includes("agent")),
   );
   assert.ok(rustIds.size > 0, "parsed zero agent-related finding ids out of Rust -- the FINDING_IDS array shape probably moved");
 

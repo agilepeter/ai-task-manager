@@ -392,6 +392,8 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
         Some(Msg::new("check.pricing-cache-ttl.pass.detail")),
     ));
     usage.extend(only_if_present(inv, "pricing-drift"));
+    usage.extend(only_if_present(inv, "agent-over-budget"));
+    usage.extend(only_if_present(inv, "agent-runaway"));
     if i.spend30 >= 50.0 {
         usage.push(from_finding(
             inv,
@@ -612,6 +614,20 @@ mod tests {
         };
         let c = super::only_if_present(&inv, "mcp-memory").expect("present");
         assert_eq!(c.status, "consider", "a resting cost is not a failing");
+    }
+
+    #[test]
+    fn the_agent_watch_findings_reach_the_audit_unscored() {
+        let over = [crate::agent_watch::BudgetRow { agent: "Plan".into(), month_to_date: 9.0, monthly_budget: 5.0 }];
+        let run = [crate::agent_watch::Runaway { tool: "Claude Code".into(), area: None, reason: "duration", pace_per_hour: None, minutes: 200 }];
+        let inv = Inventory { opportunities: crate::agent_watch::opportunities(&over, &run), ..Inventory::default() };
+        let r = run_one(&inv);
+        let got = statuses(&r);
+        for id in ["agent-over-budget", "agent-runaway"] {
+            assert!(got.contains(&(id.to_string(), "consider".to_string())), "{id} missing from {got:?}");
+        }
+        let quiet = statuses(&run_one(&Inventory::default()));
+        assert!(quiet.iter().all(|(id, _)| id != "agent-over-budget" && id != "agent-runaway"), "absent when there is nothing to say");
     }
 
     fn agent(name: &str, model: Option<&str>, tools: Option<Vec<&str>>) -> Definition {

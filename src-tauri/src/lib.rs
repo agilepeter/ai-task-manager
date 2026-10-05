@@ -2,7 +2,7 @@ mod tray_projection;
 
 // The data layer lives in the core crate; these keep the `alerts::…`,
 // `providers::…` paths used throughout this file and by `tray_projection`.
-pub(crate) use aitm_core::{alerts, audit, changes, clients, coaching, diagnose, digest, drift, effort, forecast, history, httpapi, i18n, inventory, ledger, mcp_usage, pin, pricing, procs, providers, spend, trust};
+pub(crate) use aitm_core::{agent_watch, alerts, audit, changes, clients, coaching, diagnose, digest, drift, effort, forecast, history, httpapi, i18n, inventory, ledger, mcp_usage, pin, pricing, procs, providers, spend, trust};
 use aitm_core::{card_is_disabled, family_of, is_managed_key_card};
 
 use std::collections::{HashMap, HashSet};
@@ -281,6 +281,62 @@ async fn get_running_agents() -> Result<Vec<procs::RunningAgent>, String> {
     .map_err(|e| format!("agent scan: {e}"))
 }
 
+/// What the Agents view needs to draw the budget editor and the live rule:
+/// what is saved, each budget against this month, who is running away right
+/// now, the user's own fastest live pace (the hint beside an empty field), and
+/// the names a budget may take.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentWatchView {
+    watch: agent_watch::Watch,
+    budgets: Vec<agent_watch::BudgetRow>,
+    runaways: Vec<agent_watch::Runaway>,
+    live_hint: Option<f64>,
+    known: Vec<String>,
+}
+
+/// The names a budget may be set for: built-in agents, agents defined on this
+/// machine, and any agent with spend. Never typed by the user.
+fn known_agent_names() -> Vec<String> {
+    let defined: Vec<String> = inventory::scan().agents.into_iter().map(|a| a.name).collect();
+    agent_watch::known_names(&defined, &spend::agent_spend(31))
+}
+
+fn agent_watch_view(watch: agent_watch::Watch, known: Vec<String>) -> AgentWatchView {
+    let rules = clients::load_from(&clients::path());
+    let running = procs::agents_snapshot(&rules);
+    AgentWatchView {
+        budgets: agent_watch::budget_rows(&spend::agent_spend_month(), &watch),
+        runaways: agent_watch::runaways(&running, &watch.live),
+        live_hint: agent_watch::live_hint(&running),
+        known,
+        watch,
+    }
+}
+
+#[tauri::command]
+async fn get_agent_watch() -> Result<AgentWatchView, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        agent_watch_view(agent_watch::load_from(&agent_watch::path()), known_agent_names())
+    })
+    .await
+    .map_err(|e| format!("agent watch: {e}"))
+}
+
+/// Validates against the known names, saves, and returns the fresh view. The
+/// app only ever tells: nothing here, or in the rules it saves, acts on an agent.
+#[tauri::command]
+async fn set_agent_watch(watch: agent_watch::Watch) -> Result<AgentWatchView, String> {
+    let cfg = config_with_defaults(load_config());
+    tauri::async_runtime::spawn_blocking(move || {
+        let known = known_agent_names();
+        let saved = agent_watch::save_to(&agent_watch::path(), watch, &known).map_err(|m| user_error(&cfg, &m))?;
+        Ok(agent_watch_view(saved, known))
+    })
+    .await
+    .map_err(|e| format!("agent watch: {e}"))?
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ClientView {
@@ -512,6 +568,18 @@ fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     inv.opportunities.extend(changes::opportunities(&setup_changes));
     mcp_usage::attach(&mut inv.mcp_servers, &spend::mcp_usage_30d());
     inv.opportunities.extend(mcp_usage::opportunities(&inv.mcp_servers));
+    // Nothing set means nothing is read, scanned or shown.
+    let watch = agent_watch::load_from(&agent_watch::path());
+    if !watch.is_empty() {
+        let rows = agent_watch::budget_rows(&spend::agent_spend_month(), &watch);
+        let running = if watch.live_is_set() {
+            procs::agents_snapshot(&clients::load_from(&clients::path()))
+        } else {
+            Vec::new()
+        };
+        inv.opportunities
+            .extend(agent_watch::opportunities(&agent_watch::currently_over(&rows), &agent_watch::runaways(&running, &watch.live)));
+    }
     // Gaps first, then things to learn, each in the order found.
     inv.opportunities.sort_by_key(|o| o.kind != "tighten");
     (inv, spend)
@@ -2872,7 +2940,8 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
     );
     // Optional dashboard feeds on the loopback API. Off by default; when off
     // nothing is published, so the paths do not exist.
-    {
+    let watch = agent_watch::load_from(&agent_watch::path());
+    let running_agents = {
         let cfg = config_with_defaults(load_config());
         let on = cfg.get("apiFeeds").and_then(Value::as_bool).unwrap_or(false);
         let today = chrono::Local::now().date_naive();
@@ -2887,7 +2956,9 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
         // Unlike the rows above, which are already sitting in memory, this
         // is a fresh process-table scan -- pay for it only while a
         // dashboard could actually read the result.
-        let running_agents = if on { procs::agents_snapshot(&client_rules) } else { Vec::new() };
+        // The live rule needs the same scan, so it is also paid for while a
+        // runaway limit is set, even with the feeds off (nothing is published then).
+        let running_agents = if on || watch.live_is_set() { procs::agents_snapshot(&client_rules) } else { Vec::new() };
         httpapi::publish_feeds(
             on,
             vec![
@@ -2909,7 +2980,8 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
                 ),
             ],
         );
-    }
+        running_agents
+    };
 
     // Client budgets and the weekly digest. Both remember what they have
     // already said in a small state file, so a restart does not repeat them.
@@ -2952,6 +3024,51 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
                 changed = true;
             }
             marks["budgetFired"] = json!(fired);
+        }
+
+        // Agent budgets: one notification per agent per calendar month.
+        if !watch.budgets.is_empty() {
+            let rows = agent_watch::budget_rows(&spend::agent_spend_month(), &watch);
+            let mut fired: Vec<String> = marks
+                .get("agentBudgetFired")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default();
+            for row in agent_watch::over_budget(&rows, today, &mut fired) {
+                let body = i18n::Msg::new("notify.agentBudget.body")
+                    .var("agent", &row.agent)
+                    .var("spent", format!("{:.2}", row.month_to_date))
+                    .var("budget", format!("{:.2}", row.monthly_budget));
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title(i18n::t(&cfg, &i18n::Msg::new("notify.agentBudget.title")))
+                    .body(i18n::t(&cfg, &body))
+                    .show();
+                changed = true;
+            }
+            marks["agentBudgetFired"] = json!(fired);
+        }
+
+        // The live rule: one notification per running agent (tool and area)
+        // per day. The app tells; it never touches the agent.
+        if watch.live_is_set() {
+            let mut fired: Vec<String> = marks
+                .get("runawayFired")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default();
+            let runaways = agent_watch::runaways(&running_agents, &watch.live);
+            for alert in agent_watch::alerts_for(&runaways, &today.format("%Y-%m-%d").to_string(), &mut fired) {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title(i18n::t(&cfg, &alert.title))
+                    .body(i18n::t(&cfg, &alert.body))
+                    .show();
+                changed = true;
+            }
+            marks["runawayFired"] = json!(fired);
         }
 
         // Session hygiene: an old, costly session that is still being used.
@@ -3852,6 +3969,8 @@ pub fn run() {
             reveal_session,
             client_rollup,
             save_clients,
+            get_agent_watch,
+            set_agent_watch,
             export_clients_csv,
             save_subscription,
             delete_subscription,
