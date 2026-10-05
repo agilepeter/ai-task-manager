@@ -144,10 +144,6 @@ let budgetNote: { key: string } | { text: string } | null = null;
  *  saves are never built from the same view and no change is overwritten. */
 let saving = false;
 let budgetDraft: BudgetDraft = { agent: "", amount: "" };
-/** True while an input method is composing text in the amount field. A redraw
- *  replaces that field and would cut the composition off, so it waits. */
-let composing = false;
-let renderPending = false;
 /** True while keyboard focus is parked on the panel heading because the
  *  control that had it was disabled by a save in flight. */
 let parkedFocus = false;
@@ -545,21 +541,12 @@ function render(): void {
   if (!isOpen()) return;
   const el = document.querySelector<HTMLElement>("#agents-body");
   if (!el) return;
-  // These two replace the whole body and destroy the amount field, and a
-  // destroyed field usually delivers no compositionend: the gate must not be
-  // left shut for every redraw that follows.
   if (loadError) {
-    endCompositionGate();
     el.innerHTML = renderLoadError(loadError);
     return;
   }
   if (!inventory) {
-    endCompositionGate();
     el.innerHTML = `<p class="dt-empty">${esc(t("detail.loading"))}</p>`;
-    return;
-  }
-  if (composing) {
-    renderPending = true;
     return;
   }
   // The amount field is replaced by this redraw, and a text field's caret
@@ -573,34 +560,6 @@ function render(): void {
   if (!field || field.disabled) return;
   field.focus({ preventScroll: true });
   if (caret.start !== null && caret.end !== null) field.setSelectionRange(caret.start, caret.end);
-}
-
-/// Opens the redraw gate without redrawing: used wherever the field is gone or
-/// has lost focus, so a composition that will never report its end cannot hold
-/// back every later redraw (a save's result, a language switch).
-function endCompositionGate(): void {
-  composing = false;
-  renderPending = false;
-}
-
-/// An input method starts or ends composing in the amount field. A redraw
-/// asked for meanwhile is held back and runs when the composition ends.
-export function noteComposition(on: boolean): void {
-  composing = on;
-  if (!on && renderPending) {
-    renderPending = false;
-    render();
-  }
-}
-
-/// The composition ended, or the field lost focus (which ends one too): the
-/// field's own value is what was committed. Some engines deliver the final
-/// text in an input event after compositionend, and that event lands on the
-/// field this redraw is about to replace, so the value is taken now, before
-/// the gate opens.
-export function finishComposition(fieldValue: string): void {
-  noteBudgetDraft("amount", fieldValue);
-  noteComposition(false);
 }
 
 /// Whether a key press in the amount field means Add: Enter, not a held-key
@@ -747,7 +706,9 @@ export async function changeLiveRule(figure: keyof LiveRuleSetting, value: strin
   try {
     result = await saveAgentLive({ [figure]: value === "" ? null : Number(value) });
   } catch (err) {
-    result = { outcome: "rejected", error: String(err) };
+    // What was thrown is not text for a user, and not in their language.
+    console.error("[aitm] agent watch: could not build the live rule payload", err);
+    result = { outcome: "rejected", error: t("error.agentWatch.write") };
   }
   const live = watchView?.watch?.live;
   const presets = figure === "hourlyPaceUsd" ? LIVE_PACE_PRESETS : LIVE_OPEN_PRESETS;
@@ -875,7 +836,6 @@ function loadData(): void {
 }
 
 function close(): void {
-  endCompositionGate();
   document.body.classList.remove("agents-open");
   // src/panels.ts is the sole writer of `inert` on panels and the
   // background now -- see that module's own header for why this is called
@@ -905,8 +865,6 @@ function close(): void {
 /// #agents-open-btn on its own.
 export function openAgents(opener_: HTMLElement | null = null): void {
   opener = opener_;
-  composing = false;
-  renderPending = false;
   document.body.classList.add("agents-open");
   syncPanels();
   loadError = "";
@@ -1029,11 +987,17 @@ export function setupAgents(h: AgentsHost): void {
     ke.preventDefault();
     void addBudget(true);
   });
-  const isAmount = (e: Event) => (e.target as HTMLElement).id === "agent-budget-amount";
-  body?.addEventListener("compositionstart", (e) => { if (isAmount(e)) noteComposition(true); });
-  body?.addEventListener("compositionend", (e) => { if (isAmount(e)) finishComposition((e.target as HTMLInputElement).value); });
-  // Leaving the field ends a composition whether or not an end was reported.
-  body?.addEventListener("focusout", (e) => { if (isAmount(e)) finishComposition((e.target as HTMLInputElement).value); });
+  // What an input method commits is taken from the field when the composition
+  // ends, in case no input event follows it. A redraw is never held back for a
+  // composition: holding one back meant flushing it when the field lost focus,
+  // which is the mouse-down of a click on Add or Remove, and the button was
+  // replaced under the pointer before the click could land. A redraw that
+  // arrives mid-composition cuts the composition off, as it does in every
+  // other text field in this app; the draft keeps what had been typed.
+  body?.addEventListener("compositionend", (e) => {
+    const field = e.target as HTMLInputElement;
+    if (field.id === "agent-budget-amount") noteBudgetDraft("amount", field.value);
+  });
   document.addEventListener(
     "keydown",
     (e) => {
