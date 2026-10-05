@@ -38,8 +38,8 @@ pub struct ClientSpend {
     pub today: Window,
     pub yesterday: Window,
     pub last30: Window,
-    /// This calendar month so far: each area's own figure from the scan, or a
-    /// cut of its daily series for an area that has none.
+    /// This calendar month so far: each area's own figure from the scan when
+    /// it is for this month, otherwise a cut of its daily series.
     pub month_to_date: f64,
     /// The areas that rolled up here, largest first.
     pub areas: Vec<String>,
@@ -108,14 +108,16 @@ fn add(into: &mut Window, from: &Window) {
 }
 
 /// Sum of the daily series over the days that fall in `today`'s month: the
-/// answer for an area that carries no `month_to_date` of its own, and only
-/// for that. `daily` is oldest first with today last, like every trend in the
-/// app.
+/// answer for an area whose scan figure is missing or is for another month,
+/// and only for that. `daily` is oldest first with today last, like every
+/// trend in the app.
 ///
 /// Short by one day on the 31st of a 31-day month. The series holds
 /// `TREND_DAYS` (30) days, so the 1st is one past its oldest slot. That is why
 /// the scan sums the month itself (`AreaSpend::month_to_date`); this only
-/// stands in for an area that did not come from a scan.
+/// stands in when that figure cannot be used. A series scanned before midnight
+/// on the 1st is read as ending today, so it counts its last day or so as the
+/// new month's: a day's spend in place of a whole month's.
 fn month_to_date_from_series(daily: &[f64], today: NaiveDate) -> f64 {
     let n = daily.len();
     daily
@@ -132,7 +134,17 @@ fn month_to_date_from_series(daily: &[f64], today: NaiveDate) -> f64 {
 
 /// Areas grouped by client, largest 30-day cost first, `Unassigned` last.
 /// Every dollar lands in exactly one row.
+///
+/// An area's month to date is the figure its scan computed when that figure
+/// is for `today`'s month, and a cut of its daily series otherwise: the figure
+/// is a number fixed at scan time, so one from before midnight on the 1st must
+/// not be read as the new month's (see `AreaSpend::month_to_date`). A work
+/// area with no spend in the last `TREND_DAYS` days is not in `areas`, so its
+/// earlier spend this month is not in the month to date.
 pub fn rollup(areas: &[AreaSpend], rules: &[ClientRule], today: NaiveDate) -> Vec<ClientSpend> {
+    // The same spelling `over_budget` marks its months with, and the scan labels
+    // its figures with.
+    let this_month = today.format("%Y-%m").to_string();
     let mut out: Vec<ClientSpend> = Vec::new();
     let mut sorted: Vec<&AreaSpend> = areas.iter().collect();
     sorted.sort_by(|a, b| b.last30.cost.total_cmp(&a.last30.cost));
@@ -155,9 +167,10 @@ pub fn rollup(areas: &[AreaSpend], rules: &[ClientRule], today: NaiveDate) -> Ve
         add(&mut row.today, &area.today);
         add(&mut row.yesterday, &area.yesterday);
         add(&mut row.last30, &area.last30);
-        row.month_to_date += area
-            .month_to_date
-            .unwrap_or_else(|| month_to_date_from_series(&area.daily_cost, today));
+        row.month_to_date += match &area.month_to_date {
+            Some(figure) if figure.month == this_month => figure.cost,
+            _ => month_to_date_from_series(&area.daily_cost, today),
+        };
         row.areas.push(area.area.clone());
     }
     out.sort_by(|a, b| {
@@ -252,7 +265,7 @@ pub fn csv(rows: &[ClientSpend], today: NaiveDate) -> String {
     out.push_str(&format!(
         "\r\n{}\r\n",
         cell(&format!(
-            "Generated {today}. From local Claude Code logs, priced at API rates: on a flat-rate plan this is equivalent value, not a charge. The daily series covers {TREND_DAYS} days, so month to date is partial once a month runs longer than that."
+            "Generated {today}. From local Claude Code logs, priced at API rates: on a flat-rate plan this is equivalent value, not a charge. Month to date is summed from the scanned days of this calendar month; a work area with no spend in the last {TREND_DAYS} days is not listed, so its earlier spend this month is not in the figure."
         ))
     ));
     out
@@ -462,6 +475,12 @@ mod tests {
         assert!(out.starts_with("Client,Month to date (USD)"));
         assert!(out.contains("Unassigned,1.00,12.50,125,1.00,'=evil\r\n"), "{out}");
         assert!(out.contains("equivalent value, not a charge"));
+        // The footer says what the month figure is, and names the one thing it leaves out.
+        let limit = format!(
+            "Month to date is summed from the scanned days of this calendar month; a work area with no spend in the last {TREND_DAYS} days is not listed, so its earlier spend this month is not in the figure."
+        );
+        assert!(out.contains(&limit), "{out}");
+        assert!(!out.contains("partial once a month runs longer"), "the old claim, false since the scan sums the month: {out}");
     }
 
     #[test]

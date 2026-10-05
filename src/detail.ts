@@ -92,12 +92,13 @@ interface AreaSpend {
   yesterday: SpendWindow;
   last30: SpendWindow;
   daily_cost: number[];
-  /** This calendar month so far, summed by the scan from every day it read. This
-   *  page never reads it: it has to go back whole in what `client_rollup` and
-   *  `export_clients_csv` are handed (`allAreas`), because a 30-day `daily_cost`
-   *  cannot give the month on the 31st. Absent or null on an area from a build
-   *  that predates it, which the backend then answers from `daily_cost`. */
-  month_to_date?: number | null;
+  /** This calendar month so far, summed by the scan from every day it read, and the
+   *  month it is for (`"YYYY-MM"`). This page never reads it: it has to go back whole
+   *  in what `client_rollup` and `export_clients_csv` are handed (`allAreas`), because
+   *  a 30-day `daily_cost` cannot give the month on the 31st, and the backend uses the
+   *  figure only while its month is the current one. Absent or null on an area from a
+   *  build that predates it, which the backend then answers from `daily_cost`. */
+  month_to_date?: { month: string; cost: number } | null;
 }
 
 interface SessionSpend {

@@ -1,14 +1,17 @@
 // A client's month to date is worked out once, by the scan (crates/core/src/spend.rs),
 // from the whole per-day map: a 30-slot daily series is a day short on the 31st of a
 // 31-day month, so the frontend must never rebuild it from `daily_cost` when the scan
-// has already given the figure. Two places in the frontend handle that figure:
+// has already given the figure. The figure is `{ month: "YYYY-MM", cost }`: it is a
+// number fixed at scan time, so it says which month it is for, and it is used only
+// while that is the current month. Two places in the frontend handle it:
 //
 //  - the detail page hands the areas it received straight back to the `client_rollup`
 //    and `export_clients_csv` commands, and a copy rebuilt field by field would drop
 //    `month_to_date` and send the backend down its fallback;
 //  - the browser demo's stand-in for `client_rollup` (src/demo/mock.ts) adds the figure
-//    up itself, and falls back to its own cut of the series only for an area that has
-//    none (the committed fixture predates the field).
+//    up itself when it is for the current month, and otherwise falls back to its own cut
+//    of the series (an area with none, or one for another month: the committed fixture
+//    predates the field, and a regenerated one is frozen at one date).
 //
 // Same combined-module technique as scripts/detail-focus.test.mjs.
 import assert from "node:assert/strict";
@@ -59,26 +62,44 @@ async function buildDemoBackend() {
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 
+/** The demo's clock, pinned: local noon on the given day. */
+function setClock(t, year, month, day) {
+  t.mock.timers.reset();
+  t.mock.timers.enable({ apis: ["Date"], now: new Date(year, month - 1, day, 12, 0, 0).getTime() });
+}
+
 test("the demo rollup uses the month figure the scan computed", async (t) => {
   const { handle } = await loadDemoBackend();
-  // October 15, local noon: a 30-slot series of one-dollar days then holds fifteen
-  // dollars in October (the 1st through the 15th), which is what the demo's own cut
-  // reports, so it is easy to tell apart from the figures given below.
-  t.mock.timers.enable({ apis: ["Date"], now: new Date(2026, 9, 15, 12, 0, 0).getTime() });
+  // October 15: a 30-slot series of one-dollar days then holds fifteen dollars in October
+  // (the 1st through the 15th), which is what the demo's own cut reports, so it is easy to
+  // tell apart from the figures given below.
+  setClock(t, 2026, 10, 15);
   const rows = (areas) => Object.fromEntries(handle("client_rollup", { areas }).rows.map((r) => [r.client, r]));
+  const october = (cost) => ({ month: "2026-10", cost });
 
-  // The scan's figure is added up as it is: not the series' cut (15 each), not zero.
-  const given = rows([area("acme-portal", { month_to_date: 123.5 }), area("acme-portal/web", { month_to_date: 6.5 })]);
+  // The scan's figure for this month is added up as it is: not the series' cut (15 each).
+  const given = rows([area("acme-portal", { month_to_date: october(123.5) }), area("acme-portal/web", { month_to_date: october(6.5) })]);
   assert.equal(given["Acme Co"].monthToDate, 130);
 
   // Zero is a figure too: a month that has spent nothing is not a missing one.
-  assert.equal(rows([area("acme-portal", { month_to_date: 0 })])["Acme Co"].monthToDate, 0);
+  assert.equal(rows([area("acme-portal", { month_to_date: october(0) })])["Acme Co"].monthToDate, 0);
 
   // An area with no figure (the committed fixture has none yet), or a null one, keeps
   // the demo's own cut of the series.
   const missing = rows([area("northwind-api"), area("acme-portal", { month_to_date: null })]);
   assert.equal(missing["Northwind"].monthToDate, 15);
   assert.equal(missing["Acme Co"].monthToDate, 15);
+
+  // A figure for another month is not this month's, however it got here: the series is read
+  // instead, and neither September's total nor a bare number from an older build is used.
+  const other = rows([area("acme-portal", { month_to_date: { month: "2026-09", cost: 999 } }), area("northwind-api", { month_to_date: 999 })]);
+  assert.equal(other["Acme Co"].monthToDate, 15);
+  assert.equal(other["Northwind"].monthToDate, 15);
+
+  // The engine writes the month as two digits, and a single-digit month must still match.
+  setClock(t, 2026, 3, 5);
+  const march = rows([area("acme-portal", { month_to_date: { month: "2026-03", cost: 77 } })]);
+  assert.equal(march["Acme Co"].monthToDate, 77);
 });
 
 // ---------------------------------------------------------------------------
@@ -127,10 +148,13 @@ async function buildDetailModule() {
 test("areas go back to the client rollup with every field they came with", async () => {
   const { __invoke, __loadClients, __opened } = await loadDetailModule();
   // Two projects, so the areas are gathered across them. `month_to_date` is the field the
-  // backend needs; `from_a_newer_build` stands for whichever field comes next, which a
-  // copy rebuilt field by field would drop the same way.
-  const acme = area("acme-portal", { month_to_date: 24, from_a_newer_build: "kept" });
-  const northwind = area("northwind-api", { month_to_date: 0, week: { thisWeek: 1, lastWeek: 2, changePercent: -50 } });
+  // backend needs, month and all; `from_a_newer_build` stands for whichever field comes
+  // next, which a copy rebuilt field by field would drop the same way.
+  const acme = area("acme-portal", { month_to_date: { month: "2026-10", cost: 24 }, from_a_newer_build: "kept" });
+  const northwind = area("northwind-api", {
+    month_to_date: { month: "2026-10", cost: 0 },
+    week: { thisWeek: 1, lastWeek: 2, changePercent: -50 },
+  });
   const received = [acme, northwind];
   const before = structuredClone(received);
   const spend = {
@@ -162,6 +186,6 @@ test("areas go back to the client rollup with every field they came with", async
   assert.equal(sent.areas.length, 2, "every area of every project goes");
   sent.areas.forEach((a, i) => assert.strictEqual(a, received[i], `area ${i} must be the object that was received, not a rebuilt copy`));
   assert.deepEqual(received, before, "sending them must not change them either");
-  assert.equal(sent.areas[0].month_to_date, 24);
-  assert.equal(sent.areas[1].month_to_date, 0, "a zero figure goes back as zero");
+  assert.deepEqual(sent.areas[0].month_to_date, { month: "2026-10", cost: 24 }, "the month goes back with its figure");
+  assert.deepEqual(sent.areas[1].month_to_date, { month: "2026-10", cost: 0 }, "a zero figure goes back as zero");
 });

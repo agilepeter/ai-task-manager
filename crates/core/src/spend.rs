@@ -152,6 +152,15 @@ pub struct ProjectSpend {
     pub areas: Vec<AreaSpend>,
 }
 
+/// Dollars for one calendar month, with the month they are for.
+#[derive(Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct MonthSpend {
+    /// The local calendar month the figure belongs to, `"YYYY-MM"`: the form
+    /// the budget alerts mark their months with.
+    pub month: String,
+    pub cost: f64,
+}
+
 /// One work area's share of a project: a top-level folder, or `(unsorted)`
 /// for spend before the session had been anywhere.
 #[derive(Serialize, serde::Deserialize, Clone)]
@@ -172,12 +181,25 @@ pub struct AreaSpend {
     /// month `today` falls in, through `today`. Summed from the scan's own
     /// per-day map in the same pass as `daily_cost`, so it is complete on the
     /// 31st of a 31-day month, when the 1st is 30 days back and one day past
-    /// the series. `Some` for every area a scan makes; `None` only for one
+    /// the series.
+    ///
+    /// The figure carries the month it is for because it is fixed at scan
+    /// time and read later: a scan that ends just before midnight on the 1st
+    /// is handed to a rollup made just after, and last month's total read as
+    /// the new month's would be wrong by a whole month, and could raise a
+    /// budget alert that then hides the real one. `clients::rollup` uses it
+    /// only when that month is `today`'s, and otherwise cuts the month out of
+    /// `daily_cost`. `Some` for every area a scan makes; `None` only for one
     /// that did not come from a scan (an older frontend handing back a shape
-    /// from before this field existed), which `clients::rollup` then answers
-    /// by cutting the month out of `daily_cost`, never as zero.
+    /// from before this field existed), which the rollup answers from
+    /// `daily_cost` too, never as zero.
+    ///
+    /// An area with no spend in the last `TREND_DAYS` days is not listed at
+    /// all, so an area used on the 1st and idle since is missing from the
+    /// month. A log Claude Code has already deleted cannot be counted,
+    /// whichever window is used.
     #[serde(default)]
-    pub month_to_date: Option<f64>,
+    pub month_to_date: Option<MonthSpend>,
 }
 
 impl ProviderSpend {
@@ -3233,6 +3255,14 @@ fn first_of_month(today: i32) -> i32 {
     NaiveDate::from_num_days_from_ce_opt(today).map_or(today, |d| today - d.day0() as i32)
 }
 
+/// The `"YYYY-MM"` of the month `today` (a CE day number) falls in: the label a
+/// month figure carries, spelled the way `clients::over_budget` spells a month.
+/// A `today` that is no real date gets a label no month has, so a figure made
+/// for it is never taken for any month's.
+fn month_label(today: i32) -> String {
+    NaiveDate::from_num_days_from_ce_opt(today).map_or_else(String::new, |d| d.format("%Y-%m").to_string())
+}
+
 /// For each key of a day map: its today / yesterday / last-30-days windows,
 /// its dollars per day over those 30 days (oldest first, today last), and its
 /// dollars for the calendar month so far.
@@ -3273,6 +3303,9 @@ fn windows_by_key(days: DayMap, today: i32) -> HashMap<String, ([Window; 3], Vec
 }
 
 fn project_spends(per_project: Vec<(String, FileData)>, today: i32) -> Vec<ProjectSpend> {
+    // The month every area's figure below is for: the one `today` falls in, the
+    // same `today` its windows are cut by.
+    let month = month_label(today);
     let mut out: Vec<ProjectSpend> = per_project
         .into_iter()
         .filter_map(|(project, data)| {
@@ -3289,14 +3322,14 @@ fn project_spends(per_project: Vec<(String, FileData)>, today: i32) -> Vec<Proje
             let mut areas: Vec<AreaSpend> = windows_by_key(data.areas, today)
                 .into_iter()
                 .filter(|(_, (w, _, _))| w[2].cost > 0.004 || w[2].tokens > 0.0)
-                .map(|(area, ([today, yesterday, last30], daily_cost, month_to_date))| AreaSpend {
+                .map(|(area, ([today, yesterday, last30], daily_cost, month_cost))| AreaSpend {
                     area,
                     today,
                     yesterday,
                     last30,
                     daily_cost,
                     week: None,
-                    month_to_date: Some(month_to_date),
+                    month_to_date: Some(MonthSpend { month: month.clone(), cost: month_cost }),
                 })
                 .collect();
             areas.sort_by(|a, b| b.last30.cost.total_cmp(&a.last30.cost).then_with(|| a.area.cmp(&b.area)));
@@ -7188,20 +7221,21 @@ mod tests {
     #[test]
     fn month_to_date_on_the_first_counts_only_today() {
         // The 1st has no earlier day in its own month: yesterday, the last day of the
-        // month before (a December 31st included), is that month's.
-        for today in [date(2026, 11, 1), date(2027, 1, 1)] {
+        // month before (a December 31st included), is that month's. The figure is
+        // labelled with the month it is for, two digits and all.
+        for (today, month) in [(date(2026, 11, 1), "2026-11"), (date(2027, 1, 1), "2027-01")] {
             let yesterday = days_before(today, 1);
             let areas = scanned_areas(
                 &[("acme-portal", days_before(today, 2), 50.0), ("acme-portal", yesterday, 8.0), ("acme-portal", today, 3.0)],
                 today,
             );
-            assert_eq!(areas[0].month_to_date, Some(3.0), "{today}: the scan's own figure");
+            assert_eq!(areas[0].month_to_date, Some(MonthSpend { month: month.into(), cost: 3.0 }), "{today}: the scan's own figure");
             let rows = clients::rollup(&areas, &[acme(None)], today);
             assert_eq!(rows[0].month_to_date, 3.0, "{today}: only today's 3, not the 58 before it");
 
             // Nothing spent yet today: a month of zero, not last month's last day.
             let areas = scanned_areas(&[("acme-portal", yesterday, 8.0)], today);
-            assert_eq!(areas[0].month_to_date, Some(0.0), "{today}");
+            assert_eq!(areas[0].month_to_date, Some(MonthSpend { month: month.into(), cost: 0.0 }), "{today}");
             assert_eq!(clients::rollup(&areas, &[acme(None)], today)[0].month_to_date, 0.0, "{today}");
         }
     }
@@ -7255,6 +7289,72 @@ mod tests {
     }
 
     #[test]
+    fn a_month_figure_from_another_month_is_not_used() {
+        // Areas scanned on October 31st and handed to a rollup made on November 1st (the
+        // frontend still holds the last scan, or the scan ran across midnight): the figure
+        // they carry is October's, and November has not spent anything in that scan.
+        let scanned_on = date(2026, 10, 31);
+        let areas = scanned_areas(
+            &[("acme-portal", date(2026, 10, 1), 20.0), ("acme-portal", date(2026, 10, 30), 4.0)],
+            scanned_on,
+        );
+        assert_eq!(areas[0].month_to_date, Some(MonthSpend { month: "2026-10".into(), cost: 24.0 }));
+        let rows = clients::rollup(&areas, &[acme(None)], scanned_on);
+        assert_eq!(rows[0].month_to_date, 24.0, "on the day it was scanned, the figure is the month");
+
+        let today = date(2026, 11, 1);
+        let rows = clients::rollup(&areas, &[acme(None)], today);
+        assert_eq!(rows[0].month_to_date, 0.0, "November, from the series: not October's 24");
+
+        // A series that is up to date says what November has spent, and a figure labelled
+        // with October does not displace it.
+        let mut fresh = scanned_areas(&[("acme-portal", date(2026, 10, 30), 4.0), ("acme-portal", today, 3.0)], today);
+        fresh[0].month_to_date = Some(MonthSpend { month: "2026-10".into(), cost: 500.0 });
+        assert_eq!(clients::rollup(&fresh, &[acme(None)], today)[0].month_to_date, 3.0, "November's 3, from the series");
+    }
+
+    #[test]
+    fn a_scan_that_straddles_the_first_does_not_alert_with_last_months_total() {
+        // Acme's budget is $100 and October closed at 105, so October's alert has fired. A scan
+        // reads its days a little before midnight on October 31st; the alert pass that follows
+        // takes its date from the clock a little after, on November 1st.
+        let rules = [acme(Some(100.0))];
+        let scanned_on = date(2026, 10, 31);
+        let areas = scanned_areas(
+            &[
+                ("acme-portal", date(2026, 10, 1), 30.0),
+                ("acme-portal", date(2026, 10, 15), 60.0),
+                ("acme-portal", scanned_on, 15.0),
+            ],
+            scanned_on,
+        );
+        let today = date(2026, 11, 1);
+        let rows = clients::rollup(&areas, &rules, today);
+        let mut fired = vec!["Acme|2026-10".to_string()];
+        assert!(clients::over_budget(&rows, &rules, today, &mut fired).is_empty(), "October's 105 is not November's");
+        assert!(fired.is_empty(), "no mark for November, and October's is cleared: {fired:?}");
+
+        // November's own alert is not suppressed: a scan taken in November that finds the
+        // month over budget alerts as usual.
+        let areas = scanned_areas(&[("acme-portal", today, 120.0)], today);
+        let rows = clients::rollup(&areas, &rules, today);
+        assert_eq!(clients::over_budget(&rows, &rules, today, &mut fired), [("Acme".to_string(), 120.0, 100.0)]);
+        assert_eq!(fired, ["Acme|2026-11"]);
+    }
+
+    #[test]
+    fn the_month_figure_goes_over_the_wire_as_month_and_cost() {
+        // The frontend hands areas back as it got them, and the demo reads the figure out of a
+        // fixture this engine wrote, so the names on the wire are part of the contract.
+        let today = date(2026, 10, 31);
+        let areas = scanned_areas(&[("acme-portal", today, 4.0)], today);
+        let wire = serde_json::to_value(&areas[0]).unwrap();
+        assert_eq!(wire["month_to_date"], json!({ "month": "2026-10", "cost": 4.0 }));
+        let back: AreaSpend = serde_json::from_value(wire).unwrap();
+        assert_eq!(back.month_to_date, areas[0].month_to_date);
+    }
+
+    #[test]
     fn spend_after_today_is_not_month_to_date() {
         // A log line dated after today (written while the clock ran ahead) is in no window,
         // this month's included, whether it lands later in the month or in the next one.
@@ -7269,7 +7369,7 @@ mod tests {
             today,
         );
         assert_eq!(areas[0].last30.cost, 3.0, "the days the 30-day window counts");
-        assert_eq!(areas[0].month_to_date, Some(3.0));
+        assert_eq!(areas[0].month_to_date, Some(MonthSpend { month: "2026-10".into(), cost: 3.0 }));
         assert_eq!(clients::rollup(&areas, &[acme(None)], today)[0].month_to_date, 3.0);
     }
 

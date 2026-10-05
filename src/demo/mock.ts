@@ -197,9 +197,16 @@ function glob(pattern: string, text: string): boolean {
   return new RegExp(`^${p.split("*").map((x) => x.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`).test(t);
 }
 
+/** "YYYY-MM" in the viewer's local time: how the engine labels the month a figure is for. */
+function monthLabel(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function clientRollup(areas: any[]) {
   const rows: Record<string, any> = {};
   const month = new Date().getMonth();
+  const thisMonth = monthLabel(now());
   for (const a of [...areas].sort((x, y) => y.last30.cost - x.last30.cost)) {
     const rule = clientRules.find((r) => r.patterns.some((p: string) => glob(p, a.area)));
     const name = rule ? rule.client : "Unassigned";
@@ -209,13 +216,16 @@ function clientRollup(areas: any[]) {
       row[k].cost += a[k].cost;
       row[k].tokens += a[k].tokens;
     }
-    if (typeof a.month_to_date === "number") {
-      // The engine's own figure, summed from every day it read: the 30-slot series
-      // below is a day short on the 31st of a 31-day month.
-      row.monthToDate += a.month_to_date;
+    const figure = a.month_to_date;
+    if (figure && typeof figure.cost === "number" && figure.month === thisMonth) {
+      // The engine's own figure for this month, summed from every day it read: the
+      // 30-slot series below is a day short on the 31st of a 31-day month. A figure
+      // for another month is not this month's (a fixture is frozen at one date, the
+      // viewer's clock is not), and counts as none.
+      row.monthToDate += figure.cost;
     } else {
-      // An area with none (the committed fixture predates the field): cut the month
-      // out of the series.
+      // An area with no figure for this month (the committed fixture predates the
+      // field): cut the month out of the series.
       const daily: number[] = a.daily_cost ?? [];
       daily.forEach((c, i) => {
         const d = new Date(now() - (daily.length - 1 - i) * 24 * HOUR);
