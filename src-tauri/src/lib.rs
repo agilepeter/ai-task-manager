@@ -297,9 +297,9 @@ struct AgentWatchView {
 
 /// The names a budget may be set for: built-in agents, agents defined on this
 /// machine, and any agent with spend. Never typed by the user.
-fn known_agent_names() -> Vec<String> {
+fn known_agent_names(saved: &agent_watch::Watch) -> Vec<String> {
     let defined: Vec<String> = inventory::scan().agents.into_iter().map(|a| a.name).collect();
-    agent_watch::known_names(&defined, &spend::agent_spend(31))
+    agent_watch::known_names(&defined, &spend::agent_spend(31), saved)
 }
 
 fn agent_watch_view(watch: agent_watch::Watch, known: Vec<String>) -> AgentWatchView {
@@ -317,7 +317,9 @@ fn agent_watch_view(watch: agent_watch::Watch, known: Vec<String>) -> AgentWatch
 #[tauri::command]
 async fn get_agent_watch() -> Result<AgentWatchView, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        agent_watch_view(agent_watch::load_from(&agent_watch::path()), known_agent_names())
+        let saved = agent_watch::load_from(&agent_watch::path());
+        let known = known_agent_names(&saved);
+        agent_watch_view(saved, known)
     })
     .await
     .map_err(|e| format!("agent watch: {e}"))
@@ -326,10 +328,12 @@ async fn get_agent_watch() -> Result<AgentWatchView, String> {
 /// Validates against the known names, saves, and returns the fresh view. The
 /// app only ever tells: nothing here, or in the rules it saves, acts on an agent.
 #[tauri::command]
-async fn set_agent_watch(watch: agent_watch::Watch) -> Result<AgentWatchView, String> {
+async fn set_agent_watch(watch: agent_watch::WatchInput) -> Result<AgentWatchView, String> {
     let cfg = config_with_defaults(load_config());
     tauri::async_runtime::spawn_blocking(move || {
-        let known = known_agent_names();
+        let watch = watch.into_watch().map_err(|m| user_error(&cfg, &m))?;
+        // A name already saved stays acceptable even if its agent is gone.
+        let known = known_agent_names(&agent_watch::load_from(&agent_watch::path()));
         let saved = agent_watch::save_to(&agent_watch::path(), watch, &known).map_err(|m| user_error(&cfg, &m))?;
         Ok(agent_watch_view(saved, known))
     })
@@ -2995,7 +2999,13 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_else(|| json!({}));
-        let mut changed = false;
+        // Valid JSON that is not an object (a hand edit, a stray write) would
+        // panic on the first `marks[key] = ...`, and this loop runs for the life
+        // of the app.
+        if !marks.is_object() {
+            marks = json!({});
+        }
+        let mut changed = agent_watch::drop_unused_marks(&mut marks, &watch);
 
         let rules = clients::load_from(&clients::path());
         if rules.iter().any(|r| r.monthly_budget.is_some()) {
@@ -3028,13 +3038,9 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
 
         // Agent budgets: one notification per agent per calendar month.
         if !watch.budgets.is_empty() {
+            // The per-cycle cost of having a budget: one read of the cached month's spend.
             let rows = agent_watch::budget_rows(&spend::agent_spend_month(), &watch);
-            let mut fired: Vec<String> = marks
-                .get("agentBudgetFired")
-                .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
-                .unwrap_or_default();
-            for row in agent_watch::over_budget(&rows, today, &mut fired) {
+            for row in agent_watch::newly_over_budget(&mut marks, &rows, today) {
                 let body = i18n::Msg::new("notify.agentBudget.body")
                     .var("agent", &row.agent)
                     .var("spent", format!("{:.2}", row.month_to_date))
@@ -3047,19 +3053,13 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
                     .show();
                 changed = true;
             }
-            marks["agentBudgetFired"] = json!(fired);
         }
 
-        // The live rule: one notification per running agent (tool and area)
-        // per day. The app tells; it never touches the agent.
+        // The live rule: one notification per running agent per day. The app
+        // tells; it never touches the agent.
         if watch.live_is_set() {
-            let mut fired: Vec<String> = marks
-                .get("runawayFired")
-                .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
-                .unwrap_or_default();
             let runaways = agent_watch::runaways(&running_agents, &watch.live);
-            for alert in agent_watch::alerts_for(&runaways, &today.format("%Y-%m-%d").to_string(), &mut fired) {
+            for alert in agent_watch::due_runaway_alerts(&mut marks, &runaways, &today.format("%Y-%m-%d").to_string()) {
                 let _ = app
                     .notification()
                     .builder()
@@ -3068,7 +3068,6 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
                     .show();
                 changed = true;
             }
-            marks["runawayFired"] = json!(fired);
         }
 
         // Session hygiene: an old, costly session that is still being used.
@@ -3134,7 +3133,10 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
             changed = true;
         }
         if changed {
-            let _ = std::fs::write(&marks_path, marks.to_string());
+            // Notified first, persisted after; a torn write would re-fire every alert once.
+            if let Err(e) = providers::onenewapi::store::atomic_write(&marks_path, &marks.to_string()) {
+                eprintln!("[aitm] could not save alert marks: {e}");
+            }
         }
     }
 

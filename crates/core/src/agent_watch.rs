@@ -25,6 +25,7 @@ use crate::procs::RunningAgent;
 use crate::spend::{AgentSpend, LivePace};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 /// Every finding id this module can emit (see `inventory::FINDING_IDS`).
@@ -41,6 +42,37 @@ pub(crate) const ERROR_KEYS: &[&str] = &[
     "error.agentWatch.write",
 ];
 
+/// The same watch as the webview sends it. The one figure that must be whole,
+/// `maxMinutes`, arrives as a plain number so that a fraction is refused by
+/// `into_watch` in the user's language rather than by serde in English.
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchInput {
+    #[serde(default)]
+    pub budgets: Vec<AgentBudget>,
+    #[serde(default)]
+    pub live: LiveInput,
+}
+
+#[derive(Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LiveInput {
+    pub hourly_pace_usd: Option<f64>,
+    pub max_minutes: Option<f64>,
+}
+
+impl WatchInput {
+    /// A whole number of minutes above zero, or `error.agentWatch.figure`.
+    pub fn into_watch(self) -> Result<Watch, Msg> {
+        let max_minutes = match self.live.max_minutes {
+            None => None,
+            Some(m) if m.is_finite() && m.fract() == 0.0 && (1.0..=1e9).contains(&m) => Some(m as u64),
+            Some(_) => return Err(Msg::new("error.agentWatch.figure")),
+        };
+        Ok(Watch { budgets: self.budgets, live: LiveRule { hourly_pace_usd: self.live.hourly_pace_usd, max_minutes } })
+    }
+}
+
 /// The notification keys this module's alerts and the budget notification in
 /// `src-tauri/src/lib.rs` use.
 #[cfg(test)]
@@ -53,6 +85,11 @@ pub(crate) const NOTIFY_KEYS: &[&str] = &[
 ];
 
 pub const MAX_BUDGETS: usize = 50;
+/// A name longer than this is not an agent name; a hand-edited file may hold one.
+const MAX_NAME_CHARS: usize = 80;
+/// Keys of the remembered "already said" marks in `alert_marks.json`.
+const BUDGET_MARKS: &str = "agentBudgetFired";
+const RUNAWAY_MARKS: &str = "runawayFired";
 /// A pace is cost in the last ten minutes carried over an hour.
 const PACE_FACTOR: f64 = 6.0;
 /// Seconds without a new line, with nothing in ten minutes, after which a
@@ -107,25 +144,47 @@ pub fn path() -> PathBuf {
     crate::providers::config_dir().join("agent_watch.json")
 }
 
-/// A missing or broken file is "nothing set", never an error, and a figure
-/// that could not have been saved (a hand edit) is dropped rather than acted on.
+/// A missing or broken file is "nothing set", never an error. The file is read
+/// on every refresh and may have been edited by hand, so it is bounded: each
+/// entry is parsed on its own (one malformed entry does not cost the rest), an
+/// empty or over-long name is dropped, a repeated name keeps its first row, at
+/// most `MAX_BUDGETS` rows are kept, and a figure that could not have been
+/// saved is dropped rather than acted on.
 pub fn load_from(path: &Path) -> Watch {
-    let mut w: Watch = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default();
-    w.budgets.retain(|b| !b.agent.is_empty() && good_figure(b.monthly_budget));
-    w.live.hourly_pace_usd = w.live.hourly_pace_usd.filter(|x| good_figure(*x));
-    w.live.max_minutes = w.live.max_minutes.filter(|m| *m > 0);
+    let Some(root) = std::fs::read_to_string(path).ok().and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) else {
+        return Watch::default();
+    };
+    let mut w = Watch::default();
+    if let Some(list) = root.get("budgets").and_then(Value::as_array) {
+        for entry in list {
+            let Ok(b) = serde_json::from_value::<AgentBudget>(entry.clone()) else { continue };
+            let ok = !b.agent.is_empty()
+                && b.agent.chars().count() <= MAX_NAME_CHARS
+                && good_figure(b.monthly_budget)
+                && !w.budgets.iter().any(|seen| seen.agent == b.agent);
+            if ok {
+                w.budgets.push(b);
+            }
+            if w.budgets.len() >= MAX_BUDGETS {
+                break;
+            }
+        }
+    }
+    let live = root.get("live");
+    w.live.hourly_pace_usd = live.and_then(|l| l.get("hourlyPaceUsd")).and_then(Value::as_f64).filter(|x| good_figure(*x));
+    w.live.max_minutes = live.and_then(|l| l.get("maxMinutes")).and_then(Value::as_u64).filter(|m| *m > 0);
     w
 }
 
 /// The names a budget may take: every built-in agent, every agent defined on
-/// this machine, and every named agent with spend. Sorted, no duplicates, and
-/// never the empty unattributed row.
-pub fn known_names(defined: &[String], spend: &[AgentSpend]) -> Vec<String> {
+/// this machine, every named agent with spend, and every name already saved.
+/// The last keeps a budget whose agent has since been deleted both listed and
+/// editable, so a stale row can never block saving the others. Sorted, no
+/// duplicates, and never the empty unattributed row.
+pub fn known_names(defined: &[String], spend: &[AgentSpend], saved: &Watch) -> Vec<String> {
     let mut names: Vec<String> = crate::seat::BUILTIN_AGENTS.iter().map(|s| s.to_string()).collect();
     names.extend(defined.iter().cloned());
+    names.extend(saved.budgets.iter().map(|b| b.agent.clone()));
     names.extend(spend.iter().map(|a| a.name.clone()));
     names.retain(|n| !n.is_empty());
     names.sort();
@@ -133,7 +192,7 @@ pub fn known_names(defined: &[String], spend: &[AgentSpend]) -> Vec<String> {
     names
 }
 
-pub fn validate(w: Watch, known: &[String]) -> Result<Watch, Msg> {
+fn validate(w: Watch, known: &[String]) -> Result<Watch, Msg> {
     if w.budgets.len() > MAX_BUDGETS {
         return Err(Msg::new("error.agentWatch.tooMany").var("max", MAX_BUDGETS));
     }
@@ -159,9 +218,14 @@ pub fn validate(w: Watch, known: &[String]) -> Result<Watch, Msg> {
 /// Validates, then writes owner-only through a temp file and a rename.
 pub fn save_to(path: &Path, w: Watch, known: &[String]) -> Result<Watch, Msg> {
     let w = validate(w, known)?;
-    let body = serde_json::to_string_pretty(&w).map_err(|e| Msg::new("error.agentWatch.write").var("error", e))?;
-    crate::providers::onenewapi::store::atomic_write(path, &body)
-        .map_err(|e| Msg::new("error.agentWatch.write").var("error", e))?;
+    // The shared writer's own messages are English and name a credential file,
+    // so the user gets a fixed translated line and the detail goes to the log.
+    let failed = |detail: String| {
+        eprintln!("[aitm] agent watch: could not save agent_watch.json: {detail}");
+        Msg::new("error.agentWatch.write")
+    };
+    let body = serde_json::to_string_pretty(&w).map_err(|e| failed(e.to_string()))?;
+    crate::providers::onenewapi::store::atomic_write(path, &body).map_err(failed)?;
     Ok(w)
 }
 
@@ -238,6 +302,10 @@ fn pace_per_hour(pace: &LivePace) -> Option<f64> {
 #[serde(rename_all = "camelCase")]
 pub struct Runaway {
     pub tool: String,
+    /// The host process, used only to key the once-a-day mark. Never sent to
+    /// the webview or anywhere else.
+    #[serde(skip)]
+    pub pid: u32,
     pub area: Option<String>,
     /// "pace" | "duration"
     pub reason: &'static str,
@@ -267,6 +335,7 @@ pub fn runaways(running: &[RunningAgent], rule: &LiveRule) -> Vec<Runaway> {
         };
         out.push(Runaway {
             tool: agent.tool.clone(),
+            pid: agent.pid,
             area: agent.area.clone(),
             reason,
             pace_per_hour: per_hour,
@@ -295,25 +364,88 @@ fn who(r: &Runaway) -> String {
     }
 }
 
-/// One alert per running agent (tool and area) per day. `today` is
-/// "YYYY-MM-DD"; `fired` holds "tool|area|YYYY-MM-DD" marks, updated in place,
-/// and marks from other days are dropped.
+/// Hours:minutes, language-neutral, for the finding's rows.
+fn hours_minutes(minutes: u64) -> String {
+    format!("{}:{:02}", minutes / 60, minutes % 60)
+}
+
+/// The open time as the locale's own short duration, chosen by size the way
+/// the Running now row does (days and hours, hours and minutes, minutes).
+fn duration_msg(minutes: u64) -> Msg {
+    let (d, h, m) = (minutes / 1440, (minutes % 1440) / 60, minutes % 60);
+    if d > 0 {
+        Msg::new("time.daysHours").var("d", d).var("h", h)
+    } else if h > 0 {
+        Msg::new("time.hoursMins").var("h", h).var("m", m)
+    } else {
+        Msg::new("time.mins").var("m", m.max(1))
+    }
+}
+
+/// One alert per running agent per day, and the process is the agent: the mark
+/// is "tool|area|pid|YYYY-MM-DD", because the folder is often unknown and two
+/// sessions of one tool must not silence each other. It is one per process
+/// whatever the reason, so a duration alert also uses up that process's pace
+/// alert for the day. `today` is "YYYY-MM-DD"; `fired` is updated in place and
+/// marks from other days are dropped.
+///
+/// A name or area holding "|" is harmless: marks are only compared whole and
+/// the day is read from the end, so the separator is never parsed back apart.
 pub fn alerts_for(runaways: &[Runaway], today: &str, fired: &mut Vec<String>) -> Vec<Alert> {
     fired.retain(|m| m.ends_with(&format!("|{today}")));
     let mut out = Vec::new();
     for r in runaways {
-        let mark = format!("{}|{}|{today}", r.tool, r.area.as_deref().unwrap_or(""));
+        let mark = format!("{}|{}|{}|{today}", r.tool, r.area.as_deref().unwrap_or(""), r.pid);
         if fired.contains(&mark) {
             continue;
         }
         fired.push(mark);
         let body = match (r.reason, r.pace_per_hour) {
             ("pace", Some(pace)) => Msg::new("notify.agentRunaway.pace").var("who", who(r)).var("pace", format!("{pace:.2}")),
-            _ => Msg::new("notify.agentRunaway.duration").var("who", who(r)).var("minutes", r.minutes),
+            _ => Msg::new("notify.agentRunaway.duration").var("who", who(r)).sub("open", duration_msg(r.minutes)),
         };
         out.push(Alert { title: Msg::new("notify.agentRunaway.title"), body });
     }
     out
+}
+
+fn read_marks(marks: &mut Value, key: &str) -> Vec<String> {
+    if !marks.is_object() {
+        *marks = json!({});
+    }
+    marks.get(key).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()
+}
+
+/// The loop's budget step: reads its own marks out of `alert_marks.json`'s
+/// value, writes them back, and returns the rows to notify about. Marks that
+/// are not an object are replaced by an empty one.
+pub fn newly_over_budget(marks: &mut Value, rows: &[BudgetRow], today: NaiveDate) -> Vec<BudgetRow> {
+    let mut fired = read_marks(marks, BUDGET_MARKS);
+    let out = over_budget(rows, today, &mut fired);
+    marks[BUDGET_MARKS] = json!(fired);
+    out
+}
+
+/// The loop's live-rule step; same contract as `newly_over_budget`.
+pub fn due_runaway_alerts(marks: &mut Value, runaways: &[Runaway], today: &str) -> Vec<Alert> {
+    let mut fired = read_marks(marks, RUNAWAY_MARKS);
+    let out = alerts_for(runaways, today, &mut fired);
+    marks[RUNAWAY_MARKS] = json!(fired);
+    out
+}
+
+/// Marks for a rule that is no longer set are dropped. True when something
+/// was removed, so the caller knows the file changed.
+pub fn drop_unused_marks(marks: &mut Value, w: &Watch) -> bool {
+    let Some(map) = marks.as_object_mut() else { return false };
+    let mut removed = false;
+    if w.budgets.is_empty() {
+        removed |= map.remove(BUDGET_MARKS).is_some();
+    }
+    if !w.live_is_set() {
+        removed |= map.remove(RUNAWAY_MARKS).is_some();
+    }
+    removed
 }
 
 // ---------------------------------------------------------------------------
@@ -349,8 +481,8 @@ pub fn opportunities(over: &[BudgetRow], runaways: &[Runaway]) -> Vec<Opportunit
         let names = runaways
             .iter()
             .map(|r| match (r.reason, r.pace_per_hour) {
-                ("pace", Some(p)) => format!("{}: {}/h", who(r), usd(p)),
-                _ => format!("{}: {} min", who(r), r.minutes),
+                ("pace", Some(p)) => format!("{}: {}", who(r), usd(p)),
+                _ => format!("{}: {}", who(r), hours_minutes(r.minutes)),
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -415,17 +547,20 @@ mod tests {
     #[test]
     fn nothing_set_means_nothing_fires() {
         let w = Watch::default();
-        assert!(w.is_empty() && !w.live_is_set());
-        assert_eq!((w.live.hourly_pace_usd, w.live.max_minutes), (None, None));
-        let rows = budget_rows(&[spend_row("Explore", 900.0)], &w);
+        // Spend far over any plausible budget, and an agent far over any
+        // plausible pace and open for days: with nothing set, nothing happens.
+        let rows = budget_rows(&[spend_row("Explore", 1_000_000.0)], &w);
         assert!(rows.is_empty());
         let mut fired = Vec::new();
         assert!(over_budget(&rows, day("2026-10-03"), &mut fired).is_empty());
-        // A session burning a fortune and open for days: with no figure set, no runaway.
-        let fast = running("Claude Code", Some("site"), 9 * 24 * 3600, Some(pace(50.0, 9_000, 0, true)));
-        assert!(runaways(&[fast], &w.live).is_empty());
-        assert!(opportunities(&currently_over(&rows), &[]).is_empty());
-        assert!(alerts_for(&[], "2026-10-03", &mut fired).is_empty());
+        let fast = running("Claude Code", Some("site"), 9 * 24 * 3600, Some(pace(5_000.0, 9_000, 0, true)));
+        let found = runaways(&[fast], &w.live);
+        assert!(found.is_empty());
+        assert!(opportunities(&currently_over(&rows), &found).is_empty());
+        assert!(alerts_for(&found, "2026-10-03", &mut fired).is_empty());
+        let mut marks = json!({});
+        assert!(newly_over_budget(&mut marks, &rows, day("2026-10-03")).is_empty());
+        assert!(due_runaway_alerts(&mut marks, &found, "2026-10-03").is_empty());
     }
 
     #[test]
@@ -465,7 +600,7 @@ mod tests {
 
     #[test]
     fn a_budget_may_name_a_built_in_agent() {
-        let known = known_names(&[], &[]);
+        let known = known_names(&[], &[], &Watch::default());
         let path = temp_path("agent_watch.json");
         let saved = save_to(&path, Watch { budgets: vec![budget("Explore", 25.0)], ..Watch::default() }, &known).expect("a built-in name is allowed");
         assert_eq!(saved.budgets[0].agent, "Explore");
@@ -475,7 +610,7 @@ mod tests {
 
     #[test]
     fn a_budget_for_an_unknown_name_is_refused() {
-        let known = known_names(&["reviewer".to_string()], &[spend_row("", 1.0), spend_row("worker", 2.0)]);
+        let known = known_names(&["reviewer".to_string()], &[spend_row("", 1.0), spend_row("worker", 2.0)], &Watch::default());
         assert!(known.contains(&"worker".to_string()) && known.contains(&"reviewer".to_string()));
         assert!(!known.contains(&String::new()), "the unattributed row can never take a budget");
         let path = temp_path("agent_watch.json");
@@ -488,7 +623,7 @@ mod tests {
 
     #[test]
     fn a_save_refuses_bad_figures_repeats_and_too_many() {
-        let known = known_names(&["reviewer".to_string()], &[]);
+        let known = known_names(&["reviewer".to_string()], &[], &Watch::default());
         let path = temp_path("agent_watch.json");
         let try_save = |w: Watch| save_to(&path, w, &known).unwrap_err().key;
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
@@ -507,7 +642,7 @@ mod tests {
             "error.agentWatch.duplicate"
         );
         let many: Vec<String> = (0..=MAX_BUDGETS).map(|i| format!("agent-{i}")).collect();
-        let known_many = known_names(&many, &[]);
+        let known_many = known_names(&many, &[], &Watch::default());
         let w = Watch { budgets: many.iter().map(|n| budget(n, 1.0)).collect(), ..Watch::default() };
         assert_eq!(save_to(&path, w, &known_many).unwrap_err().key, "error.agentWatch.tooMany");
         assert!(!path.exists());
@@ -525,7 +660,7 @@ mod tests {
         assert_eq!(w.budgets, vec![budget("Explore", 8.0)], "a figure that could not have been saved is dropped");
         assert_eq!(w.live, LiveRule::default());
         let w = Watch { budgets: vec![budget("Plan", 3.0)], live: LiveRule { hourly_pace_usd: Some(20.0), max_minutes: Some(90) } };
-        let saved = save_to(&path, w.clone(), &known_names(&[], &[])).unwrap();
+        let saved = save_to(&path, w.clone(), &known_names(&[], &[], &Watch::default())).unwrap();
         assert_eq!(saved, w);
         assert_eq!(load_from(&path), w);
         #[cfg(unix)]
@@ -594,23 +729,60 @@ mod tests {
         assert_eq!(live_hint(&[slow, fast]), Some(18.0), "the fastest pace per hour");
     }
 
+    fn runaway(area: Option<&str>, pid: u32) -> Runaway {
+        Runaway { tool: "Claude Code".into(), pid, area: area.map(str::to_string), reason: "pace", pace_per_hour: Some(12.0), minutes: 5 }
+    }
+
     #[test]
     fn a_runaway_alerts_once_a_day() {
-        let r = |area: Option<&str>| Runaway { tool: "Claude Code".into(), area: area.map(str::to_string), reason: "pace", pace_per_hour: Some(12.0), minutes: 5 };
-        let mut fired = vec!["Claude Code|old|2026-10-02".to_string()];
+        let r = |area: Option<&str>| runaway(area, 7);
+        let mut fired = vec!["Claude Code|old|7|2026-10-02".to_string()];
         let first = alerts_for(&[r(Some("site")), r(None)], "2026-10-03", &mut fired);
         assert_eq!(first.len(), 2, "two different areas are two agents");
-        assert_eq!(fired, ["Claude Code|site|2026-10-03", "Claude Code||2026-10-03"], "yesterday's mark is dropped");
+        assert_eq!(fired, ["Claude Code|site|7|2026-10-03", "Claude Code||7|2026-10-03"], "yesterday's mark is dropped");
         assert!(alerts_for(&[r(Some("site")), r(None)], "2026-10-03", &mut fired).is_empty(), "same day: silent");
-        // Two hosts in one area in a single pass are one alert.
+        // One process in one pass is one alert, and it is armed again the next day.
         let mut fresh = Vec::new();
         assert_eq!(alerts_for(&[r(Some("site")), r(Some("site"))], "2026-10-04", &mut fresh).len(), 1);
         assert_eq!(alerts_for(&[r(Some("site"))], "2026-10-05", &mut fresh).len(), 1, "armed again the next day");
         // The body names the figure for a pace and the open time for a duration.
         let p = &alerts_for(&[r(Some("x"))], "2026-10-06", &mut Vec::new())[0];
         assert_eq!(p.body.key, "notify.agentRunaway.pace");
-        let d = Runaway { reason: "duration", pace_per_hour: None, ..r(Some("x")) };
-        assert_eq!(alerts_for(&[d], "2026-10-06", &mut Vec::new())[0].body.key, "notify.agentRunaway.duration");
+        let d = Runaway { reason: "duration", pace_per_hour: None, minutes: 130, ..r(Some("x")) };
+        let body = &alerts_for(std::slice::from_ref(&d), "2026-10-06", &mut Vec::new())[0].body;
+        assert_eq!(body.key, "notify.agentRunaway.duration");
+        let Some(crate::i18n::Var::Msg(open)) = body.vars.get("open") else { panic!("the open time is a nested message") };
+        assert_eq!((open.key, open.vars.get("h").cloned(), open.vars.get("m").cloned()), ("time.hoursMins", Some(crate::i18n::Var::Text("2".into())), Some(crate::i18n::Var::Text("10".into()))));
+        // The reason does not matter: a duration alert uses up that process's day.
+        let mut one = Vec::new();
+        assert_eq!(alerts_for(&[d], "2026-10-06", &mut one).len(), 1);
+        assert!(alerts_for(&[r(Some("x"))], "2026-10-06", &mut one).is_empty());
+    }
+
+    #[test]
+    fn two_agents_in_the_same_tool_each_alert_once() {
+        // The folder is unknown for both, so only the process tells them apart.
+        let both = [runaway(None, 101), runaway(None, 102)];
+        let mut fired = Vec::new();
+        assert_eq!(alerts_for(&both, "2026-10-03", &mut fired).len(), 2);
+        assert!(alerts_for(&both, "2026-10-03", &mut fired).is_empty(), "each only once that day");
+        let json = serde_json::to_string(&both[0]).unwrap();
+        assert!(!json.contains("101") && !json.contains("pid"), "the pid never leaves: {json}");
+    }
+
+    #[test]
+    fn a_pipe_in_a_name_or_an_area_is_harmless() {
+        let w = Watch { budgets: vec![budget("a|b", 1.0)], ..Watch::default() };
+        let rows = budget_rows(&[spend_row("a|b", 2.0)], &w);
+        let mut fired = Vec::new();
+        assert_eq!(over_budget(&rows, day("2026-10-03"), &mut fired).len(), 1);
+        assert!(over_budget(&rows, day("2026-10-09"), &mut fired).is_empty(), "same month: silent");
+        assert_eq!(over_budget(&rows, day("2026-11-01"), &mut fired).len(), 1, "the mark is dropped by month, not parsed apart");
+        let mut marks = Vec::new();
+        let odd = [runaway(Some("x|y"), 5), runaway(Some("x"), 5), runaway(Some("y"), 5)];
+        assert_eq!(alerts_for(&odd, "2026-10-03", &mut marks).len(), 3, "areas with and around a pipe stay distinct");
+        assert!(alerts_for(&odd, "2026-10-03", &mut marks).is_empty());
+        assert!(alerts_for(&odd, "2026-10-04", &mut marks).len() == 3, "and are dropped by day");
     }
 
     #[test]
@@ -620,23 +792,141 @@ mod tests {
             BudgetRow { agent: "Explore".into(), month_to_date: 30.0, monthly_budget: 30.0 },
         ];
         let run = vec![
-            Runaway { tool: "Claude Code".into(), area: Some("site".into()), reason: "pace", pace_per_hour: Some(14.0), minutes: 4 },
-            Runaway { tool: "Codex".into(), area: None, reason: "duration", pace_per_hour: None, minutes: 130 },
+            Runaway { tool: "Claude Code".into(), pid: 1, area: Some("site".into()), reason: "pace", pace_per_hour: Some(14.0), minutes: 4 },
+            Runaway { tool: "Codex".into(), pid: 2, area: None, reason: "duration", pace_per_hour: None, minutes: 130 },
         ];
         let found = opportunities(&over, &run);
         let ids: Vec<&str> = found.iter().map(|o| o.id.as_str()).collect();
         assert_eq!(ids, FINDING_IDS);
         assert!(found.iter().all(|o| o.kind == "learn"));
-        assert_eq!(found[0].title_msg.count, Some(2));
-        assert_eq!(found[1].title_msg.count, Some(2));
-        assert!(found[0].detail.contains("reviewer ($12.50 / $10.00)") && found[0].detail.contains("Explore"), "{}", found[0].detail);
-        assert!(found[1].detail.contains("Claude Code (site): $14.00/h") && found[1].detail.contains("Codex: 130 min"), "{}", found[1].detail);
-        assert!(found[0].title.starts_with("2 agents") && !found[0].title.contains("reviewer"), "{}", found[0].title);
-        assert!(!found[0].title.starts_with("finding."), "{}", found[0].title);
+        let names = |o: &Opportunity| match o.detail_msg.as_ref().and_then(|m| m.vars.get("names")) {
+            Some(crate::i18n::Var::Text(t)) => t.clone(),
+            other => panic!("names is a text var, got {other:?}"),
+        };
+        for (o, rows) in found.iter().zip([over.len(), run.len()]) {
+            assert_eq!(o.title_msg.count, Some(rows as i64));
+            assert_eq!(names(o).split(", ").count(), rows, "the count is the number of rows named");
+            assert!(o.title_msg.vars.is_empty(), "a title carries a count only");
+        }
+        assert_eq!(names(&found[0]), "reviewer ($12.50 / $10.00), Explore ($30.00 / $30.00)");
+        assert_eq!(names(&found[1]), "Claude Code (site): $14.00, Codex: 2:10", "rows hold figures only, no unit words");
         assert!(opportunities(&[], &[]).is_empty(), "absent when there is nothing to say");
         // Only what is over now: a row under budget is not a finding.
         let under = vec![BudgetRow { agent: "Plan".into(), month_to_date: 1.0, monthly_budget: 2.0 }];
         assert!(currently_over(&under).is_empty());
+        let exactly = vec![BudgetRow { agent: "Plan".into(), month_to_date: 2.0, monthly_budget: 2.0 }];
+        assert_eq!(currently_over(&exactly).len(), 1, "at the budget counts");
+    }
+
+    #[test]
+    fn a_budget_equal_to_spend_counts_as_over_after_a_round_trip() {
+        let path = temp_path("agent_watch.json");
+        let saved = save_to(&path, Watch { budgets: vec![budget("Plan", 12.5)], ..Watch::default() }, &known_names(&[], &[], &Watch::default())).unwrap();
+        let rows = budget_rows(&[spend_row("Plan", 12.5)], &load_from(&path));
+        assert_eq!(rows[0].monthly_budget, saved.budgets[0].monthly_budget);
+        assert_eq!(currently_over(&rows).len(), 1);
+        assert_eq!(over_budget(&rows, day("2026-10-03"), &mut Vec::new()).len(), 1);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_saved_budget_for_a_vanished_agent_does_not_block_saving() {
+        let path = temp_path("agent_watch.json");
+        let first = Watch { budgets: vec![budget("gone-agent", 5.0)], ..Watch::default() };
+        let known = known_names(&["gone-agent".to_string()], &[], &Watch::default());
+        save_to(&path, first, &known).unwrap();
+        // The definition is deleted and it has no spend: only the saved file still names it.
+        let saved = load_from(&path);
+        let known = known_names(&[], &[], &saved);
+        assert!(known.contains(&"gone-agent".to_string()), "still listed, so the row can be shown and edited");
+        let next = Watch { budgets: vec![budget("gone-agent", 9.0), budget("Plan", 3.0)], live: LiveRule { hourly_pace_usd: Some(20.0), max_minutes: None } };
+        assert_eq!(save_to(&path, next.clone(), &known).unwrap(), next);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_failed_write_gives_a_fixed_message_not_the_writers_detail() {
+        let dir = temp_path("blocker");
+        std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+        std::fs::write(&dir, "a file where a folder is needed").unwrap();
+        let err = save_to(&dir.join("agent_watch.json"), Watch::default(), &[]).unwrap_err();
+        assert_eq!(err.key, "error.agentWatch.write");
+        assert!(err.vars.is_empty(), "the writer's English, credential-file wording must not reach the user");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn a_hand_edited_file_is_bounded_on_load() {
+        let path = temp_path("agent_watch.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let long = "x".repeat(MAX_NAME_CHARS + 1);
+        let mut entries: Vec<String> = vec![
+            r#"{"agent":"first","monthlyBudget":1}"#.into(),
+            r#"{"agent":"first","monthlyBudget":99}"#.into(),
+            r#"{"agent":"broken","monthlyBudget":"lots"}"#.into(),
+            r#"{"nonsense":true}"#.into(),
+            r#"42"#.into(),
+            format!(r#"{{"agent":"{long}","monthlyBudget":1}}"#),
+            r#"{"agent":"","monthlyBudget":1}"#.into(),
+            r#"{"agent":"last-ok","monthlyBudget":2}"#.into(),
+        ];
+        entries.extend((0..60).map(|i| format!(r#"{{"agent":"bulk-{i}","monthlyBudget":1}}"#)));
+        std::fs::write(&path, format!(r#"{{"budgets":[{}],"live":{{"hourlyPaceUsd":3.5,"maxMinutes":90.5}}}}"#, entries.join(","))).unwrap();
+        let w = load_from(&path);
+        assert_eq!(w.budgets.len(), MAX_BUDGETS, "stops at the cap");
+        assert_eq!((w.budgets[0].agent.as_str(), w.budgets[0].monthly_budget), ("first", 1.0), "a repeated name keeps its first row");
+        assert_eq!(w.budgets[1].agent, "last-ok", "one malformed entry does not cost the rest");
+        assert!(w.budgets.iter().all(|b| !b.agent.is_empty() && b.agent != long && b.agent != "broken"));
+        assert_eq!(w.live, LiveRule { hourly_pace_usd: Some(3.5), max_minutes: None }, "a fractional minute count is dropped, the other figure kept");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_fractional_or_out_of_range_minute_count_is_refused_in_the_users_language() {
+        let input = |m: Option<f64>| WatchInput { budgets: vec![], live: LiveInput { hourly_pace_usd: None, max_minutes: m } };
+        for bad in [90.5, 0.0, -3.0, f64::NAN, 1e30] {
+            assert_eq!(input(Some(bad)).into_watch().unwrap_err().key, "error.agentWatch.figure", "{bad}");
+        }
+        assert_eq!(input(Some(90.0)).into_watch().unwrap().live.max_minutes, Some(90));
+        assert_eq!(input(None).into_watch().unwrap().live.max_minutes, None);
+        let parsed: WatchInput = serde_json::from_str(r#"{"budgets":[],"live":{"maxMinutes":90.5}}"#).expect("a fraction parses, then is refused by into_watch");
+        assert!(parsed.into_watch().is_err());
+    }
+
+    #[test]
+    fn the_loop_steps_read_and_write_their_own_marks() {
+        // A missing key, and marks that are valid JSON but not an object.
+        let rows = [BudgetRow { agent: "Plan".into(), month_to_date: 9.0, monthly_budget: 5.0 }];
+        for mut marks in [json!({}), json!([1, 2]), json!("text"), json!(null)] {
+            assert_eq!(newly_over_budget(&mut marks, &rows, day("2026-10-03")).len(), 1);
+            assert_eq!(marks[BUDGET_MARKS], json!(["Plan|2026-10"]));
+            assert!(newly_over_budget(&mut marks, &rows, day("2026-10-20")).is_empty(), "same month: silent");
+            // A stale month is dropped, and the 1st re-arms it.
+            marks[BUDGET_MARKS] = json!(["Plan|2026-09", "Other|2026-09"]);
+            assert_eq!(newly_over_budget(&mut marks, &rows, day("2026-10-01")).len(), 1);
+            assert_eq!(marks[BUDGET_MARKS], json!(["Plan|2026-10"]));
+        }
+        let mut marks = json!({"budgetFired": ["keep|2026-10"]});
+        let run = [runaway(Some("site"), 3)];
+        assert_eq!(due_runaway_alerts(&mut marks, &run, "2026-10-03").len(), 1);
+        assert!(due_runaway_alerts(&mut marks, &run, "2026-10-03").is_empty());
+        assert_eq!(marks["runawayFired"], json!(["Claude Code|site|3|2026-10-03"]));
+        assert_eq!(marks["budgetFired"], json!(["keep|2026-10"]), "other keys are left alone");
+        assert_eq!(due_runaway_alerts(&mut json!(7), &run, "2026-10-03").len(), 1);
+        let mut rolled = json!({"runawayFired": ["Claude Code|site|3|2026-10-02"]});
+        assert_eq!(due_runaway_alerts(&mut rolled, &run, "2026-10-03").len(), 1, "yesterday's mark is gone");
+    }
+
+    #[test]
+    fn marks_for_a_rule_that_is_no_longer_set_are_dropped() {
+        let mut marks = json!({"agentBudgetFired": ["a|2026-10"], "runawayFired": ["t||1|2026-10-03"], "budgetFired": []});
+        let budget_only = Watch { budgets: vec![budget("Plan", 1.0)], ..Watch::default() };
+        assert!(drop_unused_marks(&mut marks, &budget_only));
+        assert!(marks.get("runawayFired").is_none() && marks.get("agentBudgetFired").is_some());
+        assert!(!drop_unused_marks(&mut marks, &budget_only), "nothing more to remove: not a change");
+        assert!(drop_unused_marks(&mut marks, &Watch::default()));
+        assert_eq!(marks, json!({"budgetFired": []}), "the client budget marks are never touched");
+        assert!(!drop_unused_marks(&mut json!([1]), &Watch::default()));
     }
 
     #[test]

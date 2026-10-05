@@ -619,7 +619,7 @@ mod tests {
     #[test]
     fn the_agent_watch_findings_reach_the_audit_unscored() {
         let over = [crate::agent_watch::BudgetRow { agent: "Plan".into(), month_to_date: 9.0, monthly_budget: 5.0 }];
-        let run = [crate::agent_watch::Runaway { tool: "Claude Code".into(), area: None, reason: "duration", pace_per_hour: None, minutes: 200 }];
+        let run = [crate::agent_watch::Runaway { tool: "Claude Code".into(), pid: 1, area: None, reason: "duration", pace_per_hour: None, minutes: 200 }];
         let inv = Inventory { opportunities: crate::agent_watch::opportunities(&over, &run), ..Inventory::default() };
         let r = run_one(&inv);
         let got = statuses(&r);

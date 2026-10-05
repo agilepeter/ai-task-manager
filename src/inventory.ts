@@ -516,6 +516,12 @@ function agentPlace(a: RunningAgent): string {
   return T("running.agentFolderOnly", { folder });
 }
 
+/// Seconds without a new line, with no tokens in ten minutes, after which a
+/// running session reads as idle. The Rust runaway rule states the same number
+/// (`IDLE_SECS` in crates/core/src/agent_watch.rs); scripts/agent-idle.test.mjs
+/// fails when the two differ.
+export const IDLE_SECS = 60;
+
 /// The one place an agent row's three strings are composed, so renderAgents()
 /// never touches a translation key directly. Pure: no DOM, no invoke -- easy
 /// to run for all nine locales in a plain node test.
@@ -531,7 +537,7 @@ export function describeAgent(a: RunningAgent): { title: string; place: string; 
   const p = a.pace;
   if (!p) return { title, place, pace: null, tip: null };
   const tip = T("running.agentPaceTip");
-  if (p.idleSecs >= 60 && p.tokens10m === 0) {
+  if (p.idleSecs >= IDLE_SECS && p.tokens10m === 0) {
     return { title, place, pace: T("running.agentIdle", { minutes: Math.floor(p.idleSecs / 60) }), tip };
   }
   const pace = p.priced
