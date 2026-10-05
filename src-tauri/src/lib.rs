@@ -328,6 +328,11 @@ async fn get_agent_watch() -> Result<AgentWatchView, String> {
 
 /// Validates against the known names, saves, and returns the fresh view. The
 /// app only ever tells: nothing here, or in the rules it saves, acts on an agent.
+///
+/// Two calls that overlap cannot tear the file (each writes a temp file and
+/// renames it, so the last rename wins whole), but the earlier call's returned
+/// view may describe what it saved rather than what is on disk now. A caller
+/// paints only the answer to the last call it made.
 #[tauri::command]
 async fn set_agent_watch(watch: serde_json::Value) -> Result<AgentWatchView, String> {
     let cfg = config_with_defaults(load_config());

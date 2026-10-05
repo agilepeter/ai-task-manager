@@ -45,17 +45,16 @@ pub(crate) const ERROR_KEYS: &[&str] = &[
 /// Reads the watch the webview sends, as plain JSON, so that every way it can
 /// be malformed ends in a translated error instead of a serde string in
 /// English: an empty number field arrives as `null`, a figure may be a string,
-/// a name may be missing. `null` or a missing `budgets` / `live` means none
-/// set. A bad or missing name is `error.agentWatch.pick`; a bad or missing
-/// figure, or anything else the wrong shape, is `error.agentWatch.figure`.
-/// Bounds and known names are checked afterwards by `save_to`.
+/// a name may be missing. Inside the object, `null` or a missing `budgets` /
+/// `live` means none set. The payload itself must be an object: a bare `null`
+/// is what a view sends when it saves before it has loaded, and treating that
+/// as "clear everything" would wipe the user's budgets without a word. A bad
+/// or missing name is `error.agentWatch.pick`; a bad or missing figure, or
+/// anything else the wrong shape, is `error.agentWatch.figure`. Bounds and
+/// known names are checked afterwards by `save_to`.
 pub fn watch_from_json(v: &Value) -> Result<Watch, Msg> {
     let figure = || Msg::new("error.agentWatch.figure");
-    let obj = match v {
-        Value::Null => return Ok(Watch::default()),
-        Value::Object(o) => o,
-        _ => return Err(figure()),
-    };
+    let Value::Object(obj) = v else { return Err(figure()) };
     let mut w = Watch::default();
     match obj.get("budgets") {
         None | Some(Value::Null) => {}
@@ -939,11 +938,12 @@ mod tests {
         for bad in [90.5, 0.0, -3.0, 1e30] {
             assert_eq!(err(json!({"live":{"maxMinutes":bad}})), fig, "{bad}");
         }
-        for top in [json!([1]), json!("watch"), json!(7), json!(true)] {
+        // A bare null is refused too: it would otherwise clear what is saved.
+        for top in [json!(null), json!([1]), json!("watch"), json!(7), json!(true)] {
             assert_eq!(err(top), fig);
         }
-        // Null or missing means none set, not an error.
-        for none in [json!(null), json!({}), json!({"budgets":null,"live":null}), json!({"live":{"hourlyPaceUsd":null,"maxMinutes":null}})] {
+        // Inside the object, null or missing means none set, not an error.
+        for none in [json!({}), json!({"budgets":null,"live":null}), json!({"live":{"hourlyPaceUsd":null,"maxMinutes":null}})] {
             assert_eq!(watch_from_json(&none).unwrap(), Watch::default());
         }
         let ok = watch_from_json(&json!({"budgets":[{"agent":"Plan","monthlyBudget":5}],"live":{"hourlyPaceUsd":2.5,"maxMinutes":90}})).unwrap();
