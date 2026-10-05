@@ -13,6 +13,13 @@ export function money(n: number): string {
   return n >= 10 ? `$${Math.round(n).toLocaleString(localeTag())}` : `$${n.toFixed(2)}`;
 }
 
+/// A budget is typed in whole dollars, so a whole one reads "$5" and "$25",
+/// never "$5.00" beside "$25"; grouping is money()'s. Only a hand-edited file
+/// can hold a fractional budget, and that goes through money().
+export function wholeMoney(n: number): string {
+  return Number.isInteger(n) ? `$${n.toLocaleString(localeTag())}` : money(n);
+}
+
 /// B/M/K stay English: format tokens, not prose, like money()'s $ and fileSize()'s
 /// MB/KB — "tokens" itself is this codebase's house loanword in every non-English
 /// locale's strings.

@@ -42,7 +42,7 @@ const I18N_ATTRS = ["data-i18n", "data-i18n-html"];
 //
 // - The eleven key-row labels are brand names (OpenRouter, Z.ai, …); a
 //   product name is never translated, same rule as a URL.
-// - spend-alert's six options are bare currency amounts ("$10" … "$500") --
+// - spend-alert's and agent-pace's options are bare currency amounts ("$10" … "$500") --
 //   no natural-language word sits in any of them, so there is nothing in
 //   them TO translate, again like a URL or a version number.
 //
@@ -66,6 +66,7 @@ export const SETTINGS_I18N_EXEMPT = {
   "key-aihubmix": "brand name (AihubMix), never translated",
   "key-qwen": "brand name (Qwen Code), never translated",
   "spend-alert>option": "bare currency amounts ($10 … $500), no words to translate",
+  "agent-pace>option": "bare currency amounts ($5 … $250), no words to translate",
 };
 
 // Which data-i18n-* attribute covers which plain attribute, mirroring

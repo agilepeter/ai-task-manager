@@ -4569,6 +4569,8 @@ function applyLocale(): void {
   if (lastSnapshots.length) renderIfVisible();
   populatePinnedOptions();
   renderBuildInfo();
+  // The hint and the error line are painted with t(), not data-i18n.
+  paintAgentLive();
 }
 
 /// The two agent live-rule dropdowns are not config keys: they are read with
@@ -4581,8 +4583,8 @@ function paintAgentLive(): void {
   const pace = document.querySelector<HTMLSelectElement>("#agent-pace");
   const open = document.querySelector<HTMLSelectElement>("#agent-open");
   if (!pace || !open) return;
-  const { view, error } = agentWatchState();
-  pace.disabled = open.disabled = view === null;
+  const { view, error, saving } = agentWatchState();
+  pace.disabled = open.disabled = view === null || saving;
   const show = (el: HTMLSelectElement, value: string | null) => {
     if (value === null) el.selectedIndex = -1;
     else el.value = value;

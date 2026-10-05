@@ -13,7 +13,7 @@
 // reimplemented here.
 
 import { invoke } from "@tauri-apps/api/core";
-import { money } from "./format";
+import { money, wholeMoney } from "./format";
 import { focusOrFallback } from "./focus";
 import { plural, t } from "./i18n";
 import { focusAfterClose, isTopPanel, syncPanels } from "./panels";
@@ -136,12 +136,22 @@ export const MAX_BUDGET_USD = 1_000_000;
 let watchView: AgentWatchView | null = null;
 let watchError = "";
 /** The rejection shown under the add row; cleared by the next success. */
-let budgetNote = "";
+/** Either which of this view's own messages it is (translated when painted, so
+ *  a language switch changes it) or a refusal the backend already translated
+ *  (shown as it came, and dropped on a language switch: it cannot be redone). */
+let budgetNote: { key: string } | { text: string } | null = null;
+/** True from the moment a save is sent to the moment its answer is painted.
+ *  Every control that could start another save is disabled meanwhile, so two
+ *  saves are never built from the same view and no change is overwritten. */
+let saving = false;
 let budgetDraft: BudgetDraft = { agent: "", amount: "" };
 /** Counts every get_agent_watch / set_agent_watch call. An answer paints only
  *  when it belongs to the latest call: two saves can overlap, and the older
  *  answer describes a file that has since been overwritten. */
 let watchSeq = 0;
+function noteText(): string {
+  return !budgetNote ? "" : "key" in budgetNote ? t(budgetNote.key) : budgetNote.text;
+}
 const watchListeners = new Set<() => void>();
 
 function esc(s: string): string {
@@ -255,7 +265,8 @@ export function budgetRemoveFocus(names: string[], removed: string, byKeyboard: 
 /// the rejection to show. With no view there are no controls at all, so no
 /// payload can ever be built from an empty default and written over the
 /// user's budgets.
-export function renderBudgetsSection(view: AgentWatchView | null, error: string, draft: BudgetDraft, note = ""): string {
+export function renderBudgetsSection(view: AgentWatchView | null, error: string, draft: BudgetDraft, note = "", busy = false): string {
+  const off = busy ? " disabled" : "";
   const head = (count: number | null) =>
     `<h3>${esc(T("budgets.title"))}${count === null ? "" : ` <span class="plan">${count}</span>`}</h3><p class="inv-note">${esc(T("budgets.note"))}</p>`;
   const open = `<section class="dt-section" data-section="agent-budgets">`;
@@ -267,15 +278,15 @@ export function renderBudgetsSection(view: AgentWatchView | null, error: string,
     .map((b) => {
       const over = b.monthToDate >= b.monthlyBudget;
       const line = b.monthToDate === 0
-        ? T("budgets.noSpend", { budget: money(b.monthlyBudget) })
-        : T("budgets.spent", { spent: money(b.monthToDate), budget: money(b.monthlyBudget) });
+        ? T("budgets.noSpend", { budget: wholeMoney(b.monthlyBudget) })
+        : T("budgets.spent", { spent: money(b.monthToDate), budget: wholeMoney(b.monthlyBudget) });
       return `
       <div class="inv-row ag-budget-row">
         <div class="inv-row-main">
           <span class="inv-name" title="${esc(b.agent)}">${esc(b.agent)}</span>
           <span class="inv-sub inv-sub-wrap${over ? " dt-forecast-hit" : ""}">${esc(line)}</span>
         </div>
-        <div class="inv-row-meta"><button class="inv-learn" data-budget-remove="${esc(b.agent)}" aria-label="${esc(T("budgets.removeAria", { agent: b.agent }))}">${esc(T("budgets.remove"))}</button></div>
+        <div class="inv-row-meta"><button class="inv-learn" data-budget-remove="${esc(b.agent)}"${off} aria-label="${esc(T("budgets.removeAria", { agent: b.agent }))}">${esc(T("budgets.remove"))}</button></div>
       </div>`;
     })
     .join("");
@@ -290,11 +301,11 @@ export function renderBudgetsSection(view: AgentWatchView | null, error: string,
       : free.length === 0
         ? `<p class="dt-caption">${esc(T("budgets.allSet"))}</p>`
         : `<div class="ag-budget-add">
-          <select id="agent-budget-pick" aria-label="${esc(T("budgets.pickAria"))}">
+          <select id="agent-budget-pick"${off} aria-label="${esc(T("budgets.pickAria"))}">
             <option value="" disabled${free.includes(draft.agent) ? "" : " selected"}>${esc(T("budgets.pick"))}</option>${options}
           </select>
-          <input id="agent-budget-amount" type="number" min="1" max="${MAX_BUDGET_USD}" step="1" inputmode="numeric" placeholder="${esc(t("detail.client.budgetPh"))}" value="${esc(draft.amount)}" aria-label="${esc(T("budgets.amountAria"))}" />
-          <button class="inv-learn" id="agent-budget-add">${esc(t("ledger.add"))}</button>
+          <input id="agent-budget-amount"${off} type="number" min="1" max="${MAX_BUDGET_USD}" step="1" inputmode="numeric" placeholder="${esc(t("detail.client.budgetPh"))}" value="${esc(draft.amount)}" aria-label="${esc(T("budgets.amountAria"))}" />
+          <button class="inv-learn" id="agent-budget-add"${off}>${esc(t("ledger.add"))}</button>
         </div>`;
   const empty = view.budgets.length ? "" : `<p class="inv-empty">${esc(T("budgets.empty"))}</p>`;
   const noteLine = note ? `<p class="lg-error" role="alert">${esc(note)}</p>` : "";
@@ -317,6 +328,7 @@ export function renderAgentsView(
   watchLoadError = "",
   draft: BudgetDraft = { agent: "", amount: "" },
   budgetRejection = "",
+  budgetBusy = false,
 ): string {
   // 1. Three labelled facts, not one sentence that joins a count of the
   // user's own agents with a cost that is mostly built-ins' (see agentStats()
@@ -435,7 +447,7 @@ export function renderAgentsView(
       ${yourAgentsBody}
     </section>
     ${builtInSection}
-    ${renderBudgetsSection(watch, watchLoadError, draft, budgetRejection)}
+    ${renderBudgetsSection(watch, watchLoadError, draft, budgetRejection, budgetBusy)}
     <section class="dt-section">
       <h3>${esc(T("section.worthALook"))} <span class="plan">${findings.length}</span></h3>
       ${findingsBody}
@@ -522,7 +534,7 @@ function render(): void {
     el.innerHTML = `<p class="dt-empty">${esc(t("detail.loading"))}</p>`;
     return;
   }
-  el.innerHTML = renderAgentsView(inventory, runningAgents, runningAgentsError, agentSpend, agentSpendError, failingGuardrails, Date.now(), watchView, watchError, budgetDraft, budgetNote);
+  el.innerHTML = renderAgentsView(inventory, runningAgents, runningAgentsError, agentSpend, agentSpendError, failingGuardrails, Date.now(), watchView, watchError, budgetDraft, noteText(), saving);
 }
 
 async function loadFailingGuardrails(): Promise<number> {
@@ -545,8 +557,8 @@ async function loadFailingGuardrails(): Promise<number> {
 // ---------------------------------------------------------------------------
 
 /// What the last answer was, for the Settings dropdowns.
-export function agentWatchState(): { view: AgentWatchView | null; error: string } {
-  return { view: watchView, error: watchError };
+export function agentWatchState(): { view: AgentWatchView | null; error: string; saving: boolean } {
+  return { view: watchView, error: watchError, saving };
 }
 
 /// Called after every painted answer, so Settings can repaint its two selects.
@@ -563,7 +575,11 @@ function announceWatch(): void {
 
 /// Fetches the saved watch. A failed load leaves NO view behind, so nothing
 /// can build a payload from an empty default; the error is shown instead.
+///
+/// While a save is in flight a load is skipped: that save's answer is the
+/// fresh view, and a load started now would make it count as stale.
 export function loadAgentWatch(): Promise<void> {
+  if (saving) return Promise.resolve();
   const seq = ++watchSeq;
   return invoke<AgentWatchView>("get_agent_watch").then(
     (view) => {
@@ -588,26 +604,40 @@ export type WatchSave =
   /** A newer call has been made since, so this answer is dropped unseen. */
   | { outcome: "stale" }
   /** Nothing has loaded yet: no call is made, because there is nothing to build from. */
-  | { outcome: "notLoaded" };
+  | { outcome: "notLoaded" }
+  /** Another save is still in flight; nothing is sent. */
+  | { outcome: "busy" };
 
 /// Sends a whole watch built from the last view the backend returned and
 /// paints the view that comes back, if no newer call has been made since.
 /// `beforePaint` runs only on success, just before the repaint.
 export function saveAgentWatch(build: (last: AgentWatchView) => AgentWatchPayload, beforePaint?: () => void): Promise<WatchSave> {
+  if (saving) return Promise.resolve({ outcome: "busy" });
   const last = watchView;
   if (!last) return Promise.resolve({ outcome: "notLoaded" });
   const seq = ++watchSeq;
+  saving = true;
+  // Repaint now, so every control that could start a second save is disabled.
+  announceWatch();
   return invoke<AgentWatchView>("set_agent_watch", { watch: build(last) }).then(
     (view): WatchSave => {
-      if (seq !== watchSeq) return { outcome: "stale" };
+      saving = false;
+      if (seq !== watchSeq) {
+        announceWatch();
+        return { outcome: "stale" };
+      }
       watchView = view;
       watchError = "";
-      budgetNote = "";
+      budgetNote = null;
       beforePaint?.();
       announceWatch();
       return { outcome: "saved" };
     },
-    (err): WatchSave => (seq !== watchSeq ? { outcome: "stale" } : { outcome: "rejected", error: String(err) }),
+    (err): WatchSave => {
+      saving = false;
+      announceWatch();
+      return seq !== watchSeq ? { outcome: "stale" } : { outcome: "rejected", error: String(err) };
+    },
   );
 }
 
@@ -639,7 +669,7 @@ function focusFirstMatch(selectors: string[]): void {
 export async function addBudget(byKeyboard: boolean): Promise<void> {
   const checked = checkBudgetInput(budgetDraft.agent, budgetDraft.amount);
   if (!checked.ok) {
-    budgetNote = t(checked.key);
+    budgetNote = { key: checked.key };
     render();
     if (byKeyboard) focusFirstMatch(["#agent-budget-pick"]);
     return;
@@ -650,7 +680,7 @@ export async function addBudget(byKeyboard: boolean): Promise<void> {
     () => { budgetDraft = { agent: "", amount: "" }; },
   );
   if (result.outcome === "rejected") {
-    budgetNote = result.error;
+    budgetNote = { text: result.error };
     render();
   }
   if (byKeyboard && (result.outcome === "saved" || result.outcome === "rejected")) focusFirstMatch(["#agent-budget-pick"]);
@@ -661,7 +691,7 @@ export async function removeBudget(agent: string, byKeyboard: boolean): Promise<
   const names = (watchView?.budgets ?? []).map((b) => b.agent);
   const result = await saveAgentWatch((last) => budgetPayload(last, { remove: agent }));
   if (result.outcome === "rejected") {
-    budgetNote = result.error;
+    budgetNote = { text: result.error };
     render();
   }
   if (!byKeyboard) return;
@@ -808,6 +838,9 @@ export function applyRescan(data: RescanResult): void {
 /// Redraws the Agents panel in place, e.g. after a locale switch. A no-op
 /// while the panel is closed.
 export function rerender(): void {
+  // A refusal from the backend arrived already translated: it cannot follow
+  // the language, so it goes rather than stay in the old one.
+  if (budgetNote && "text" in budgetNote) budgetNote = null;
   if (document.body.classList.contains("agents-open")) render();
 }
 

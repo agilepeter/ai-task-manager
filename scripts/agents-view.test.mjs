@@ -85,7 +85,7 @@ async function buildAgentsModule() {
   const agentsSource = await readFile(new URL("../src/agents.ts", import.meta.url), "utf8");
   const strippedAgents = agentsSource
     .replace('import { invoke } from "@tauri-apps/api/core";', "")
-    .replace('import { money } from "./format";', "")
+    .replace('import { money, wholeMoney } from "./format";', "")
     .replace('import { focusOrFallback } from "./focus";', "")
     .replace('import { focusAfterClose, isTopPanel, syncPanels } from "./panels";', "")
     .replace('import { plural, t } from "./i18n";', "")
@@ -768,7 +768,7 @@ test("a budget with no spend still shows", async () => {
 
   assert.equal((html.match(/class="inv-row ag-budget-row"/g) ?? []).length, 2, "a budget with no spend must still get its row");
   assert.ok(html.includes("No spend this month, against a budget of $20"), "a zero-spend row must say there is no spend, with the budget");
-  assert.ok(html.includes("No spend this month, against a budget of $7.00"), "a budget on an agent that no longer exists must still show");
+  assert.ok(html.includes("No spend this month, against a budget of $7"), "a budget on an agent that no longer exists must still show");
   assert.ok(html.includes('data-budget-remove="gone-agent"'), "every row has its own Remove button");
   assert.match(html, /aria-label="Remove the budget for gone-agent"/, "Remove's accessible name must include the agent's name");
   assert.ok(!html.includes("This month:"), "a zero-spend row must not claim a figure for the month");
@@ -788,7 +788,20 @@ test("an over-budget row is marked and an under-budget row is not", async () => 
   assert.equal(marked("at-agent"), true, "a row exactly at its budget counts as over, like the client budget line");
   assert.equal(marked("under-agent"), false, "a row under its budget must not be marked");
   assert.ok(html.includes("This month: $15 of $10"), "the figure for the month must read as this month's spend of the budget");
-  assert.ok(html.includes("This month: $1.69 of $5.00"));
+  assert.ok(html.includes("This month: $1.69 of $5"));
+});
+
+test("a whole-dollar budget shows without cents and a fractional one keeps them", async () => {
+  const { renderBudgetsSection, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  const view = watchView({ rows: [["a", 0.85, 25], ["b", 1.69, 5], ["c", 0, 5], ["d", 3, 2.5], ["e", 20, 1500]] });
+  const html = renderBudgetsSection(view, "", NO_DRAFT);
+  assert.ok(html.includes("This month: $0.85 of $25<"), "a whole budget of $25 reads $25");
+  assert.ok(html.includes("This month: $1.69 of $5<"), "a whole budget of $5 reads $5, not $5.00");
+  assert.ok(html.includes("No spend this month, against a budget of $5<"), "the no-spend line reads the same way");
+  assert.ok(html.includes("This month: $3.00 of $2.50<"), "a budget that is not whole goes through money()");
+  assert.ok(html.includes("of $1,500<"), "larger budgets keep money()'s grouping");
+  assert.ok(!html.includes("$5.00"));
 });
 
 test("the picker offers only known names without a budget", async () => {
@@ -941,30 +954,35 @@ test("the budgets section calls only set_agent_watch", async () => {
 });
 
 test("an answer to an older save is not painted", async () => {
-  const { loadAgentWatch, saveAgentWatch, agentWatchState, onAgentWatchChange, setActiveLocale } = await loadAgentsModule();
+  const { loadAgentWatch, saveAgentLive, agentWatchState, onAgentWatchChange, setActiveLocale } = await loadAgentsModule();
   setActiveLocale("en");
   globalThis.document = makeFakeDocument();
-  const base = watchView();
-  const queue = [];
+  // A save is never started while another is in flight, so the older answer
+  // that can still arrive late is a load's: a refresh asked for before the
+  // save, answered after it. It describes the file as it was.
+  const before = watchView();
+  const answers = [];
+  let loads = 0;
   globalThis.invoke = (cmd, args) => {
-    if (cmd === "get_agent_watch") return Promise.resolve(base);
-    return new Promise((resolve) => queue.push(() => resolve(watchView({ rows: args.watch.budgets.map((b) => [b.agent, 0, b.monthlyBudget]), known: base.known }))));
+    if (cmd === "get_agent_watch") {
+      loads += 1;
+      if (loads === 1) return Promise.resolve(before);
+      return new Promise((resolve) => answers.push(() => resolve(before)));
+    }
+    return Promise.resolve(watchView({ live: args.watch.live }));
   };
   const painted = [];
-  onAgentWatchChange(() => painted.push(agentWatchState().view?.budgets.map((b) => b.agent).join(",")));
+  onAgentWatchChange(() => painted.push(agentWatchState().view?.watch.live.hourlyPaceUsd));
   try {
     await loadAgentWatch();
     painted.length = 0;
-
-    const older = saveAgentWatch((last) => ({ budgets: [...last.watch.budgets, { agent: "Plan", monthlyBudget: 1 }], live: last.watch.live }));
-    const newer = saveAgentWatch((last) => ({ budgets: [...last.watch.budgets, { agent: "Explore", monthlyBudget: 2 }], live: last.watch.live }));
-    queue[1](); // the newer call answers first
-    assert.deepEqual(await newer, { outcome: "saved" });
-    queue[0](); // then the older one answers late
-    assert.deepEqual(await older, { outcome: "stale" });
-
-    assert.deepEqual(painted, ["general-purpose,deploy-checker,Explore"], "only the latest call's answer may be painted");
-    assert.equal(agentWatchState().view.budgets.map((b) => b.agent).join(","), "general-purpose,deploy-checker,Explore", "a late older answer must not replace the newer view");
+    const slowLoad = loadAgentWatch(); // asked first, answers last
+    assert.deepEqual(await saveAgentLive({ hourlyPaceUsd: 50 }), { outcome: "saved" });
+    const paintedBySave = painted.length;
+    answers[0]();
+    await slowLoad;
+    assert.equal(painted.length, paintedBySave, "the older answer must not be painted");
+    assert.equal(agentWatchState().view.watch.live.hourlyPaceUsd, 50, "a late older answer must not replace the newer view");
   } finally {
     delete globalThis.document;
     delete globalThis.invoke;
@@ -1054,4 +1072,135 @@ test("checkBudgetInput and the remove focus order", async () => {
   assert.deepEqual(budgetRemoveFocus(names, "b", false), [], "a pointer click leaves nothing focused");
   assert.deepEqual(budgetRemoveFocus(['we"ird'], 'we"ird', true), ["#agent-budget-pick"]);
   assert.deepEqual(budgetRemoveFocus(['we"ird', "x"], "x", true), ['[data-budget-remove="we\\"ird"]', "#agent-budget-pick"], "a quote in a name is escaped in the selector");
+});
+
+test("the live rule hint follows a language switch", async () => {
+  const { t, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  const en = t("settings.agentPaceHint", { pace: "$4" });
+  setActiveLocale("de");
+  const de = t("settings.agentPaceHint", { pace: "$4" });
+  setActiveLocale("en");
+  assert.notEqual(en, de, "the hint must be a translated string, so a switch changes it");
+  // The hint and the error line are painted with t(), not data-i18n, so the
+  // switch only reaches them if applyLocale() repaints the Settings rows.
+  const main = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+  const body = main.match(/function applyLocale\(\): void \{[\s\S]*?\n\}\n/)[0];
+  assert.match(body, /paintAgentLive\(\)/, "applyLocale() must repaint the live rule's hint and error");
+});
+
+test("a budget note follows a language switch", async () => {
+  const { openAgents, noteBudgetDraft, addBudget, __agentsRerender, loadAgentWatch, t, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  const doc = makeFakeDocument();
+  globalThis.document = doc;
+  let refuse = false;
+  const view = watchView();
+  globalThis.invoke = async (cmd) => {
+    if (cmd === "get_inventory") return inventory();
+    if (cmd === "get_agent_watch") return view;
+    if (cmd === "set_agent_watch") {
+      if (refuse) throw "Refused by the backend.";
+      return view;
+    }
+    if (cmd === "get_audit") return { sections: [] };
+    return [];
+  };
+  try {
+    openAgents();
+    await flushMicrotasks();
+    const body = () => doc.elements.get("#agents-body").innerHTML;
+
+    noteBudgetDraft("agent", "");
+    noteBudgetDraft("amount", "5");
+    await addBudget(false);
+    assert.ok(body().includes(esc(t("error.agentWatch.pick"))), "the pick note shows");
+    setActiveLocale("de");
+    __agentsRerender();
+    assert.ok(body().includes(esc(t("error.agentWatch.pick"))) && !body().includes("Pick each agent"), "the pick note must be repainted in the new language");
+
+    setActiveLocale("en");
+    noteBudgetDraft("agent", "Plan");
+    refuse = true;
+    await addBudget(false);
+    assert.ok(body().includes("Refused by the backend."), "the backend's refusal shows as it came");
+    setActiveLocale("de");
+    __agentsRerender();
+    assert.ok(!body().includes("Refused by the backend."), "a refusal that was translated by the backend cannot follow the language, so it is dropped");
+  } finally {
+    setActiveLocale("en");
+    noteBudgetDraft("agent", "");
+    noteBudgetDraft("amount", "");
+    doc.body.classList.remove("agents-open");
+    await loadAgentWatch;
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
+
+test("a second save cannot start while one is in flight", async () => {
+  const { loadAgentWatch, saveAgentWatch, removeBudget, agentWatchState, renderBudgetsSection, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  globalThis.document = makeFakeDocument();
+  const base = watchView();
+  const release = [];
+  const sentCmds = [];
+  globalThis.invoke = (cmd, args) => {
+    sentCmds.push(cmd);
+    if (cmd === "get_agent_watch") return Promise.resolve(base);
+    return new Promise((resolve) => release.push(() => resolve(watchView({ rows: args.watch.budgets.map((b) => [b.agent, 0, b.monthlyBudget]), known: base.known }))));
+  };
+  try {
+    await loadAgentWatch();
+    sentCmds.length = 0;
+    const first = removeBudget("general-purpose", false);
+    assert.equal(agentWatchState().saving, true, "a save in flight is visible to every control");
+    assert.deepEqual(await saveAgentWatch((last) => ({ budgets: [], live: last.watch.live })), { outcome: "busy" });
+    await removeBudget("deploy-checker", false);
+    assert.deepEqual(sentCmds, ["set_agent_watch"], "a second save must not be sent while the first is in flight");
+
+    // Every control that could start one is disabled meanwhile.
+    const html = renderBudgetsSection(base, "", { agent: "", amount: "" }, "", true);
+    const controls = (html.match(/<(button|select|input)\b[^>]*>/g) ?? []);
+    assert.equal(controls.length, 5, "two Remove buttons, picker, amount and Add");
+    assert.ok(controls.every((c) => / disabled[ >]/.test(c)), "every budget control is disabled while a save is in flight");
+    assert.ok(!/<(button|select|input)\b(?![^>]*disabled)[^>]*>/.test(html));
+    const free = renderBudgetsSection(base, "", { agent: "", amount: "" }, "", false);
+    assert.ok(!/ disabled[ >]/.test(free.replace('value="" disabled', "")), "nothing is disabled when no save is in flight");
+
+    release[0]();
+    await first;
+    assert.equal(agentWatchState().saving, false, "the controls come back once the answer is painted");
+    assert.deepEqual(agentWatchState().view.budgets.map((b) => b.agent), ["deploy-checker"]);
+  } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
+
+test("a load requested during a save does not discard the save's answer", async () => {
+  const { loadAgentWatch, saveAgentLive, agentWatchState, setActiveLocale } = await loadAgentsModule();
+  setActiveLocale("en");
+  globalThis.document = makeFakeDocument();
+  const base = watchView();
+  const cmds = [];
+  let release;
+  globalThis.invoke = (cmd, args) => {
+    cmds.push(cmd);
+    if (cmd === "get_agent_watch") return Promise.resolve(base);
+    return new Promise((resolve) => { release = () => resolve(watchView({ live: args.watch.live })); });
+  };
+  try {
+    await loadAgentWatch();
+    cmds.length = 0;
+    const save = saveAgentLive({ hourlyPaceUsd: 50 });
+    await loadAgentWatch(); // Settings opening mid-save
+    assert.deepEqual(cmds, ["set_agent_watch"], "a load must be skipped while a save is in flight");
+    release();
+    assert.deepEqual(await save, { outcome: "saved" }, "the save's answer is the fresh view, not a stale one");
+    assert.equal(agentWatchState().view.watch.live.hourlyPaceUsd, 50);
+  } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
 });
