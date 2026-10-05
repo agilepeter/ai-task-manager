@@ -16,8 +16,11 @@ reads prompt text.
   Off until you set a figure.
 - **Time spent at the limit.** How often a limit reached 100 percent in the
   last 30 days, and for how long.
-- **Unused MCP servers.** Servers that answered no call in 30 days. Claude
-  Code only, because that is where call counts exist.
+- **Unused MCP servers.** Servers with no tool calls over a stretch the app
+  itself watched. It first needs the app to keep its own daily count of calls
+  per server: working it out from the logs that are still on disk can name a
+  server that is in use. Claude Code only, because that is where call counts
+  exist.
 
 ## Being considered
 

@@ -87,7 +87,8 @@ function isOpen(): boolean {
  *  agent guardrail checks (agent-tools, agent-model, deny-shell) and
  *  agents-none used to point at Inventory, back when Inventory itself
  *  showed agent rows; now that those rows live only in the Agents view,
- *  these four point there instead. */
+ *  these four point there instead. `mcp-unused` is listed ahead of time: the
+ *  app does not produce that finding yet. */
 const WHERE: Record<string, "inventory" | "ledger" | "usage" | "agents"> = {
   "mcp-unpinned": "inventory", "mcp-env-secrets": "inventory", "mcp-remote": "inventory",
   "perm-none": "inventory", "perm-deny": "inventory", "perm-deny-only": "inventory", "hooks-none": "inventory",

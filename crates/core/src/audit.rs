@@ -256,6 +256,8 @@ pub fn run(i: &Inputs, now: i64) -> AuditReport {
         )
     }];
     setup.extend(only_if_present(inv, "mcp-context-heavy"));
+    // Never present today: the app does not produce this finding yet (see
+    // `mcp_usage::unused_from_history`). Its row is ready for when it does.
     setup.extend(only_if_present(inv, "mcp-unused"));
     if inv.mcp_servers.is_empty() {
         setup.push(check(

@@ -245,9 +245,11 @@ test("audit.ts and agents.ts agree on the freshness window", async () => {
 // A check that something can fix gets an "Open ..." link under it when it
 // needs attention or is worth a look, and WHERE (src/audit.ts) is what says
 // where. A finding that is computed and scored but missing from that map
-// shows a row with no way to act on it, so the four findings that reach the
-// Audit as "worth a look" and have a place to go are each rendered here and
-// checked for the link they get. A check outside the map gets none, which
+// shows a row with no way to act on it, so the three findings that reach the
+// Audit as "worth a look" and have a place to go (budgets, runaways, time at
+// the limit) are each rendered here and checked for the link they get, and so
+// is the unused-server one, whose place is ready though the app does not
+// produce that finding yet. A check outside the map gets none, which
 // keeps the assertions from passing on a renderer that links everything.
 test("render() links each unused-server, budget, runaway and limit-time check to where it is handled", async () => {
   const { openAudit } = await loadAuditModule();

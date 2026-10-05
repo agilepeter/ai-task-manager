@@ -209,10 +209,25 @@ fn loads_in_every_session(server: &McpServer) -> bool {
     server.client == CLAUDE_CODE && server.scope == "user" && !server.switched_off_in_a_project
 }
 
-/// Names of the Claude Code servers that can be said to have had no tool calls
-/// in the last `UNUSED_WINDOW_DAYS`, sorted. Everything it needs comes in as
-/// measured and it decides alone; it says so only when it is known, and any
-/// doubt returns nothing. A server is named only when ALL of these hold:
+/// **Not called by the app: only tests call this.** It names the Claude Code
+/// servers it takes to have had no tool calls in the last
+/// `UNUSED_WINDOW_DAYS`, sorted, and it can be wrong. Condition 1 below infers
+/// that the logs are complete from which logs survive, and that fails in
+/// ordinary setups. Claude Code keeps the transcript of a session started in
+/// Claude Desktop or Cowork at any age, in the same folder as its own, so one
+/// of those can show the window as kept while a shorter retention has deleted
+/// the command-line logs. A second Claude Code config directory is read only
+/// when its sign-in file is found, which on macOS it usually is not, and the
+/// retention measure looks at the first directory alone, so a server used from
+/// the other can have no calls here. And a log that could not be read or
+/// parsed is missing from the counts although the walk that found it was
+/// complete. Each of these can name a server that was called inside the
+/// window. The rule stays unwired until calls are counted from a record this
+/// app keeps, day by day, of what it saw, the way limit readings already are.
+///
+/// What it does: everything it needs comes in as measured and it decides
+/// alone; any doubt it can see returns nothing. A server is named only when
+/// ALL of these hold:
 ///
 /// 0. It loads in every session (`loads_in_every_session`). A server set up
 ///    for one project, or switched off in it, starts in fewer sessions, so
@@ -247,18 +262,6 @@ fn loads_in_every_session(server: &McpServer) -> bool {
 /// prompts or resources, or called from a hook (a hook's call is not a model
 /// tool call, and hooks of every scope cannot be seen here), has none and is
 /// named: the finding's text says so.
-///
-/// **Not called by the app.** Condition 1 infers that the logs are complete
-/// from which logs survive, and that fails in ordinary setups. Claude Code
-/// keeps the transcript of a session started in Claude Desktop or Cowork at
-/// any age, in the same folder as its own, so one of those can show the window
-/// as kept while a shorter retention has deleted the command-line logs. Only
-/// one Claude Code config directory is scanned, so a server used from a second
-/// one has no calls here. And a log that could not be read or parsed is
-/// missing from the counts although the walk that found it was complete. Each
-/// of these can name a server that was called inside the window. The rule
-/// stays unwired until calls are counted from a record this app keeps, day by
-/// day, of what it saw, the way limit readings already are.
 pub fn unused_from_history(
     servers: &[McpServer],
     by_server: &HashMap<String, McpUsage>,
@@ -339,7 +342,8 @@ pub fn opportunities(servers: &[McpServer]) -> Vec<Opportunity> {
 /// The finding for `unused_from_history`'s names: absent when there are none. The title is
 /// a count and nothing else, because titles leave the machine in the seat
 /// report and a server's name is the user's own; the names travel in the
-/// detail as one opaque variable, as every other MCP finding's do.
+/// detail as one opaque variable, as every other MCP finding's do. Only tests
+/// call it while `unused_from_history` is not wired.
 pub fn unused_opportunities(names: &[String]) -> Vec<Opportunity> {
     if names.is_empty() {
         return Vec::new();

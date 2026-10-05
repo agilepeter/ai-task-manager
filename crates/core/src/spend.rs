@@ -2862,7 +2862,9 @@ fn logs_kept_days_among<'a>(
 /// `logs_kept_days_among` over the files the last scan saw. The scan cache also
 /// holds entries for logs that have since gone (it is only pruned when it is
 /// saved), and a deleted log must not prove that logs are kept: only paths
-/// touched by the current run count. Reads only; never a rescan.
+/// touched by the current run count. Reads only; never a rescan. Only tests
+/// call it while `mcp_usage::unused_from_history`, the one rule that needs it,
+/// is not wired; that function's own comment says why.
 pub fn logs_kept_days() -> Option<i64> {
     let root = claude_projects_root();
     load_persisted_cache();

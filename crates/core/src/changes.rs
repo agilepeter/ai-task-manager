@@ -171,7 +171,9 @@ fn days_between(from: &str, to: &str) -> Option<i64> {
 /// the history cannot vouch for anything then, and a caller treats that as
 /// "not known". Every snapshot dated on or after the start counts, in any
 /// order: a second one on the same day, or one dated in the future by a clock
-/// that ran ahead, can only remove servers from the answer.
+/// that ran ahead, can only remove servers from the answer. Only tests call it
+/// while `mcp_usage::unused_from_history`, the one rule that needs it, is not
+/// wired.
 pub fn configured_throughout(snapshots: &[Snapshot], today: &str, days: i64, client: &str) -> Option<HashSet<String>> {
     let mut dated: Vec<(chrono::NaiveDate, &Snapshot)> = Vec::new();
     for s in snapshots {
