@@ -77,7 +77,7 @@ function snapshots(at: number = now()) {
 function spend() {
   const claude = (fixture as any).spend as any[];
   // Two light extra cards so the ledger's "plan loses" line has something to say.
-  const thin = (id: string, name: string, cost: number) => ({
+  const lightCard = (id: string, name: string, cost: number) => ({
     id, name, today: { cost: cost / 30, tokens: 40_000, models: [] }, yesterday: { cost: cost / 28, tokens: 38_000, models: [] },
     last30: { cost, tokens: 1_200_000, models: [{ model: id === "codex" ? "gpt-5-codex" : "cursor-auto", cost, tokens: 1_200_000 }] },
     trend: Array(30).fill(40_000), unpriced: 0, unpriced_models: [], daily_cost: Array(30).fill(cost / 30), projects: [],
@@ -91,7 +91,7 @@ function spend() {
     const lastWeek = daily.slice(cut - 7, cut).reduce((a, b) => a + b, 0);
     return { thisWeek, lastWeek, changePercent: lastWeek > 0 ? ((thisWeek - lastWeek) / lastWeek) * 100 : null };
   };
-  const all = [...claude, thin("codex", "Codex", 31), thin("cursor", "Cursor", 9.4)];
+  const all = [...claude, lightCard("codex", "Codex", 31), lightCard("cursor", "Cursor", 9.4)];
   for (const card of all) card.week = week(card.daily_cost);
   return all;
 }
@@ -398,11 +398,12 @@ function inventory() {
     else if (pin) s.pinTo = pin[0];
   }
   // The app adds the usage findings to the setup ones; the audit carries
-  // them, Msg and all, so they translate exactly as they do on that panel. The
-  // engine's checks for the findings built from the demo's state below are not
-  // lifted: they describe the machine as it was generated.
-  const liftable = new Set<string>([...inv.opportunities.map((o: any) => o.id), ...STATE_FINDING_IDS]);
-  inv.opportunities.push(...buildUsageRows((fixture as any).audit.sections, liftable));
+  // them, Msg and all, so they translate exactly as they do on that panel. Not
+  // lifted: what the Inventory already lists, and the engine's checks for the
+  // findings built from the demo's state below, which describe the machine as
+  // it was generated.
+  const skipIds = new Set<string>([...inv.opportunities.map((o: any) => o.id), ...STATE_FINDING_IDS]);
+  inv.opportunities.push(...buildUsageRows((fixture as any).audit.sections, skipIds));
   // Those, last, as the app lists the learn findings after the tighten ones.
   inv.opportunities.push(...stateFindings().filter((row) => row !== null));
   // The real app computes this one from the live process list; the demo has

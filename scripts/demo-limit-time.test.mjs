@@ -5,9 +5,10 @@
 //
 //  - The port. The cases below are the Rust tests' own, input for input and answer for
 //    answer (`time_at_the_limit_skips_gaps_the_app_did_not_watch`, `a_span_ends_at_the_reset`,
-//    `a_limit_never_reached_says_nothing`, and the other `from_points` tests whose inputs
-//    JavaScript can hold), so that one side's rule cannot change without the other failing.
-//    The one Rust test left out feeds it i64::MIN and i64::MAX, which a double cannot hold.
+//    `a_limit_never_reached_says_nothing`, and the other `from_points` tests), so that one
+//    side's rule cannot change without the other failing. One half of one test is left out: the
+//    extremes in `disordered_readings_never_panic_or_go_negative` feed the rule i64::MIN and
+//    i64::MAX, which a double cannot hold.
 //  - The constants. AT_LIMIT, MAX_GAP_MS, WINDOW_MS and FINDING_AT_MS are read out of
 //    limit_time.rs, compared with the port's own, and the edge cases below run on the Rust
 //    gap, so a change to the rule in Rust fails here whichever constant it touches.
@@ -257,13 +258,11 @@ test("a shorter range is the newest part of a longer one", async (t) => {
   setClock(t, NOON);
   const day = handle("get_history", { providerId: "claude", hours: 24 });
   const month = handle("get_history", { providerId: "claude", hours: 24 * 30 });
-  for (const [shorter, longer] of [[day, month]]) {
-    shorter.forEach((series, i) => {
-      assert.equal(series.metric, longer[i].metric);
-      assert.ok(series.points.length >= 2 && series.points.length < longer[i].points.length, series.metric);
-      assert.deepEqual(series.points, longer[i].points.slice(-series.points.length), `${series.metric}: the same readings, not a redraw`);
-    });
-  }
+  day.forEach((series, i) => {
+    assert.equal(series.metric, month[i].metric);
+    assert.ok(series.points.length >= 2 && series.points.length < month[i].points.length, series.metric);
+    assert.deepEqual(series.points, month[i].points.slice(-series.points.length), `${series.metric}: the same readings, not a redraw`);
+  });
   // The newest reading is the live value, now.
   const live = handle("cached_usage").find((c) => c.id === "claude").metrics;
   for (const series of day) {
@@ -545,6 +544,47 @@ test("the audit carries the findings the demo built from its state, and the engi
   // A finding the demo does not build is not added, whatever the report held before.
   const onlyLimit = auditWithFindings(both, [null, limit]);
   assert.deepEqual(idsOf(onlyLimit).filter((id) => id === "agent-over-budget" || id === "limit-time"), ["limit-time"]);
+});
+
+test("the audit lists the Usage section's leading checks in the engine's order, whichever of them are present", async () => {
+  const { auditWithFindings, buildLimitTimeRow, buildOverBudgetRow } = await loadDemoBackend();
+  // crates/core/src/audit.rs opens the Usage section with the pricing check, then the findings it adds
+  // only when they are present, then the checks that depend on spend. The order is read out of that
+  // source, so a change to it there fails here instead of leaving the demo's list out of step.
+  const audit = await readFile(new URL("../crates/core/src/audit.rs", import.meta.url), "utf8");
+  const from = audit.indexOf("let mut usage = Vec::new();");
+  const to = audit.indexOf("if i.spend30 >= 50.0", from);
+  assert.ok(from !== -1 && to > from, "the Usage section is no longer built where this test looks for it in audit.rs");
+  const engine = [...audit.slice(from, to).matchAll(/(?:from_finding\(\s*inv,\s*|only_if_present\(inv, )"([a-z0-9-]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(
+    engine,
+    ["pricing-cache-ttl", "pricing-drift", "agent-over-budget", "agent-runaway", "limit-time"],
+    "audit.rs leads the Usage section differently: USAGE_HEAD in src/demo/synthetic.ts and this list need the same change",
+  );
+
+  // The fixture's Usage section has neither pricing-drift nor agent-runaway, so their places are only
+  // reached on a section that has them: those two, a check that depends on spend, and then the two
+  // findings the demo builds.
+  const check = (id) => ({ id, status: "pass", title: `${id} title`, detail: `${id} detail`, titleMsg: null, detailMsg: null });
+  const sectionOf = (nameKey, ids) => ({ nameKey, checks: ids.map(check) });
+  const report = {
+    sections: [sectionOf("section.guardrails", ["hooks-none"]), sectionOf("section.usage", ["pricing-cache-ttl", "pricing-drift", "agent-runaway", "mix-top-heavy"])],
+  };
+  const over = buildOverBudgetRow([{ agent: "general-purpose", monthToDate: 14.7362, monthlyBudget: 10 }]);
+  const limit = buildLimitTimeRow([{ provider: "claude", metric: "Weekly", times: 3, totalMs: 5 * HOUR, longestMs: 3 * HOUR }]);
+  const served = (rows, source = report) => auditWithFindings(source, rows).sections.find((s) => s.nameKey === "section.usage").checks.map((c) => c.id);
+
+  assert.deepEqual(served([over, limit]), ["pricing-cache-ttl", "pricing-drift", "agent-over-budget", "agent-runaway", "limit-time", "mix-top-heavy"]);
+  // Either one alone takes the place it has beside the other, and neither leaves the section as it was.
+  assert.deepEqual(served([over, null]), ["pricing-cache-ttl", "pricing-drift", "agent-over-budget", "agent-runaway", "mix-top-heavy"]);
+  assert.deepEqual(served([null, limit]), ["pricing-cache-ttl", "pricing-drift", "agent-runaway", "limit-time", "mix-top-heavy"]);
+  assert.deepEqual(served([null, null]), ["pricing-cache-ttl", "pricing-drift", "agent-runaway", "mix-top-heavy"]);
+  // Without the engine's two, the demo's go between what is there, as on the fixture.
+  const plain = { sections: [sectionOf("section.usage", ["pricing-cache-ttl", "mix-top-heavy", "session-long-lived"])] };
+  assert.deepEqual(served([over, limit], plain), ["pricing-cache-ttl", "agent-over-budget", "limit-time", "mix-top-heavy", "session-long-lived"]);
+  // The other sections are as they were, and the report passed in is not written to.
+  assert.deepEqual(auditWithFindings(report, [over, limit]).sections[0], report.sections[0]);
+  assert.deepEqual(report.sections[1].checks.map((c) => c.id), ["pricing-cache-ttl", "pricing-drift", "agent-runaway", "mix-top-heavy"]);
 });
 
 test("the Audit opens the Usage tab for the time-at-the-limit check", async () => {

@@ -191,7 +191,10 @@ test("buildUsageRows() gives a finding the engine builds without a link none, an
 });
 
 /** The arguments of every `Opportunity::from_msgs(id, kind, title, detail, learn_url)` call in `source`,
- *  split at the top level of the call: strings, parentheses, brackets and braces are skipped over. */
+ *  split at the top level of the call: strings, parentheses, brackets and braces are skipped over.
+ *  What it cannot read it does not guess at: a string or a call that never closes throws, with the
+ *  offset it began at, so a quote in a char literal or a comment (`'"'`) cannot make it spin or read
+ *  on into code that is not part of the call. */
 function fromMsgsCalls(source) {
   const needle = "Opportunity::from_msgs(";
   const calls = [];
@@ -200,20 +203,27 @@ function fromMsgsCalls(source) {
     let depth = 0;
     let start = at + needle.length;
     let i = start;
+    let closed = false;
     for (; i < source.length; i++) {
       const c = source[i];
       if (c === '"') {
-        for (i++; source[i] !== '"'; i++) if (source[i] === "\\") i++;
+        const opened = i;
+        for (i++; i < source.length && source[i] !== '"'; i++) if (source[i] === "\\") i++;
+        if (i >= source.length) throw new Error(`the string opened at offset ${opened} never closes`);
       } else if (c === "(" || c === "[" || c === "{") depth++;
       else if (c === "]" || c === "}") depth--;
       else if (c === ")") {
-        if (depth === 0) break;
+        if (depth === 0) {
+          closed = true;
+          break;
+        }
         depth--;
       } else if (c === "," && depth === 0) {
         args.push(source.slice(start, i).trim());
         start = i + 1;
       }
     }
+    if (!closed) throw new Error(`the call at offset ${at} never closes`);
     const last = source.slice(start, i).trim();
     if (last) args.push(last);
     calls.push(args);
@@ -239,6 +249,17 @@ test("the scanner reads a from_msgs call the way the Rust is written", () => {
   ]);
 });
 
+test("the scanner throws on what it cannot read, instead of spinning or reading on", () => {
+  // A char literal holding a quote, as Rust allows, opens a string that nothing closes. The scan
+  // used to loop for ever there; it now names where the string began.
+  const quoted = `Opportunity::from_msgs("a", 'x', '"', None, None)`;
+  assert.throws(() => fromMsgsCalls(quoted), new Error(`the string opened at offset ${quoted.indexOf(`'"'`) + 1} never closes`));
+  // A call that runs out of source before its closing parenthesis is not a call with a last argument.
+  const open = `let a = 1;\nOpportunity::from_msgs("a", "b", title`;
+  assert.throws(() => fromMsgsCalls(open), new Error(`the call at offset ${open.indexOf("Opportunity")} never closes`));
+  assert.deepEqual(fromMsgsCalls("no call here"), []);
+});
+
 test("NO_LEARN_LINK is every finding the two Rust modules build with no link, and nothing else", async () => {
   const { NO_LEARN_LINK } = await loadDemo();
   const source = (file) => readFile(new URL(`../crates/core/src/${file}`, import.meta.url), "utf8");
@@ -250,11 +271,18 @@ test("NO_LEARN_LINK is every finding the two Rust modules build with no link, an
     assert.equal(rest.length, 1, `${file}: expected one test module to cut at`);
     const calls = fromMsgsCalls(production);
     assert.ok(calls.length > 0, `${file}: no from_msgs call found, so the scanner or the file moved`);
+    // What the scan cannot see is made loud, so a finding built another way fails here instead of
+    // passing unseen: a call by some other path to the constructor (or a mention of it), and a
+    // struct literal, which would set its link by name.
+    assert.equal(production.split("from_msgs(").length - 1, calls.length, `${file}: a from_msgs( the scan did not read as a call`);
+    assert.ok(!/\blearn_url\s*:/.test(production), `${file}: a finding is built by a struct literal (learn_url: ...) and not by from_msgs`);
     for (const args of calls) {
       assert.equal(args.length, 5, `${file}: a from_msgs call with ${args.length} arguments`);
       const id = args[0].match(/^"([a-z0-9-]+)"$/);
       assert.ok(id, `${file}: a finding built with an id that is not a string (${args[0]}): this test cannot say what link it has`);
-      if (args.at(-1) === "None") noLink.add(id[1]);
+      const link = args.at(-1);
+      assert.match(link, /^(None|Some\()/, `${file}: ${args[0]} is built with a link argument this test cannot read (${link})`);
+      if (link === "None") noLink.add(id[1]);
     }
   }
   assert.deepEqual([...noLink].sort(), [...NO_LEARN_LINK].sort(), "a finding built with no link must be listed, and a listed one must still be built so");

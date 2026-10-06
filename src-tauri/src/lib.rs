@@ -579,8 +579,13 @@ fn cache_is_fresh(captured: std::time::Instant, ttl: std::time::Duration, now: s
 /// The inventory plus every computed finding, and the spend it was built
 /// from. **Both the Inventory tab and the audit go through here**: they used
 /// to assemble the list separately, so the audit silently scored a shorter
-/// one than the tab displayed. The demo fixture's audit takes the same steps in
-/// `audit::tests::live_audit`: a step added here needs adding there too.
+/// one than the tab displayed. The demo fixture's audit repeats these steps in
+/// `audit::tests::live_audit`, bar four it leaves out on purpose: `procs` (needs
+/// live processes), `drift` (needs the vendor's own cost lines in session logs,
+/// which the fixture machine's logs do not carry), `agent_usage` (no audit check
+/// reads it) and `limit_time` (needs a history of limit readings it does not
+/// keep; the demo builds that finding from its own). A step added here needs
+/// adding there too, unless it is one of those.
 fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     let mut inv = inventory::scan();
     let spend = spend::collect(None);

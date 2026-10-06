@@ -19,9 +19,9 @@ let instances = 0;
  *  ES5, where spreading a Set turns into an empty array, which the build the demo ships in never does. */
 const target = (() => {
   const file = fileURLToPath(new URL("../tsconfig.json", import.meta.url));
-  const read = ts.readConfigFile(file, ts.sys.readFile);
-  if (read.error) throw new Error(`could not read tsconfig.json: ${ts.flattenDiagnosticMessageText(read.error.messageText, "\n")}`);
-  const { options, errors } = ts.convertCompilerOptionsFromJson(read.config.compilerOptions ?? {}, ".");
+  const { config, error } = ts.readConfigFile(file, ts.sys.readFile);
+  if (error) throw new Error(`could not read tsconfig.json: ${ts.flattenDiagnosticMessageText(error.messageText, "\n")}`);
+  const { options, errors } = ts.convertCompilerOptionsFromJson(config.compilerOptions ?? {}, ".");
   if (errors.length || options.target === undefined) throw new Error("tsconfig.json names no usable compilerOptions.target");
   return options.target;
 })();

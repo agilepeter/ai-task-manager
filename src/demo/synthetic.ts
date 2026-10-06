@@ -245,9 +245,11 @@ export type BudgetRow = { agent: string; monthToDate: number; monthlyBudget: num
  *  `currently_over`: absent unless some budget is at or over its figure (at it counts, like a
  *  client budget). The title is a count of those budgets and nothing else; the detail names them in
  *  the order they were saved, each as "name ($spent / $budget)" to the cent, and there is no Learn
- *  more link. Built from the budgets as they are now, so one the visitor removes or adds changes it;
- *  `toFixed(2)` matches Rust's `{:.2}` except on a figure exactly halfway between two cents in
- *  binary (x.125), which none here is. */
+ *  more link. Built from the budgets as they are now, so one the visitor removes or adds changes it.
+ *  The cents differ from Rust's `{:.2}` on one kind of figure: Rust rounds a figure exactly halfway
+ *  between two cents to the even cent, so x.125 and x.625 print `.12` and `.62` where `toFixed(2)`
+ *  gives `.13` and `.63`. None is reached here: the Agents view sets a budget in whole dollars, and
+ *  the fixture's spends carry four decimals, none of them such a figure. */
 export function buildOverBudgetRow(rows: readonly BudgetRow[]): SyntheticOpportunity | null {
   const over = rows.filter((r) => r.monthToDate >= r.monthlyBudget);
   if (!over.length) return null;

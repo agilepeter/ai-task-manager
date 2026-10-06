@@ -198,8 +198,9 @@ and computed Opportunities). Usage stays the default view.
   fixture are not lifted: over-budget from the budgets the visitor has saved (`buildOverBudgetRow`,
   pinned to the engine's own check in the fixture) and time at the limit (`buildLimitTimeRow`,
   which the engine cannot compute here at all: the fictional machine keeps no limit history).
-  `get_inventory` and `get_audit` serve them. The entry uses ordered static imports because the
-  app boots on DOMContentLoaded.
+  `get_inventory` and `get_audit` serve them, the audit with both placed in the Usage section's
+  own order (`auditWithFindings`, whose order `scripts/demo-limit-time.test.mjs` reads out of
+  `audit.rs`). The entry uses ordered static imports because the app boots on DOMContentLoaded.
   `scripts/sync-demo-to-site.sh` rebuilds it into the staas.fund product page
   (`staasfund/task-manager/demo/`); it never commits or pushes, because a push there is a deploy.
   `npm run fixture:demo` pins `AITM_TODAY` to a fixed instant, so two runs are byte-identical
@@ -271,9 +272,10 @@ and computed Opportunities). Usage stays the default view.
   (`timeAtLimit` in `src/demo/synthetic.ts`) and the finding (`buildLimitTimeRow` beside it, with
   its own `durationMsg`, a Msg-returning twin of `i18n::duration_msg`).
   `scripts/demo-limit-time.test.mjs` holds the port to the Rust test cases (their inputs and
-  answers), the finding to the Rust finding's cases and English, and both to the constants it reads
-  out of `limit_time.rs` (`AT_LIMIT`, `MAX_GAP_MS`, `WINDOW_MS`, `FINDING_AT_MS`), so change them
-  together.
+  answers, all but the `i64::MIN` / `i64::MAX` half of
+  `disordered_readings_never_panic_or_go_negative`, which a double cannot hold), the finding to
+  the Rust finding's cases and English, and both to the constants it reads out of `limit_time.rs`
+  (`AT_LIMIT`, `MAX_GAP_MS`, `WINDOW_MS`, `FINDING_AT_MS`), so change them together.
 - **The unused-server finding is NOT shipped.** The rule is in `mcp_usage.rs`
   (`unused_from_history`) and tested, and the app does not call it: "no calls in 30 days" worked out
   from the logs still on disk can name a server in daily use (Claude Code keeps a session started in
