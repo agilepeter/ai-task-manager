@@ -432,6 +432,11 @@ const TRUST: Record<string, [string, string, number]> = {
 const MAX_WATCH_BUDGETS = 50;
 const MAX_WATCH_USD = 1_000_000;
 const MAX_WATCH_MINUTES = 1_000_000_000;
+// What the live hint is worked out with, as in the engine: a session with no new line for this many
+// seconds and nothing in ten minutes is idle, and the last ten minutes are carried over an hour.
+// These and the three limits above are held to crates/core/src/agent_watch.rs by scripts/agent-limits.test.mjs.
+const IDLE_SECS = 60;
+const PACE_FACTOR = 6;
 
 type AgentWatch = { budgets: { agent: string; monthlyBudget: number }[]; live: { hourlyPaceUsd: number | null; maxMinutes: number | null } };
 
@@ -474,12 +479,11 @@ function agentWatchView() {
   // The same sum the real app makes: the fastest priced, non-idle running pace,
   // a dollar figure an hour (the last ten minutes carried over an hour).
   const paces = AGENTS.map((a) => a.pace as { priced: boolean; idleSecs: number; tokens10m: number; cost10m: number } | null)
-    .filter((p) => p && p.priced && !(p.idleSecs >= 60 && p.tokens10m === 0))
-    .map((p) => p!.cost10m * 6);
+    .filter((p) => p && p.priced && !(p.idleSecs >= IDLE_SECS && p.tokens10m === 0))
+    .map((p) => p!.cost10m * PACE_FACTOR);
   return structuredClone({
     watch: saved,
     budgets: budgetRows(),
-    runaways: [],
     liveHint: paces.length ? Math.max(...paces) : null,
     known: agentWatchKnown(saved.budgets),
   });

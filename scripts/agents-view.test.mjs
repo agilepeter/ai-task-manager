@@ -283,7 +283,6 @@ function watchView({ rows = [["general-purpose", 14.74, 10], ["deploy-checker", 
   return {
     watch: { budgets: rows.map(([agent, , monthlyBudget]) => ({ agent, monthlyBudget })), live },
     budgets: rows.map(([agent, monthToDate, monthlyBudget]) => ({ agent, monthToDate, monthlyBudget })),
-    runaways: [],
     liveHint,
     known: known ?? ["Explore", "Plan", "deploy-checker", "general-purpose"],
   };
@@ -655,13 +654,14 @@ test("shouldReload(): closed never reloads, open+fresh does not, open+stale does
 // re-invoking get_inventory / get_running_agents / get_agent_spend a second
 // time for the same event -- the actual bug this fixes (a view left open
 // used to cause a full second scan on every rescan). Exercised for real this
-// time: openAgents() first (its own loadData() makes the view's normal four
+// time: openAgents() first (its own loadData() makes the view's normal five
 // calls), then applyRescan() with fresh data, checking that the ONLY new
-// invoke() call it causes is get_audit (via loadFailingGuardrails() -- a
-// rescan's own data carries nothing about the Audit's checks, so that one
-// call cannot be avoided), and that the panel actually redraws from the
-// argument it was handed rather than from a second scan.
-test("applyRescan() re-invokes only get_audit, never get_inventory/get_running_agents/get_agent_spend", async () => {
+// invoke() calls it causes are get_audit (via loadFailingGuardrails() -- a
+// rescan's own data carries nothing about the Audit's checks, so that call
+// cannot be avoided) and get_agent_watch (the budgets' month to date moves
+// with the scan), and that the panel actually redraws from the argument it
+// was handed rather than from a second scan.
+test("applyRescan() re-invokes only get_audit and get_agent_watch, never get_inventory/get_running_agents/get_agent_spend", async () => {
   const { openAgents, applyRescan } = await loadAgentsModule();
   const fakeDocument = makeFakeDocument();
   globalThis.document = fakeDocument;
@@ -701,11 +701,81 @@ test("applyRescan() re-invokes only get_audit, never get_inventory/get_running_a
     });
     await flushMicrotasks();
 
-    assert.deepEqual(calls, ["get_audit"], "applyRescan() must cause exactly one new invoke() call, get_audit, and nothing else");
+    assert.deepEqual([...calls].sort(), ["get_agent_watch", "get_audit"], "applyRescan() must cause exactly two new invoke() calls, get_audit and get_agent_watch, and nothing else");
     const body = fakeDocument.elements.get("#agents-body");
     assert.ok(body.innerHTML.includes("rescanned-agent"), "the panel must redraw from applyRescan()'s own argument, not from a fresh scan");
     assert.ok(!body.innerHTML.includes("initial-agent"), "the panel must not still show the pre-rescan data");
   } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
+
+// A budget's month to date is read from the per-day agent spend a scan keeps, so a rescan
+// moves it; the rescan's own data carries nothing of the watch, so the view asks for it.
+test("applyRescan() reloads the budgets, so their month to date follows the scan", async () => {
+  const { openAgents, applyRescan, setActiveLocale } = await freshAgentsModule();
+  setActiveLocale("en");
+  const doc = makeFakeDocument();
+  globalThis.document = doc;
+  let view = watchView({ rows: [["deploy-checker", 1.69, 5]] });
+  const { calls, invoke } = makeRecordingInvoke({
+    get_inventory: inventory(),
+    get_running_agents: [],
+    get_agent_spend: [],
+    get_audit: { sections: [] },
+    get_agent_watch: () => view,
+  });
+  globalThis.invoke = invoke;
+  try {
+    openAgents();
+    await flushMicrotasks();
+    const body = () => doc.elements.get("#agents-body").innerHTML;
+    assert.ok(body().includes("This month: $1.69 of $5"), "the figure the budgets were first loaded with");
+
+    view = watchView({ rows: [["deploy-checker", 2.4, 5]] });
+    calls.length = 0;
+    applyRescan({ inventory: inventory(), loadError: "", runningAgents: [], runningAgentsError: "", agentSpend: [], agentSpendError: "" });
+    await flushMicrotasks();
+    assert.ok(calls.includes("get_agent_watch"), "a rescan must ask for the watch again");
+    assert.ok(body().includes("This month: $2.40 of $5") && !body().includes("$1.69"), "the budgets read the scan's new figure");
+  } finally {
+    doc.body.classList.remove("agents-open");
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
+
+test("applyRescan() sends no budget reload while a save is in flight, and the save's answer stays", async () => {
+  const { openAgents, applyRescan, removeBudget, agentWatchState, setActiveLocale } = await freshAgentsModule();
+  setActiveLocale("en");
+  const doc = makeFakeDocument();
+  globalThis.document = doc;
+  const before = watchView({ rows: [["general-purpose", 14.74, 10], ["deploy-checker", 1.69, 5]] });
+  const calls = [];
+  let finishSave;
+  globalThis.invoke = (cmd) => {
+    calls.push(cmd);
+    if (cmd === "get_inventory") return Promise.resolve(inventory());
+    if (cmd === "get_running_agents" || cmd === "get_agent_spend") return Promise.resolve([]);
+    if (cmd === "get_audit") return Promise.resolve({ sections: [] });
+    if (cmd === "get_agent_watch") return Promise.resolve(before);
+    return new Promise((resolve) => { finishSave = () => resolve(watchView({ rows: [["deploy-checker", 1.69, 5]], known: before.known })); });
+  };
+  try {
+    openAgents();
+    await flushMicrotasks();
+    calls.length = 0;
+    const save = removeBudget("general-purpose", false);
+    assert.equal(agentWatchState().saving, true, "the save is in flight");
+    applyRescan({ inventory: inventory(), loadError: "", runningAgents: [], runningAgentsError: "", agentSpend: [], agentSpendError: "" });
+    await flushMicrotasks();
+    assert.ok(!calls.includes("get_agent_watch"), `a rescan during a save must not reload the watch: ${calls.join(", ")}`);
+    finishSave();
+    await save;
+    assert.deepEqual(agentWatchState().view.budgets.map((b) => b.agent), ["deploy-checker"], "the save's answer is the view, not the reload's");
+  } finally {
+    doc.body.classList.remove("agents-open");
     delete globalThis.document;
     delete globalThis.invoke;
   }
@@ -1323,6 +1393,81 @@ test("a load requested during a save does not discard the save's answer", async 
     delete globalThis.document;
     delete globalThis.invoke;
   }
+});
+
+// "Reset all settings" must clear the live rule too: it is a Settings dropdown pair that lives in
+// agent_watch.json, so the config patch the reset sends never reaches it. The budgets are the user's
+// data and stay.
+test("clearLiveRule() sets both live figures to Off, keeps the budgets, and writes nothing when there is nothing to clear", async () => {
+  const { clearLiveRule, onAgentWatchChange, agentWatchState, setActiveLocale } = await freshAgentsModule();
+  setActiveLocale("en");
+  globalThis.document = makeFakeDocument();
+  const sent = [];
+  let saved = watchView({ live: { hourlyPaceUsd: 50, maxMinutes: null } });
+  globalThis.invoke = async (cmd, args) => {
+    if (cmd === "get_agent_watch") return saved;
+    if (cmd === "set_agent_watch") {
+      sent.push(args.watch);
+      saved = watchView({ rows: args.watch.budgets.map((b) => [b.agent, 0, b.monthlyBudget]), live: args.watch.live });
+      return saved;
+    }
+    throw new Error(`unexpected command ${cmd}`);
+  };
+  let repaints = 0;
+  onAgentWatchChange(() => { repaints += 1; });
+  try {
+    // One figure set is enough to write: both go to Off.
+    assert.deepEqual(await clearLiveRule(), { outcome: "saved" });
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0].live, { hourlyPaceUsd: null, maxMinutes: null });
+    assert.deepEqual(sent[0].budgets, [{ agent: "general-purpose", monthlyBudget: 10 }, { agent: "deploy-checker", monthlyBudget: 5 }], "the budgets are sent back as they were");
+    assert.deepEqual(agentWatchState().view.watch.live, { hourlyPaceUsd: null, maxMinutes: null }, "what the two dropdowns paint from");
+    assert.ok(repaints > 0, "the dropdowns are told to repaint");
+
+    // The other figure alone, then both already Off: the second writes nothing.
+    saved = watchView({ live: { hourlyPaceUsd: null, maxMinutes: 240 } });
+    assert.deepEqual(await clearLiveRule(), { outcome: "saved" });
+    assert.equal(sent.length, 2, "a minutes figure alone is cleared too");
+    assert.deepEqual(await clearLiveRule(), { outcome: "saved" });
+    assert.equal(sent.length, 2, "an Off rule is not written again");
+  } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
+
+test("clearLiveRule() sends nothing when the watch could not be loaded", async () => {
+  const { clearLiveRule, setActiveLocale } = await freshAgentsModule();
+  setActiveLocale("en");
+  globalThis.document = makeFakeDocument();
+  const cmds = [];
+  globalThis.invoke = async (cmd) => {
+    cmds.push(cmd);
+    throw new Error("disk unreadable");
+  };
+  try {
+    assert.deepEqual(await clearLiveRule(), { outcome: "notLoaded" }, "no view, so nothing to build a payload from");
+    assert.deepEqual(cmds, ["get_agent_watch"]);
+  } finally {
+    delete globalThis.document;
+    delete globalThis.invoke;
+  }
+});
+
+// The wiring in src/main.ts is not run by these tests (see the note at the top of this file), so
+// what must hold of it is held as source text, the way the live rule's language switch is.
+test("Reset all settings clears the live rule and repaints its dropdowns, and touches no budget", async () => {
+  const main = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+  const reset = main.match(/async function resetAllSettings\(\): Promise<void> \{[\s\S]*?\n\}\n/)?.[0];
+  assert.ok(reset, "resetAllSettings() moved in src/main.ts");
+  const clear = reset.indexOf("await clearLiveRule()");
+  assert.ok(clear !== -1, "resetAllSettings() must clear the live rule");
+  assert.ok(clear > reset.indexOf("patchConfig("), "after the config patch, which does not reach it");
+  assert.ok(clear < reset.indexOf("syncSettingsControls()"), "before the controls are painted from what is saved");
+  assert.ok(!/set_agent_watch|saveAgentWatch|saveAgentLive|budgetPayload/.test(reset), "the reset writes the watch only through clearLiveRule(), which keeps the budgets: they are the user's data, not a setting");
+  const sync = main.match(/function syncSettingsControls\(\): void \{[\s\S]*?\n\}\n/)?.[0];
+  assert.ok(sync, "syncSettingsControls() moved in src/main.ts");
+  assert.match(sync, /paintAgentLive\(\)/, "syncSettingsControls() must repaint the live rule's two dropdowns");
 });
 
 test("a drafted agent that is no longer free is not sent", async () => {

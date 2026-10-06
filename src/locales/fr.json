@@ -802,7 +802,7 @@
   "finding.agent-runaway.detail": "Actifs maintenant et au-delà d'un seuil que vous avez défini : {names}. Un montant en dollars est un rythme par heure, calculé sur le coût des 10 dernières minutes. Une valeur comme 2:10 indique depuis combien de temps l'agent est ouvert, en heures et minutes, et ne compte que tant qu'il travaille encore. L'application ne fait que prévenir ; elle n'arrête jamais un agent.",
   "finding.limit-time.title.one": "{count} limite est restée épuisée pendant deux heures ou plus au cours des 30 derniers jours",
   "finding.limit-time.title.other": "{count} limites sont restées épuisées pendant deux heures ou plus au cours des 30 derniers jours",
-  "finding.limit-time.detail": "Au cours des 30 derniers jours, la limite restée épuisée le plus longtemps l'a été pendant {total} ({times}) ; sa plus longue période d'affilée a duré {longest}. Tant qu'une limite est épuisée, cet outil est inutilisable avec votre forfait. La page de chaque fournisseur indique quelle limite et quand.",
+  "finding.limit-time.detail": "Au cours des 30 derniers jours, la limite restée épuisée le plus longtemps l'a été pendant {total} ({times}) ; sa plus longue période d'affilée a duré {longest}. La page de chaque fournisseur indique quelle limite et quand.",
   "check.tools.info.title.one": "{count} outil d'IA trouvé",
   "check.tools.info.title.other": "{count} outils d'IA trouvés",
   "check.tools.info.detail": "Aucun des outils d'IA connus de cette application n'a été trouvé.",

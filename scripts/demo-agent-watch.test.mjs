@@ -25,12 +25,30 @@ test("the demo's budgets are the engine's answer for the fictional machine", asy
   assert.deepEqual(view.budgets, engine.budgets, "each budget against the calendar month, as the engine summed it: the same figure its monthSpend holds");
   assert.deepEqual(view.known, engine.known, "the names a budget may take");
   assert.ok(view.budgets.some((b) => b.monthToDate >= b.monthlyBudget) && view.budgets.some((b) => b.monthToDate < b.monthlyBudget));
-  // The live rule is unset, so nothing runs away; the hint is the demo's own running agent's pace.
-  assert.deepEqual(view.runaways, []);
+  // The hint is the demo's own running agent's pace.
   assert.ok(view.liveHint > 0);
   // The view is a copy: painting it cannot change what is saved.
   view.watch.budgets.length = 0;
   assert.equal(handle("get_agent_watch").watch.budgets.length, engine.watch.budgets.length);
+});
+
+test("the demo's view has the fields the app's has, and the view's type names the same ones", async () => {
+  // `AgentWatchView` in src-tauri/src/lib.rs is what the command serializes; src/agents.ts types what
+  // the view reads. A field only one of the three carries is a field painted, or sent, for nothing.
+  const lib = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const struct = lib.match(/struct AgentWatchView \{([\s\S]*?)\n\}/);
+  assert.ok(struct, "struct AgentWatchView moved in src-tauri/src/lib.rs");
+  const camel = (name) => name.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  const rust = [...struct[1].matchAll(/^\s*(?:pub\s+)?([a-z_]+):/gm)].map((m) => camel(m[1])).sort();
+  const agents = await readFile(new URL("../src/agents.ts", import.meta.url), "utf8");
+  const iface = agents.match(/export interface AgentWatchView \{([\s\S]*?)\n\}/);
+  assert.ok(iface, "interface AgentWatchView moved in src/agents.ts");
+  const ts = [...iface[1].matchAll(/^\s*([a-zA-Z]+)\??:/gm)].map((m) => m[1]).sort();
+  assert.deepEqual(rust, ["budgets", "known", "liveHint", "watch"], "the app's view");
+  assert.deepEqual(ts, rust, "the view's type");
+  const { handle } = await freshDemo();
+  assert.deepEqual(Object.keys(handle("get_agent_watch")).sort(), rust, "the demo's view");
+  assert.deepEqual(Object.keys(handle("set_agent_watch", { watch: engine.watch })).sort(), rust, "the demo's view after a save");
 });
 
 test("a budget saved in the demo keeps its figure, and what it was saved with reads back", async () => {

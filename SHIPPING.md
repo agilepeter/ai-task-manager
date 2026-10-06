@@ -85,8 +85,10 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
 ## Cutting a release
 
 1. Add a dated `## X.Y.Z - YYYY-MM-DD` section to `CHANGELOG.md` (not "Unreleased": the
-   publish job below refuses to run without one), bump `version` in
-   `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, commit.
+   publish job below refuses to run without one), bump `version` in `package.json`,
+   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `crates/core/Cargo.toml` (the HTTP
+   user-agent and the seat report say the core crate's version, and a test in the app crate
+   holds it equal to the app's; `crates/agent` and `crates/collector` stay at their own), commit.
 2. `git tag vX.Y.Z && git push --tags`. The workflow builds both platforms and opens a draft
    release with the installers, the `.sig` files and `latest.json`, same as before.
 3. Watch the run. A final job downloads the draft's own `latest.json` and checks it against

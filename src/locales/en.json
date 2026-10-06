@@ -802,7 +802,7 @@
   "finding.agent-runaway.detail": "Running now, past a figure you set: {names}. A dollar figure is an hourly pace, taken from the cost of the last 10 minutes. A figure like 2:10 is how long the agent has been open, in hours and minutes, and counts only while it is still working. The app only tells you; it never stops an agent.",
   "finding.limit-time.title.one": "{count} limit was fully used for two hours or more in the last 30 days",
   "finding.limit-time.title.other": "{count} limits were fully used for two hours or more in the last 30 days",
-  "finding.limit-time.detail": "Over the last 30 days, the limit that stayed fully used longest was that way for {total} ({times}); its longest stretch was {longest}. While a limit is fully used, that tool cannot be used on your plan. Each provider's page shows which limit and when.",
+  "finding.limit-time.detail": "Over the last 30 days, the limit that stayed fully used longest was that way for {total} ({times}); its longest stretch was {longest}. Each provider's page shows which limit and when.",
   "check.tools.info.title.one": "1 AI tool found",
   "check.tools.info.title.other": "{count} AI tools found",
   "check.tools.info.detail": "None of the AI tools this app knows were found.",

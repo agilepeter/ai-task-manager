@@ -62,7 +62,9 @@ file under `crates/core/src/providers/` and port it by hand.
   2026-09-22 a write under `crates/core` relaunched the app within a second. Do not rely on
   either: after a change under `crates/`, check the binary (`strings target/debug/ai-task-manager |
   grep <new text>`) and, if it did not rebuild, `touch src-tauri/src/lib.rs`.
-- The HTTP user-agent is `ai-task-manager/<version>`: the same for every install, never an id.
+- The HTTP user-agent is `ai-task-manager/<version>`: the same for every install, never an id. The
+  version is the core crate's (`aitm_core::VERSION`, from `crates/core/Cargo.toml`), held equal to the
+  app's by `the_core_crate_states_the_apps_version` in `src-tauri/src/lib.rs`.
 - **Self-update is opt-in and off by default** (`updateChecks` in config.json, a Settings >
   Network toggle; `update_checks_enabled` in `src-tauri/src/lib.rs` is the one function every
   call site asks, reading the config fresh each time so a toggle needs no restart). A missing or
@@ -149,7 +151,11 @@ and computed Opportunities). Usage stays the default view.
   coverage test (`scripts/settings-i18n-coverage.mjs`), which walks the Settings DOM itself rather
   than the key list, so a label or hint that ships with no `data-i18n*` fails loudly instead of
   silently staying English; its exemption list is short and commented, and holds only brand names
-  and bare currency options. Separately -- not part of `npm test`, since it needs a browser --
+  and bare currency options. `npm test` also holds the words written in `index.html` beside every
+  `data-i18n` key (and the `title`, `placeholder` and `aria-label` beside a `data-i18n-*` key) to
+  the English string in `en.json`, exactly: rewording a string there means rewording the markup
+  beside it, then `npm run build:demo` to regenerate `demo.html`. Separately -- not part of
+  `npm test`, since it needs a browser --
   `scripts/layout-check.mjs` is the 380 px layout harness: Playwright WebKit against the demo
   build, all nine locales across all seven views, asserting no container overflows its own window.
   A native `<select>`'s own clipped, selected-option text does not move its
@@ -265,7 +271,8 @@ and computed Opportunities). Usage stays the default view.
   `limitTimeSection`): how long each limit sat at 100 percent over the last 30 days, from the
   readings `history.rs` already keeps (`history::limit_samples`, unthinned, each with its own reset
   time) and nothing new. A pair of readings counts only when the first is at 100 and the two are at
-  most 90 minutes apart (the burn profile's rule): up to the first one's reset when that falls
+  most 90 minutes apart (`limit_time::MAX_GAP_MS`, the one pairing gap the burn profile reads too, not
+  `history`'s own hour for a flat line): up to the first one's reset when that falls
   between them, else the whole gap when the second is at 100 too, else nothing, so a stretch the
   app was not running for is skipped, never guessed. A single "learn" finding, `limit-time`, appears
   when one limit totals two hours (its title is a count only). The browser demo ports the rule
@@ -277,7 +284,7 @@ and computed Opportunities). Usage stays the default view.
   the Rust finding's cases and English, and both to the constants it reads out of `limit_time.rs`
   (`AT_LIMIT`, `MAX_GAP_MS`, `WINDOW_MS`, `FINDING_AT_MS`), so change them together.
 - **The unused-server finding is NOT shipped.** The rule is in `mcp_usage.rs`
-  (`unused_from_history`) and tested, and the app does not call it: "no calls in 30 days" worked out
+  (`unused_from_history`) and tested, and the app does not call it: "no calls in 21 days" worked out
   from the logs still on disk can name a server in daily use (Claude Code keeps a session started in
   Claude Desktop at any age, so one such log can show a retention the others lack, and a second
   config directory is read only when its sign-in file is found). A rule that holds needs the app's
@@ -473,7 +480,9 @@ Rules take the clock as a parameter (`evaluate_at`) so windows are tested exactl
 - **Agent budgets** (`crates/core/src/agent_watch.rs`, `agent_watch.json`): a monthly dollar budget
   per agent name, any agent the app knows, built-ins included. One alert per agent per calendar
   month by the client-budget rule (marks `agent|YYYY-MM` in `alert_marks.json`), against
-  `spend::agent_spend_month_at`, the per-day agent spend the scan already keeps.
+  `spend::agent_spend_month_at`, the per-day agent spend the scan already keeps. Settings > Reset all
+  settings clears the live rule and keeps the budgets (`clearLiveRule` in `src/agents.ts`): the budgets
+  are the user's data, not settings, and the rule lives in `agent_watch.json`, out of the config patch.
 - **Runaway rule** (same file): a running session whose ten-minute pace, carried over an hour,
   passes the user's dollar figure, or that has been open longer than the user's minutes and is still
   working. **There are no default figures**: no budget row, no runaway check and no notification

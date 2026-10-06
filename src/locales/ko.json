@@ -758,7 +758,7 @@
   "finding.agent-runaway.title.other": "실행 중인 에이전트 {count}개가 폭주하는 것으로 보임",
   "finding.agent-runaway.detail": "지금 실행 중이며 설정한 기준을 넘었습니다: {names}. 달러 금액은 최근 10분의 비용으로 계산한 시간당 속도입니다. 2:10 같은 값은 에이전트가 열려 있는 시간(시:분)이며, 에이전트가 아직 작업 중일 때만 계산됩니다. 앱은 알려 주기만 하며 에이전트를 절대 중지하지 않습니다.",
   "finding.limit-time.title.other": "최근 30일 동안 한도 {count}개가 2시간 이상 소진 상태였음",
-  "finding.limit-time.detail": "최근 30일 동안 가장 오래 소진 상태였던 한도는 누적 {total}({times}) 동안 그 상태였고, 가장 길게 이어진 구간은 {longest} 동안이었습니다. 한도가 소진된 동안에는 해당 도구를 현재 플랜에서 사용할 수 없습니다. 어느 한도인지와 시점은 각 제공자 페이지에서 확인할 수 있습니다.",
+  "finding.limit-time.detail": "최근 30일 동안 가장 오래 소진 상태였던 한도는 누적 {total}({times}) 동안 그 상태였고, 가장 길게 이어진 구간은 {longest} 동안이었습니다. 어느 한도인지와 시점은 각 제공자 페이지에서 확인할 수 있습니다.",
   "check.tools.info.title.other": "AI 도구 {count}개 발견",
   "check.tools.info.detail": "이 앱이 아는 AI 도구가 발견되지 않았습니다.",
   "check.mcp.none.title": "설정된 MCP 서버 없음",

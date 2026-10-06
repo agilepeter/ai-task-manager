@@ -4,6 +4,7 @@ import {
   agentWatchState,
   applyRescan,
   changeLiveRule,
+  clearLiveRule,
   LIVE_OPEN_PRESETS,
   LIVE_PACE_PRESETS,
   liveSelectValue,
@@ -4899,6 +4900,10 @@ async function resetAllSettings(): Promise<void> {
     reduceAnimations: false,
     locale: "auto",
   }).catch(() => {});
+  // The two live-rule dropdowns are settings too (Notifications), but they are kept in
+  // agent_watch.json, so the patch above never reached them: clear the rule, keep the budgets.
+  // Best effort, like the steps above: a refusal leaves the dropdowns showing what is still saved.
+  await clearLiveRule();
   spendTab = "today";
   applyLocale();
   syncSettingsControls();
@@ -4948,6 +4953,8 @@ function syncSettingsControls(): void {
   setCheck("#update-checks", config.updateChecks === true);
   const autostart = document.querySelector<HTMLInputElement>("#autostart");
   if (autostart) autostart.checked = true;
+  // The live rule's two dropdowns are painted from the saved watch, not from config.
+  paintAgentLive();
   populatePinnedOptions();
   // Resetting toggles programmatically fires no change events — re-arm
   // (or clear) the reset-moment timer against the restored values.

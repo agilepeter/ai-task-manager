@@ -1,6 +1,6 @@
 [package]
 name = "aitm-core"
-version = "0.1.0"
+version = "0.1.6"
 description = "AI Task Manager core: providers, spend, pricing, inventory, alerts and the local API. No UI, no Tauri."
 edition = "2021"
 license = "MIT"

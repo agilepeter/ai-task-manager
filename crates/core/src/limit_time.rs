@@ -3,9 +3,10 @@
 //!
 //! The history store writes a reading when the value moves, and at least once
 //! an hour while the app runs and the value is flat. So while a limit sits at
-//! 100 and the app is running there is a reading at least hourly; a longer
-//! gap means the app was not watching, and that stretch is skipped rather
-//! than guessed. The counting is pure: no clock, no database.
+//! 100 and the app is running there is a reading at least hourly; readings
+//! further apart than `MAX_GAP_MS` (an hour and a half) mean the app was not
+//! watching, and that stretch is skipped rather than guessed. The counting is
+//! pure: no clock, no database.
 
 use crate::i18n::{self, Msg};
 use crate::inventory::Opportunity;
@@ -18,8 +19,14 @@ pub(crate) const FINDING_IDS: &[&str] = &["limit-time"];
 /// A reading at or above this is a limit that has been reached.
 const AT_LIMIT: f64 = 100.0;
 /// Two readings further apart than this say nothing about the time between
-/// them. The same rule the burn profile uses for "when was it used".
-const MAX_GAP_MS: i64 = 90 * 60_000;
+/// them. The pairing gap of the stored readings: the burn profile
+/// (`history::burn_profile_from`) reads this same constant for "when was it
+/// used", so the two cannot pair readings by different rules. It is not the
+/// store's own flat-line interval (`history::MAX_GAP_MS`, an hour), which is how
+/// long the store goes without writing a reading, not how far apart two may be
+/// read together. Written as plain arithmetic: scripts/demo-limit-time.test.mjs
+/// reads it out of this file.
+pub(crate) const MAX_GAP_MS: i64 = 90 * 60_000;
 /// The span the page and the finding look back over.
 pub const WINDOW_MS: i64 = 30 * 24 * 3_600_000;
 /// A limit's total at 100 percent that is worth a finding.
@@ -276,7 +283,7 @@ mod tests {
         assert_eq!(found[0].title, "2 limits were fully used for two hours or more in the last 30 days");
         assert_eq!(
             found[0].detail,
-            "Over the last 30 days, the limit that stayed fully used longest was that way for 5h 10m (2 times); its longest stretch was 2h 35m. While a limit is fully used, that tool cannot be used on your plan. Each provider's page shows which limit and when."
+            "Over the last 30 days, the limit that stayed fully used longest was that way for 5h 10m (2 times); its longest stretch was 2h 35m. Each provider's page shows which limit and when."
         );
     }
 
@@ -315,7 +322,7 @@ mod tests {
                     if *locale != "en" {
                         // The durations inside differ by language even when the sentence
                         // around them has fallen back to English, so test the fixed words.
-                        assert!(!text.contains("While a limit is fully used"), "{locale} detail still reads in English: {text}");
+                        assert!(!text.contains("Each provider's page shows") && !text.contains("Over the last 30 days"), "{locale} detail still reads in English: {text}");
                         assert_ne!(i18n::render(locale, &title_msg), i18n::render("en", &title_msg), "{locale} title still reads in English");
                     }
                     let title = i18n::render(locale, &title_msg);

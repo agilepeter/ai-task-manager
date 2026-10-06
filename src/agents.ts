@@ -118,8 +118,6 @@ export interface AgentBudgetRow {
 export interface AgentWatchView {
   watch: AgentWatchPayload;
   budgets: AgentBudgetRow[];
-  /** Not painted here: the findings carry the runaways. */
-  runaways: unknown[];
   liveHint: number | null;
   known: string[];
 }
@@ -695,6 +693,20 @@ export function selectTakesFocusBack(hadFocus: boolean, settingsOpen: boolean, f
   return hadFocus && settingsOpen && (focusIsNowhere || focusIsOnSelect);
 }
 
+/// "Reset all settings" in Settings: both live-rule figures go to Off, and the saved
+/// budgets stay exactly as they are (they are the user's own data, not a setting). The
+/// rule is not a config key -- it lives in agent_watch.json -- so the config patch the
+/// reset sends never reaches it. Reads the watch fresh first, since the reset may be the
+/// first thing this session asks of it, and sends nothing when the rule is already Off or
+/// when no view could be loaded (nothing to build a payload from, by design). The
+/// two selects repaint through the save's own announce.
+export async function clearLiveRule(): Promise<WatchSave> {
+  await loadAgentWatch();
+  const live = watchView?.watch?.live;
+  if (live && live.hourlyPaceUsd === null && live.maxMinutes === null) return { outcome: "saved" };
+  return saveAgentLive({ hourlyPaceUsd: null, maxMinutes: null });
+}
+
 /// A Settings dropdown changed: which figure, and the select's value ("" is
 /// Off). Returns what happened, the backend's refusal if there was one, and the
 /// value the select must show now (what is saved, which after a refusal is the
@@ -794,17 +806,18 @@ export async function removeBudget(agent: string, byKeyboard: boolean): Promise<
   if (result.outcome === "rejected") focusFirstMatch([{ remove: agent }]);
 }
 
-/// The four invoke() calls this view's data comes from, fired together --
-/// used by openAgents() (the first load, always fresh) and reloadAgents()
-/// (every later popover-shown refresh, once shouldReload() above says the
-/// current data has actually gone stale). Deliberately does not touch
-/// `loadError` on the way in and does not reset any of the four pieces of
-/// state before the calls resolve: this must never flash a "loading" page
-/// over content the panel is already showing, so the previous render stays
-/// up until fresh data actually lands, one piece at a time, same as it
-/// always has. A rescan does NOT come through here any more -- see
-/// applyRescan() below, which is handed three of these four pieces directly
-/// instead of re-invoking them.
+/// The five invoke() calls this view's data comes from (the inventory, the
+/// running agents, the agent spend, the audit's failing count and the budgets'
+/// watch), fired together -- used by openAgents() (the first load, always
+/// fresh) and reloadAgents() (every later popover-shown refresh, once
+/// shouldReload() above says the current data has actually gone stale).
+/// Deliberately does not touch `loadError` on the way in and does not reset
+/// any of the five pieces of state before the calls resolve: this must never
+/// flash a "loading" page over content the panel is already showing, so the
+/// previous render stays up until fresh data actually lands, one piece at a
+/// time, same as it always has. A rescan does NOT come through here any more
+/// -- see applyRescan() below, which is handed three of these five pieces
+/// directly instead of re-invoking them, and reloads the other two.
 function loadData(): void {
   loading = true;
   void invoke<Inventory>("get_inventory").then(
@@ -880,8 +893,9 @@ export function openAgents(opener_: HTMLElement | null = null): void {
 /// shown again while this view happens to still be open (main.ts wires this
 /// into "popover-shown"). Gated by shouldReload(): reopening the popover
 /// happens far more often than the underlying data changes, so this skips
-/// its own get_inventory / get_running_agents / get_agent_spend / get_audit
-/// calls entirely when the last load is still within RELOAD_FRESHNESS_MS.
+/// its own get_inventory / get_running_agents / get_agent_spend / get_audit /
+/// get_agent_watch calls entirely when the last load is still within
+/// RELOAD_FRESHNESS_MS.
 /// A rescan finishing is a SEPARATE event, handled by applyRescan() below,
 /// not by this function -- a rescan always applies (the setup genuinely just
 /// changed), where this is purely "is it worth asking again". loadData()
@@ -901,12 +915,16 @@ export function reloadAgents(): void {
 /// produces (get_inventory, get_running_agents, get_agent_spend). Unlike
 /// reloadAgents() above, this never re-invokes those three commands itself:
 /// that would be the same redundant second full scan this function exists to
-/// remove. It still fetches the failing-guardrail count fresh
-/// (loadFailingGuardrails(), i.e. get_audit) because a rescan's own data
+/// remove. It still fetches two pieces fresh. The failing-guardrail count
+/// (loadFailingGuardrails(), i.e. get_audit), because a rescan's own data
 /// carries nothing about the Audit's checks -- those are computed by a
 /// separate command a rescan never touches, so there is nothing to reuse for
-/// it. Always applies when the panel is open (a rescan is a real change, not
-/// a "maybe" like reloadAgents()'s freshness check); a no-op while closed,
+/// it. And the budgets (loadAgentWatch(), i.e. get_agent_watch), because each
+/// budget's month to date is read from the per-day agent spend the scan keeps,
+/// so it moves with a rescan; that load sends nothing while a save is in
+/// flight (it checks `saving` itself), so a reload never lands over a save's
+/// answer. Always applies when the panel is open (a rescan is a real change,
+/// not a "maybe" like reloadAgents()'s freshness check); a no-op while closed,
 /// same as every other refresh path here -- openAgents() reloads everything
 /// fresh on its own the next time this view opens regardless.
 export function applyRescan(data: RescanResult): void {
@@ -928,6 +946,7 @@ export function applyRescan(data: RescanResult): void {
   }
   render();
   void loadFailingGuardrails().then((n) => { failingGuardrails = n; render(); });
+  void loadAgentWatch();
 }
 
 /// Redraws the Agents panel in place, e.g. after a locale switch. A no-op

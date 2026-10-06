@@ -561,6 +561,9 @@ static CACHE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// the counts the flag guards: the lines that run over are huge tool results,
 /// and the line that carries an MCP tool call is the model's own message,
 /// which is small.
+///
+/// Kept for the unused-server rule, which the app does not call yet: written on
+/// every scan, read only by `logs_kept_days`.
 static CLAUDE_WALK_COMPLETE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Paths seen by file_days() this collect() run. Entries for paths nobody

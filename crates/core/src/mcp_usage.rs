@@ -28,6 +28,7 @@ pub const HEAVY_RESULT_BYTES: u64 = 2 * 1024 * 1024;
 /// 30 days the call counts are summed over (`spend.rs` asserts that, because
 /// this module reads nothing from it). Three weeks, because that is what can
 /// be shown: the whole 30 days cannot (see `unused_from_history`).
+/// Kept for the unused-server rule, which the app does not call yet.
 pub const UNUSED_WINDOW_DAYS: i64 = 21;
 
 /// The client whose servers have call counts at all. The one place its name is
@@ -205,6 +206,7 @@ pub fn attach(servers: &mut [McpServer], by_server: &HashMap<String, McpUsage>) 
 /// top-level `mcpServers` of `~/.claude.json`, which `inventory::scan` stamps
 /// "user"; a "project" server starts only in its project) and not switched
 /// off in any project.
+/// Kept for the unused-server rule, which the app does not call yet.
 fn loads_in_every_session(server: &McpServer) -> bool {
     server.client == CLAUDE_CODE && server.scope == "user" && !server.switched_off_in_a_project
 }

@@ -406,7 +406,7 @@ test("the finding counts the limits over and details the longest", async () => {
   assert.equal(found.title, "2 limits were fully used for two hours or more in the last 30 days");
   assert.equal(
     found.detail,
-    "Over the last 30 days, the limit that stayed fully used longest was that way for 5h 10m (2 times); its longest stretch was 2h 35m. While a limit is fully used, that tool cannot be used on your plan. Each provider's page shows which limit and when.",
+    "Over the last 30 days, the limit that stayed fully used longest was that way for 5h 10m (2 times); its longest stretch was 2h 35m. Each provider's page shows which limit and when.",
   );
   assert.deepEqual(found.detailMsg.vars.times, { key: "unit.times", vars: {}, count: 2 }, "the count is a Msg, so each language words it");
   assert.equal(found.detailMsg.vars.total.key, "time.hoursMins");
@@ -451,7 +451,7 @@ test("the finding reads whole in every language and size", async () => {
         assert.ok(!/[{}]/.test(detail) && !/finding\.|unit\.|time\./.test(detail), `${locale} ${name} ${times}: ${detail}`);
         assert.ok(!/[{}]/.test(title) && !title.includes("finding."), `${locale}: ${title}`);
         if (locale !== "en") {
-          assert.ok(!detail.includes("While a limit is fully used"), `${locale} detail still reads in English: ${detail}`);
+          assert.ok(!detail.includes("Each provider's page shows") && !detail.includes("Over the last 30 days"), `${locale} detail still reads in English: ${detail}`);
           assert.notEqual(title, render("en", found.titleMsg), `${locale} title still reads in English`);
         }
       }

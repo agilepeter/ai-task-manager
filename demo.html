@@ -282,7 +282,7 @@
             </select>
           </div>
           <div class="setting-row">
-            <label for="weekly-digest" title="One notification a week: what the week cost, where it went, what renews next." data-i18n="settings.weeklyDigest" data-i18n-title="settings.weeklyDigestTip">Weekly digest</label>
+            <label for="weekly-digest" title="One notification a week: what the week cost, where it went, what renews next, and what changed in your setup." data-i18n="settings.weeklyDigest" data-i18n-title="settings.weeklyDigestTip">Weekly digest</label>
             <select id="weekly-digest">
               <option value="off" data-i18n="settings.alertOff">Off</option>
               <option value="mon" data-i18n="settings.weeklyDigestMon">Monday</option>
@@ -304,7 +304,7 @@
             </select>
           </div>
           <div class="setting-row">
-            <label for="agent-pace" data-i18n="settings.agentPace" title="The cost of an agent's last 10 minutes, carried over an hour. On a flat-rate plan the figure is API-equivalent value, not a charge. The app tells you and never stops an agent." data-i18n-title="settings.agentPaceTip">Agent pace, per hour</label>
+            <label for="agent-pace" data-i18n="settings.agentPace" title="The cost of an agent's last 10 minutes, carried over an hour. On a flat-rate plan the figure is API-equivalent value, not a charge. The app tells you and never stops an agent." data-i18n-title="settings.agentPaceTip">Agent spend per hour</label>
             <select id="agent-pace" disabled>
               <option value="" data-i18n="settings.alertOff">Off</option>
               <option value="5">$5</option>
@@ -443,7 +443,7 @@
           </div>
           <h4 class="settings-sub" data-i18n="settings.onenewapi">One/New API sites</h4>
           <p class="settings-note" data-i18n="settings.onenewapiNote">
-            Register OneAPI / NewAPI compatible sites. Keys stay on this computer and are sent only to that site. Empty sites stay here; cards appear after you add a key.
+            Register OneAPI / NewAPI compatible sites. Keys stay on this computer (onenewapi.json in the app's settings folder) and are sent only to that site. Empty sites stay here; cards appear after you add a key.
           </p>
           <div class="setting-row">
             <label class="toggle" data-i18n-title="settings.onenewapiFamilyTip" title="Turns off every key card at once. Per-key switches in Customize stay.">
@@ -454,7 +454,7 @@
           <div id="onenewapi-sites"></div>
           <form id="onenewapi-add" class="ona-add" autocomplete="off">
             <input id="ona-add-name" type="text" spellcheck="false" placeholder="Name (optional)" data-i18n-placeholder="settings.onenewapiNamePh" />
-            <input id="ona-add-url" type="text" spellcheck="false" placeholder="https://host" data-i18n-placeholder="settings.onenewapiUrlPh" />
+            <input id="ona-add-url" type="text" spellcheck="false" placeholder="https://host or http://host" data-i18n-placeholder="settings.onenewapiUrlPh" />
             <div class="ona-add-row">
               <input id="ona-add-secret" type="password" placeholder="API key" data-i18n-placeholder="settings.onenewapiKeySecretPh" autocomplete="new-password" />
               <button type="submit" data-i18n="settings.onenewapiAdd">Add site</button>
@@ -462,7 +462,7 @@
           </form>
           <h4 class="settings-sub" data-i18n="settings.sub2api">Sub2API sites</h4>
           <p class="settings-note" data-i18n="settings.sub2apiNote">
-            Register Sub2API sites. Usage is requested only from /v1/usage. Keys stay on this computer and are sent only to that site. Empty sites stay here; cards appear after you add a key.
+            Add Sub2API sites and keys without a remote check. Keys stay on this computer (sub2api.json in the app's settings folder) and are sent only to that site's /v1/usage. Shared wallets and subscriptions are shown separately for each key.
           </p>
           <div class="setting-row">
             <label class="toggle" data-i18n-title="settings.onenewapiFamilyTip" title="Turns off every key card at once. Per-key switches in Customize stay.">
@@ -473,7 +473,7 @@
           <div id="sub2api-sites"></div>
           <form id="sub2api-add" class="ona-add" autocomplete="off">
             <input id="sub2api-add-name" type="text" spellcheck="false" placeholder="Name (optional)" data-i18n-placeholder="settings.onenewapiNamePh" />
-            <input id="sub2api-add-url" type="text" spellcheck="false" placeholder="https://host" data-i18n-placeholder="settings.onenewapiUrlPh" />
+            <input id="sub2api-add-url" type="text" spellcheck="false" placeholder="https://host or http://host" data-i18n-placeholder="settings.onenewapiUrlPh" />
             <div class="ona-add-row">
               <input id="sub2api-add-secret" type="password" placeholder="API key" data-i18n-placeholder="settings.onenewapiKeySecretPh" autocomplete="new-password" />
               <button type="submit" data-i18n="settings.onenewapiAdd">Add site</button>

@@ -19,10 +19,12 @@ import { inlineLocaleImports } from "./inline-locales.mjs";
 import {
   checkSettingsPanelI18nCoverage,
   findSettingsTextNodes,
+  findStaticFallbacks,
   SETTINGS_I18N_EXEMPT,
   checkSettingsPanelAttrI18nCoverage,
   findSettingsAttributeNodes,
   SETTINGS_ATTR_I18N_EXEMPT,
+  staticFallbackDrift,
 } from "./settings-i18n-coverage.mjs";
 
 const localesDir = fileURLToPath(new URL("../src/locales/", import.meta.url));
@@ -430,6 +432,63 @@ test("every data-i18n* key referenced in index.html exists in en.json", () => {
   const referenced = new Set([...html.matchAll(pattern)].map((m) => m[1]));
   const missing = [...referenced].filter((k) => !(k in dicts.en));
   assert.deepEqual(missing, [], "index.html: referenced data-i18n* keys missing from en.json");
+});
+
+// The check above asks whether a key exists. This one asks whether the words written in the markup
+// beside it still say what the key says: applyStaticI18n() replaces them as soon as the script runs,
+// but they are what shows before that, and what a visitor sees when the script does not load. A
+// reworded string used to leave its old words behind (the Agent pace label read "Agent pace, per hour"
+// while en.json said "Agent spend per hour"). The fallback is the English string exactly, never the
+// other way round: the locale files are the source.
+const describeDrift = (d) => `<${d.tag}${d.locator ? ` id="${d.locator}"` : ""}> ${d.kind} for ${d.key}:\n    markup: ${JSON.stringify(d.text)}\n    en.json: ${JSON.stringify(d.english)}`;
+
+test("the fallback walker reads markup the way a browser does, and refuses what it cannot read", () => {
+  const html = `<!doctype html>
+<div>
+  <!-- a comment, <b>not</b> an element -->
+  <label for="a" data-i18n="k.label" title="A &quot;quoted&quot; &amp; tip" data-i18n-title="k.tip">
+    Agent   spend
+    per hour &lt;&#8964;&#x27;
+  </label>
+  <button id="b" data-i18n="k.mixed"><span>icon</span> Text</button>
+  <input id="c" placeholder="https://host" data-i18n-placeholder="k.ph" aria-label="Plain" data-i18n-aria="k.aria" disabled>
+  <p title="no key here">untouched</p>
+</div>`;
+  assert.deepEqual(findStaticFallbacks(html).map(({ kind, tag, locator, key, text }) => [kind, tag, locator, key, text]), [
+    ["title", "label", null, "k.tip", 'A "quoted" & tip'],
+    ["text", "label", null, "k.label", "Agent spend per hour <\u2304'"],
+    ["text-with-children", "button", "b", "k.mixed", ""],
+    ["placeholder", "input", "c", "k.ph", "https://host"],
+    ["aria-label", "input", "c", "k.aria", "Plain"],
+  ]);
+  // Compared with en.json, only the entries that have one string to compare.
+  const en = { "k.tip": 'A "quoted" & tip', "k.label": "Agent spend per hour", "k.ph": "https://host or http://host", "k.aria": "Plain" };
+  assert.deepEqual(staticFallbackDrift(html, en).map((d) => [d.key, d.english]), [["k.label", "Agent spend per hour"], ["k.ph", "https://host or http://host"]]);
+  // Markup it cannot tokenise, or a character reference it does not know, throws instead of being compared wrongly.
+  assert.throws(() => findStaticFallbacks(`<p class='x' data-i18n="k">t</p>`), /cannot read at offset 0/);
+  assert.throws(() => findStaticFallbacks(`<p data-i18n="k">a &hellip; b</p>`), /not one this walker decodes/);
+});
+
+test("the text written in index.html beside every data-i18n key is that key's English string", () => {
+  const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+  const texts = findStaticFallbacks(html).filter((f) => f.kind === "text");
+  assert.ok(texts.length > 100, `the walker found only ${texts.length} data-i18n elements: it no longer reads this file`);
+  const drift = staticFallbackDrift(html, dicts.en).filter((d) => d.kind === "text");
+  assert.deepEqual(drift.map(describeDrift), [], `index.html text that no longer matches en.json (change the markup, not the locale file):\n${drift.map(describeDrift).join("\n")}`);
+});
+
+test("the title, placeholder and aria-label written beside a data-i18n-* key are its English string", () => {
+  const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+  const attrs = findStaticFallbacks(html).filter((f) => f.kind !== "text" && f.kind !== "text-with-children");
+  assert.ok(attrs.length > 30, `the walker found only ${attrs.length} attribute fallbacks: it no longer reads this file`);
+  const drift = staticFallbackDrift(html, dicts.en).filter((d) => d.kind !== "text");
+  assert.deepEqual(drift.map(describeDrift), [], `index.html attribute text that no longer matches en.json (change the markup, not the locale file):\n${drift.map(describeDrift).join("\n")}`);
+});
+
+test("an element with data-i18n holds only text, since boot replaces its whole content", () => {
+  const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+  const mixed = findStaticFallbacks(html).filter((f) => f.kind === "text-with-children").map((f) => `<${f.tag}${f.locator ? ` id="${f.locator}"` : ""}> ${f.key}`);
+  assert.deepEqual(mixed, [], "these elements carry other elements that applyStaticI18n() would wipe");
 });
 
 // The check above only ever looks at an attribute that is already there --

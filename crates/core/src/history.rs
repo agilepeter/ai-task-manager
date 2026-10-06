@@ -17,7 +17,9 @@ const RETENTION_MS: i64 = 90 * 24 * 3_600_000;
 /// otherwise store 1,440 near-identical rows per metric per day.
 const MIN_GAP_MS: i64 = 4 * 60_000;
 const MIN_DELTA: f64 = 0.5;
-/// A flat line still needs a point now and then to be drawn as flat.
+/// A flat line still needs a point now and then to be drawn as flat: the longest
+/// the store goes without writing a reading while the app runs. Not the gap two
+/// stored readings may be paired across, which is `limit_time::MAX_GAP_MS`.
 const MAX_GAP_MS: i64 = 60 * 60_000;
 /// Upper bound on points handed to the UI for one metric.
 const MAX_POINTS: usize = 1_500;
@@ -185,13 +187,14 @@ pub struct BurnProfile {
     pub days_observed: usize,
 }
 
-/// A rise between two readings is booked to the hour of the later one, but
-/// only when they are this close: across a longer gap (the app was off, the
-/// machine asleep) nobody knows which hour the usage happened in.
-const MAX_BURN_GAP_MS: i64 = 90 * 60_000;
-
 /// `offset_ms` is local time minus UTC, passed in so the hour bucketing is
 /// testable anywhere.
+///
+/// A rise between two readings is booked to the hour of the later one, but
+/// only when they are within `limit_time::MAX_GAP_MS` of each other: across a
+/// longer gap (the app was off, the machine asleep) nobody knows which hour the
+/// usage happened in. Time at the limit pairs readings by the same gap, so the
+/// two never disagree about which pairs say anything.
 pub fn burn_profile_from(metric: &str, points: &[Point], offset_ms: i64) -> BurnProfile {
     let mut cells = vec![vec![0.0; 24]; 7];
     let mut days = std::collections::HashSet::new();
@@ -200,7 +203,7 @@ pub fn burn_profile_from(metric: &str, points: &[Point], offset_ms: i64) -> Burn
         let rise = b.used - a.used;
         let gap = b.at - a.at;
         // Only rises count: a fall is the window rolling over, not negative use.
-        if gap <= 0 || gap > MAX_BURN_GAP_MS || rise <= 0.0 {
+        if gap <= 0 || gap > crate::limit_time::MAX_GAP_MS || rise <= 0.0 {
             continue;
         }
         let local = b.at + offset_ms;
@@ -393,6 +396,17 @@ mod tests {
         let east = burn_profile_from("Weekly", &points, 11 * H);
         assert_eq!(east.cells[((weekday_of_base + 1) % 7) as usize][8], 6.0);
         assert_eq!(burn_profile_from("x", &[], 0).days_observed, 0);
+    }
+
+    #[test]
+    fn the_burn_profile_pairs_readings_by_the_gap_time_at_the_limit_uses() {
+        // One constant says how far apart two readings may be and still be read together
+        // (`limit_time::MAX_GAP_MS`); the burn profile reads that one, not a copy.
+        let gap = crate::limit_time::MAX_GAP_MS;
+        let at = |offset: i64, used: f64| Point { at: 1_790_000_000_000 + offset, used };
+        let booked = |points: &[Point]| burn_profile_from("Weekly", points, 0).cells.iter().flatten().sum::<f64>();
+        assert_eq!(booked(&[at(0, 10.0), at(gap, 16.0)]), 6.0, "a pair exactly the gap apart counts");
+        assert_eq!(booked(&[at(0, 10.0), at(gap + 1, 16.0)]), 0.0, "a millisecond more says nothing about when it was used");
     }
 
     #[test]

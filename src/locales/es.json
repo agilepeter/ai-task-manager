@@ -802,7 +802,7 @@
   "finding.agent-runaway.detail": "En ejecución ahora y por encima de una marca que has establecido: {names}. Una cifra en dólares es un ritmo por hora, calculado con el coste de los últimos 10 minutos. Una duración como 2:10 es el tiempo que el agente lleva abierto, en horas y minutos, y solo cuenta mientras sigue trabajando. La aplicación solo avisa; nunca detiene un agente.",
   "finding.limit-time.title.one": "{count} límite estuvo agotado durante dos horas o más en los últimos 30 días",
   "finding.limit-time.title.other": "{count} límites estuvieron agotados durante dos horas o más en los últimos 30 días",
-  "finding.limit-time.detail": "En los últimos 30 días, el límite que más tiempo estuvo agotado lo estuvo durante {total} ({times}); su tramo más largo fue de {longest}. Mientras un límite está agotado, esa herramienta no se puede usar en tu plan. La página de cada proveedor muestra qué límite fue y cuándo.",
+  "finding.limit-time.detail": "En los últimos 30 días, el límite que más tiempo estuvo agotado lo estuvo durante {total} ({times}); su tramo más largo fue de {longest}. La página de cada proveedor muestra qué límite fue y cuándo.",
   "check.tools.info.title.one": "1 herramienta de IA encontrada",
   "check.tools.info.title.other": "{count} herramientas de IA encontradas",
   "check.tools.info.detail": "No se encontró ninguna de las herramientas de IA que esta aplicación conoce.",

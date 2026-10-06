@@ -51,6 +51,8 @@ pub struct McpServer {
     /// the document `scan` already parses and kept as this one flag; like
     /// `source_file` it stays inside the process, because it says which
     /// projects the user turned a server off in and no report needs that.
+    /// Kept for the unused-server rule, which the app does not call yet: worked out
+    /// on every scan, read only by `loads_in_every_session`.
     #[serde(skip)]
     pub switched_off_in_a_project: bool,
     /// 30 days of tool-call counts and result bytes, read from Claude Code's

@@ -282,15 +282,15 @@ async fn get_running_agents() -> Result<Vec<procs::RunningAgent>, String> {
 }
 
 /// What the Agents view needs to draw the budget editor and the live rule:
-/// what is saved, each budget against this month, who is running away right
-/// now, the user's own fastest live pace (the hint beside an empty field), and
-/// the names a budget may take.
+/// what is saved, each budget against this month, the user's own fastest live
+/// pace (the hint beside an empty field), and the names a budget may take. The
+/// runaway findings reach the view through the inventory's opportunities, so
+/// they are not here.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentWatchView {
     watch: agent_watch::Watch,
     budgets: Vec<agent_watch::BudgetRow>,
-    runaways: Vec<agent_watch::Runaway>,
     live_hint: Option<f64>,
     known: Vec<String>,
 }
@@ -309,7 +309,6 @@ fn agent_watch_view(watch: agent_watch::Watch, known: Vec<String>) -> AgentWatch
     let running = procs::agents_snapshot(&rules);
     AgentWatchView {
         budgets: agent_watch::budget_rows(&spend::agent_spend_month(), &watch),
-        runaways: agent_watch::runaways(&running, &watch.live),
         live_hint: agent_watch::live_hint(&running),
         known,
         watch,
@@ -4197,6 +4196,14 @@ mod tests {
         assert!(super::cache_is_fresh(captured, ttl, captured + std::time::Duration::from_secs(5)), "inside the window");
         assert!(!super::cache_is_fresh(captured, ttl, captured + std::time::Duration::from_secs(10)), "exactly at the edge is no longer fresh");
         assert!(!super::cache_is_fresh(captured, ttl, captured + std::time::Duration::from_secs(11)), "past the window");
+    }
+
+    #[test]
+    fn the_core_crate_states_the_apps_version() {
+        // The HTTP user-agent (`providers/mod.rs`, `providers/ollama.rs`) and the seat report take their
+        // version from the core crate, whose manifest a release that bumped only the app's would leave
+        // behind: every request would say the old number.
+        assert_eq!(aitm_core::VERSION, env!("CARGO_PKG_VERSION"), "crates/core/Cargo.toml and src-tauri/Cargo.toml state different versions");
     }
 
     #[test]

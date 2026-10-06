@@ -238,6 +238,101 @@ export function checkSettingsPanelAttrI18nCoverage(html, exempt = SETTINGS_ATTR_
   return nodes.filter((n) => !n.hasI18n && !(n.locator && n.locator in exempt));
 }
 
+// ---------------------------------------------------------------------------
+// The words written in the markup, against the English string they stand for
+// ---------------------------------------------------------------------------
+//
+// applyStaticI18n() (src/i18n.ts) replaces an element's text from `data-i18n`, and its title,
+// placeholder and aria-label from `data-i18n-title` / `-placeholder` / `-aria`, as soon as the script
+// runs. What the markup itself says is what shows before that, and what a visitor sees when the
+// script does not load. Nothing compared it with en.json: the checks above ask whether a key exists
+// and whether a row has one, never whether the words beside the key still say the same thing, so a
+// string that was reworded left its old words behind in the markup (the Agent pace label read
+// "Agent pace, per hour" after en.json had moved to "Agent spend per hour").
+//
+// Unlike the walkers above this one reads the WHOLE file, and it refuses to guess: markup it cannot
+// tokenise (a single-quoted attribute, say) throws with the offset, where the older walkers would
+// skip over it.
+
+const FALLBACK_TOKEN_RE =
+  /<!--[\s\S]*?-->|<![^>]*>|<\/([a-zA-Z][a-zA-Z0-9-]*)\s*>|<([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[a-zA-Z_:][a-zA-Z0-9_:.-]*(?:\s*=\s*"[^"]*")?)*)\s*(\/?)>|[^<]+/g;
+
+// The attributes applyStaticI18n() fills from a key, beside the plain attribute that holds the
+// fallback. `title` and `aria-label` sit in ATTR_I18N above; the placeholder is only filled here.
+const FALLBACK_ATTRS = [
+  ["title", "data-i18n-title"],
+  ["placeholder", "data-i18n-placeholder"],
+  ["aria-label", "data-i18n-aria"],
+];
+
+const NAMED_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00a0" };
+
+/// Text as the browser reads it out of markup: character references decoded. A named reference
+/// this does not know throws, rather than comparing the wrong characters.
+function decodeEntities(text, where) {
+  return text.replace(/&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole, body) => {
+    if (body[0] === "#") return String.fromCodePoint(body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : Number(body.slice(1)));
+    if (body in NAMED_ENTITIES) return NAMED_ENTITIES[body];
+    throw new Error(`${where}: the character reference ${whole} is not one this walker decodes`);
+  });
+}
+
+/// Every place the markup holds fallback words for a key, in file order. Each entry:
+/// { kind, tag, locator, key, text }, where `kind` is "text" (an element with `data-i18n` and no
+/// element children: its text, entities decoded and runs of whitespace as one space), "title",
+/// "placeholder" or "aria-label" (an attribute beside its `data-i18n-*` key), or "text-with-children"
+/// (an element with `data-i18n` that holds other elements, which boot would wipe: listed for the
+/// caller to refuse, its text left empty). `locator` is the element's id when it has one.
+export function findStaticFallbacks(html) {
+  const stack = []; // { tag, attrs, parts, hasChild }
+  const found = [];
+  let pos = 0;
+  let m;
+  FALLBACK_TOKEN_RE.lastIndex = 0;
+  while ((m = FALLBACK_TOKEN_RE.exec(html))) {
+    if (m.index !== pos) throw new Error(`index.html: markup this walker cannot read at offset ${pos}: ${JSON.stringify(html.slice(pos, pos + 60))}`);
+    pos = m.index + m[0].length;
+    const whole = m[0];
+    if (whole.startsWith("<!")) continue; // a comment, or the doctype
+    if (whole.startsWith("</")) {
+      for (let i = stack.length - 1; i >= 0; i--) {
+        if (stack[i].tag !== m[1]) continue;
+        const el = stack[i];
+        stack.length = i;
+        if ("data-i18n" in el.attrs) {
+          const text = el.hasChild ? "" : decodeEntities(el.parts.join(""), `<${el.tag} data-i18n="${el.attrs["data-i18n"]}">`).replace(/\s+/g, " ").trim();
+          found.push({ kind: el.hasChild ? "text-with-children" : "text", tag: el.tag, locator: el.attrs.id ?? null, key: el.attrs["data-i18n"], text });
+        }
+        break;
+      }
+      continue;
+    }
+    if (whole.startsWith("<")) {
+      const tag = m[2];
+      const attrs = parseAttrs(m[3] || "");
+      if (stack.length) stack[stack.length - 1].hasChild = true;
+      for (const [plain, keyAttr] of FALLBACK_ATTRS) {
+        if (!(plain in attrs) || !(keyAttr in attrs)) continue;
+        found.push({ kind: plain, tag, locator: attrs.id ?? null, key: attrs[keyAttr], text: decodeEntities(attrs[plain], `<${tag} ${plain}>`) });
+      }
+      if (m[4] !== "/" && !VOID_ELEMENTS.has(tag)) stack.push({ tag, attrs, parts: [], hasChild: false });
+      continue;
+    }
+    if (stack.length) stack[stack.length - 1].parts.push(whole);
+  }
+  if (pos !== html.length) throw new Error(`index.html: markup this walker cannot read at offset ${pos}: ${JSON.stringify(html.slice(pos, pos + 60))}`);
+  return found;
+}
+
+/// The fallbacks whose words differ from the English string for their key: [{ ...entry, english }],
+/// `english` being undefined for a key en.json does not hold. "text-with-children" entries are not
+/// compared (there is no single string to compare), only reported by findStaticFallbacks().
+export function staticFallbackDrift(html, en) {
+  return findStaticFallbacks(html)
+    .filter((f) => f.kind !== "text-with-children" && en[f.key] !== f.text)
+    .map((f) => ({ ...f, english: en[f.key] }));
+}
+
 // Convenience for callers outside the test runner (e.g. a one-off check
 // against a historical revision) that want the real index.html's content
 // without re-deriving the path themselves.
