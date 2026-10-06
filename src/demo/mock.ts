@@ -220,7 +220,7 @@ function clientRollup(areas: any[]) {
     const figure = a.month_to_date;
     if (figure && typeof figure.cost === "number" && figure.month === thisMonth) {
       // The engine's own figure for this month, summed from every day it read: the
-      // 30-slot series below is a day short on the 31st of a 31-day month.
+      // series below is a day short on the 31st of a 31-day month.
       row.monthToDate += figure.cost;
     } else {
       // No figure for this month: cut the month out of the series, as for a fixture

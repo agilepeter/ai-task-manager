@@ -113,7 +113,7 @@ fn add(into: &mut Window, from: &Window) {
 /// `daily` is oldest first with today last, like every trend in the app.
 ///
 /// Short by one day on the 31st of a 31-day month. The series holds
-/// `TREND_DAYS` (30) days, so the 1st is one past its oldest slot. That is why
+/// `TREND_DAYS` days, so the 1st is one past its oldest slot. That is why
 /// the scan sums the month itself (`AreaSpend::month_to_date`); this only
 /// stands in for an area that did not come from a scan.
 fn month_to_date_from_series(daily: &[f64], today: NaiveDate) -> f64 {
@@ -479,8 +479,8 @@ mod tests {
         assert!(out.contains("Unassigned,1.00,12.50,125,1.00,'=evil\r\n"), "{out}");
         assert!(out.contains("equivalent value, not a charge"));
         // The footer says what the month figure is, and names the one thing it leaves out, and
-        // when: an area with no spend in the last 30 days is unlisted every day, but only on the
-        // 31st of a 31-day month can that cost it spend of this month.
+        // when: an area with no spend in the last `TREND_DAYS` days is unlisted every day, but
+        // only on the 31st of a 31-day month can that cost it spend of this month.
         let limit = format!(
             "Month to date is summed from the scanned days of this calendar month; on the 31st of a 31-day month a work area with no spend in the last {TREND_DAYS} days is not listed, so its spend on the 1st is not in the figure."
         );

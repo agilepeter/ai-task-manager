@@ -1,6 +1,6 @@
 // A client's month to date is worked out once, by the scan (crates/core/src/spend.rs),
-// from the whole per-day map: a 30-slot daily series is a day short on the 31st of a
-// 31-day month, so the frontend must never rebuild it from `daily_cost` when the scan
+// from the whole per-day map: a daily series is a rolling window, a day short on the 31st
+// of a 31-day month, so the frontend must never rebuild it from `daily_cost` when the scan
 // has already given the figure. The figure is `{ month: "YYYY-MM", cost }`: it is a
 // number fixed at scan time, so it says which month it is for. The app uses it only
 // while that is the current month and counts one for another month as zero, because a

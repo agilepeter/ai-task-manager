@@ -42,6 +42,36 @@ fn parse_today_override(raw: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(raw, "%Y-%m-%d").ok()
 }
 
+/// The day to treat as today, given what the clock says: `clock`, unless
+/// `override_raw` (the raw value of `AITM_TODAY`, when it is set) holds an ISO
+/// `YYYY-MM-DD` date, which wins. Anything else in it is not an override and
+/// gives the clock. Pure, so a test can pick any pair without touching the
+/// process environment, which every test in the process shares.
+pub fn today_from(clock: NaiveDate, override_raw: Option<&str>) -> NaiveDate {
+    override_raw.and_then(parse_today_override).unwrap_or(clock)
+}
+
+/// `today_from` for a caller that has already read the clock, so it can use
+/// the same reading for the hour, say: `AITM_TODAY` is read here, so no caller
+/// has to touch the environment, and the override is applied the way the scan
+/// applies it.
+pub fn today_for_clock(clock: NaiveDate) -> NaiveDate {
+    let raw = std::env::var("AITM_TODAY").ok();
+    // Set but not an ISO date -- almost certainly a typo in a shell
+    // export while poking at the fixture script, so name the value
+    // that got rejected rather than silently reading the real clock
+    // and leaving the mismatch to be found later. Debug-only: never
+    // worth a release build's stderr, and either way the real clock
+    // beneath this keeps a live install running normally.
+    #[cfg(debug_assertions)]
+    {
+        if let Some(raw) = raw.as_deref().filter(|r| parse_today_override(r).is_none()) {
+            eprintln!("AITM_TODAY={raw:?} is not an ISO YYYY-MM-DD date; using the real date instead");
+        }
+    }
+    today_from(clock, raw.as_deref())
+}
+
 /// Which local calendar day counts as "today" for every day-bucketing
 /// cutoff in this module -- the last-30-days window, the trend window, a
 /// session's own recency filter. `Local::now().date_naive()` normally;
@@ -55,20 +85,7 @@ fn parse_today_override(raw: &str) -> Option<NaiveDate> {
 /// moved on, and every unrelated regeneration reshuffled the fixture's
 /// weekday-dependent random draws along the way.
 pub fn today_naive_date() -> NaiveDate {
-    if let Ok(raw) = std::env::var("AITM_TODAY") {
-        if let Some(d) = parse_today_override(&raw) {
-            return d;
-        }
-        // Set but not an ISO date -- almost certainly a typo in a shell
-        // export while poking at the fixture script, so name the value
-        // that got rejected rather than silently reading the real clock
-        // and leaving the mismatch to be found later. Debug-only: never
-        // worth a release build's stderr, and either way the real clock
-        // beneath this keeps a live install running normally.
-        #[cfg(debug_assertions)]
-        eprintln!("AITM_TODAY={raw:?} is not an ISO YYYY-MM-DD date; using the real date instead");
-    }
-    Local::now().date_naive()
+    today_for_clock(Local::now().date_naive())
 }
 
 /// The CE-ordinal form of `today_naive_date()` -- what every day-bucketing
@@ -189,8 +206,8 @@ pub struct AreaSpend {
     /// per-day map in the same pass as `daily_cost`, so it is complete on the
     /// 31st of a 31-day month, when the 1st is 30 days back and one day past
     /// the series. That depends on the scan reading every log written in the
-    /// last `LOG_HORIZON_DAYS` days (31), which keeps the 1st of a 31-day
-    /// month in reach on the 31st.
+    /// last `LOG_HORIZON_DAYS` days, at least 31, which keeps the 1st of a
+    /// 31-day month in reach on the 31st.
     ///
     /// The figure carries the month it is for because it is fixed at scan
     /// time and read later: a scan that ends just before midnight on the 1st
@@ -3286,10 +3303,10 @@ fn month_label(today: i32) -> String {
 }
 
 /// For each key of a day map: its today / yesterday / last-30-days windows,
-/// its dollars per day over those 30 days (oldest first, today last), and its
-/// dollars for the calendar month so far.
+/// its dollars per day over the last `TREND_DAYS` days (oldest first, today
+/// last), and its dollars for the calendar month so far.
 ///
-/// The month is summed from the map, never cut out of the 30 slots: on the
+/// The month is summed from the map, never cut out of those slots: on the
 /// 31st of a 31-day month the 1st is 30 days back, one past the oldest slot.
 /// The map has every day of every log file the scan read (those written in the
 /// last `LOG_HORIZON_DAYS` days), so the 1st is in it. As in every other
@@ -5199,6 +5216,27 @@ mod tests {
         assert_eq!(super::parse_today_override(""), None, "empty string");
         assert_eq!(super::parse_today_override("not-a-date"), None, "garbage");
         assert_eq!(super::parse_today_override("25-09-2026"), None, "non-ISO field order (day-month-year)");
+    }
+
+    /// The clock and the override are split so this needs no environment: a
+    /// parseable override wins, and anything else, set or not, is the clock.
+    #[test]
+    fn today_from_takes_a_parseable_override_and_otherwise_the_clock() {
+        let clock = chrono::NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+        assert_eq!(super::today_from(clock, None), clock, "no override: the clock");
+        assert_eq!(
+            super::today_from(clock, Some("2026-09-25")),
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 25).unwrap(),
+            "a date overrides the clock"
+        );
+        assert_eq!(
+            super::today_from(clock, Some("2027-01-01")),
+            chrono::NaiveDate::from_ymd_opt(2027, 1, 1).unwrap(),
+            "whichever side of the clock it falls"
+        );
+        for garbage in ["", "not-a-date", "25-09-2026", "2026-02-30"] {
+            assert_eq!(super::today_from(clock, Some(garbage)), clock, "{garbage:?} is not a date: the clock");
+        }
     }
 
     /// Prints real sessions as JSON: `{"area": [...], "day": [...]}` for the
@@ -7220,7 +7258,7 @@ mod tests {
     #[test]
     fn client_month_to_date_includes_the_first_on_the_thirty_first() {
         // October has 31 days, so on the 31st the 1st is 30 days back: one day past the
-        // 30 slots an area's daily series holds. Spend on the last day of September
+        // slots an area's daily series holds. Spend on the last day of September
         // (last month's, never counted), on the 1st, and today.
         let today = date(2026, 10, 31);
         let areas = scanned_areas(
@@ -7265,7 +7303,7 @@ mod tests {
 
     #[test]
     fn shorter_months_give_the_same_month_to_date_as_before() {
-        // Whenever the 1st is still inside the 30 slots (February, a 30-day month, any
+        // Whenever the 1st is still inside the series (February, a 30-day month, any
         // day of a 31-day month before the 31st) the new sum and the old cut agree.
         for today in [date(2027, 2, 28), date(2028, 2, 29), date(2026, 9, 30), date(2026, 10, 30), date(2026, 10, 15)] {
             // This month's days cost their day number; the 40 days before cost 1000 a day
@@ -7440,7 +7478,10 @@ mod tests {
     fn an_area_used_only_on_the_first_is_unlisted_only_on_the_thirty_first_of_a_long_month() {
         // The limit the docs and the CSV footer state: an area is listed only if it spent in
         // the last `TREND_DAYS` days, and the 1st is inside them on every day of a month but
-        // the 31st of a 31-day month, when it is 30 days back.
+        // the 31st of a 31-day month, when it is 30 days back. A second area spends today, so
+        // the project stays listed whatever the first one does: with only the 1st's spend in
+        // it, the project would be dropped before the area's own filter was ever reached, and
+        // this would not be testing that filter.
         for (today, listed) in [
             (date(2026, 10, 2), true),
             (date(2026, 10, 15), true),
@@ -7451,8 +7492,10 @@ mod tests {
             (date(2027, 2, 28), true),
         ] {
             let first = date(today.year(), today.month(), 1);
-            let areas = scanned_areas(&[("acme-portal", first, 5.0)], today);
-            assert_eq!(!areas.is_empty(), listed, "{today}: an area used only on {first}");
+            let areas = scanned_areas(&[("acme-portal", first, 5.0), ("acme-api", today, 2.0)], today);
+            let names: Vec<&str> = areas.iter().map(|a| a.area.as_str()).collect();
+            assert!(names.contains(&"acme-api"), "{today}: the area that spent today is always listed: {names:?}");
+            assert_eq!(names.contains(&"acme-portal"), listed, "{today}: the area used only on {first}: {names:?}");
         }
     }
 
@@ -7490,7 +7533,7 @@ mod tests {
             ],
             today,
         );
-        assert_eq!(areas[0].last30.cost, 3.0, "the days the 30-day window counts");
+        assert_eq!(areas[0].last30.cost, 3.0, "the days the `last30` window counts");
         assert_eq!(areas[0].month_to_date, Some(MonthSpend { month: "2026-10".into(), cost: 3.0 }));
         assert_eq!(clients::rollup(&areas, &[acme(None)], today)[0].month_to_date, 3.0);
     }
