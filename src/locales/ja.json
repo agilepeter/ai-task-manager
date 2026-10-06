@@ -758,7 +758,7 @@
   "finding.agent-runaway.title.other": "{count} 個の実行中エージェントが暴走している可能性があります",
   "finding.agent-runaway.detail": "実行中で、設定した数値を超えています：{names}。ドル表記は 1 時間あたりのペースで、直近 10 分のコストから算出します。2:10 のような表記は、エージェントが開いたままになっている時間（時間:分）で、まだ作業中の間だけ数えられます。このアプリは通知するだけで、エージェントを停止することはありません。",
   "finding.limit-time.title.other": "直近 30 日間で、{count} 個の上限が 2 時間以上、枯渇したままでした",
-  "finding.limit-time.detail": "直近 30 日間で最も長く枯渇していた上限は、合計で {total}（{times}）枯渇しており、そのうち最長の 1 回は {longest} でした。どの上限か、いつ発生したかは、各プロバイダーのページに表示されます。",
+  "finding.limit-time.detail": "直近 30 日間で最も長く枯渇していた上限は、合計で {total}（{times}）枯渇しており、そのうち最長の 1 回は {longest}でした。どの上限か、いつ発生したかは、各プロバイダーのページに表示されます。",
   "check.tools.info.title.other": "{count} 個の AI ツールが見つかりました",
   "check.tools.info.detail": "このアプリが認識している AI ツールは見つかりませんでした。",
   "check.mcp.none.title": "MCP サーバーが設定されていません",
