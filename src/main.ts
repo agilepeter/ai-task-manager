@@ -4903,7 +4903,7 @@ async function resetAllSettings(): Promise<void> {
   // The two live-rule dropdowns are settings too (Notifications), but they are kept in
   // agent_watch.json, so the patch above never reached them: clear the rule, keep the budgets.
   // Best effort, like the steps above: a refusal leaves the dropdowns showing what is still saved.
-  await clearLiveRule();
+  await clearLiveRule().catch(() => {});
   spendTab = "today";
   applyLocale();
   syncSettingsControls();

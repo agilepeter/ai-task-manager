@@ -46,6 +46,7 @@ test("the add row and the demo refuse what the engine refuses", async () => {
   assert.match(mock, /x <= MAX_WATCH_USD/, "the demo must refuse by the named dollar limit");
   assert.match(mock, /m > MAX_WATCH_MINUTES/, "the demo must refuse by the named minutes limit");
   assert.match(agents, /amount > MAX_BUDGET_USD/, "the add row must refuse by the named dollar limit");
+  assert.match(agents, /budgets\.length >= MAX_AGENT_BUDGETS/, "the add row must close by the named budget count");
 });
 
 test("the demo works the live hint out with the engine's idle rule and pace factor", async () => {

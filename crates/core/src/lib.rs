@@ -31,9 +31,11 @@ pub mod spend;
 pub mod trust;
 pub mod usage;
 
-/// This crate's version, the one the HTTP user-agent and the seat report say. It is the app's own
-/// number only while `crates/core/Cargo.toml` is kept equal to `src-tauri/Cargo.toml`, which a test
-/// in the app crate holds.
+/// This crate's version: what the seat report says (`seat.rs` reads it here) and what the HTTP
+/// user-agent says (`providers` builds `ai-task-manager/<version>` from the same manifest number
+/// at compile time, since `concat!` takes no `const`). It is the app's own number only while
+/// `crates/core/Cargo.toml` is kept equal to `src-tauri/Cargo.toml`, which a test in the app crate
+/// holds.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The provider family of a card id: "claude@ab12cd34" → "claude".

@@ -471,8 +471,15 @@ test("the fallback walker reads markup the way a browser does, and refuses what 
 
 test("the text written in index.html beside every data-i18n key is that key's English string", () => {
   const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
-  const texts = findStaticFallbacks(html).filter((f) => f.kind === "text");
+  const found = findStaticFallbacks(html);
+  const texts = found.filter((f) => f.kind === "text");
   assert.ok(texts.length > 100, `the walker found only ${texts.length} data-i18n elements: it no longer reads this file`);
+  // Every data-i18n element in the file is accounted for, with or without children: an element
+  // whose end tag is missing (legal HTML) would otherwise be dropped from the stack unseen when
+  // its parent closes, and its fallback never compared.
+  const elements = found.filter((f) => f.kind === "text" || f.kind === "text-with-children").length;
+  const written = (html.match(/\sdata-i18n="/g) ?? []).length;
+  assert.equal(elements, written, `index.html has ${written} data-i18n elements but the walker closed ${elements}: an element is missing its end tag`);
   const drift = staticFallbackDrift(html, dicts.en).filter((d) => d.kind === "text");
   assert.deepEqual(drift.map(describeDrift), [], `index.html text that no longer matches en.json (change the markup, not the locale file):\n${drift.map(describeDrift).join("\n")}`);
 });

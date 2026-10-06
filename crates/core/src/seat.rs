@@ -226,7 +226,7 @@ pub fn build_with(
         seat_id: seat_id.to_string(),
         label: label.chars().take(80).collect(),
         generated_at: now,
-        agent_version: env!("CARGO_PKG_VERSION").to_string(),
+        agent_version: crate::VERSION.to_string(),
         os: std::env::consts::OS.to_string(),
         tools: inv.tools.iter().map(|t| t.name.clone()).collect(),
         servers: inv

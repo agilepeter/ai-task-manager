@@ -73,6 +73,11 @@ and a fix for client budgets on the 31st.
   be told apart from another's now shows no figure, and so does the one it
   would have been counted under, rather than a number that may be someone
   else's.
+- **The version in a seat report and in the HTTP user-agent was stuck at
+  0.1.0.** Both took it from a crate whose number was never bumped, so every
+  release since 0.1.1 said 0.1.0. They now say the app's own version, and a
+  test fails a release that bumps one number and not the other. A seat on an
+  older build keeps reporting 0.1.0 until it updates.
 
 ## 0.1.5 — 2026-09-28
 
