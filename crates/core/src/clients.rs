@@ -453,11 +453,10 @@ mod tests {
 
     #[test]
     fn an_area_without_the_field_takes_the_old_cut() {
-        // An area with no `month_to_date` key at all, as one built by hand or read from the
-        // demo's committed fixture (made before the field existed) has: it still loads, and its
-        // month is cut out of the daily series (September 1-3 here), never read as zero. A real
-        // frontend never hands one back: the UI ships inside the binary and keeps its areas in
-        // memory only, so the arm is for hand-built areas and that fixture.
+        // An area with no `month_to_date` key at all, as one built by hand has: it still loads,
+        // and its month is cut out of the daily series (September 1-3 here), never read as zero.
+        // A real frontend never hands one back: the UI ships inside the binary and keeps its
+        // areas in memory only, so the arm is for hand-built areas.
         let window = serde_json::json!({ "cost": 0.0, "tokens": 0.0, "cache_read": 0.0, "models": [] });
         let mut daily = vec![0.0; TREND_DAYS - 4];
         daily.extend([40.0, 10.0, 20.0, 5.0]); // Aug 31, then Sep 1, 2 and 3 (today)

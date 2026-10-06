@@ -4,9 +4,10 @@
 // Two rules. The data is fictional: an invented freelancer, invented clients.
 // And it is not hand-typed: `demo-fixture.json` is what the REAL engine
 // computed from a fictional machine (scripts/make-demo-fixture.py), so the
-// inventory, spend, sessions and audit agree with each other the way real
-// ones do. Only live things the engine cannot fake (limits that move, charts
-// that end "now") are generated here, relative to the viewer's clock.
+// inventory, spend, sessions, audit and agent budgets agree with each other
+// the way real ones do. Only live things the engine cannot fake (limits that
+// move, charts that end "now") are generated here, relative to the viewer's
+// clock.
 // Nothing in the demo leaves the page: exports and config edits are pretend.
 
 import fixture from "../demo-fixture.json";
@@ -37,15 +38,17 @@ const config: Args = {
   lastSeenVersion: __APP_VERSION__,
 };
 
-function metric(label: string, used: number, resetInHours: number, periodHours: number, detail: string | null = null) {
-  return { label, kind: "progress", used_percent: used, detail, value: null, resets_at: now() + resetInHours * HOUR, period_ms: periodHours * HOUR };
-}
-
-function snapshots() {
+/** The cards as the clock reads `at`. A caller that also needs the clock (the readings below)
+ *  reads it once and hands it in: reading it again here, a few milliseconds later, would hang
+ *  every reset time a few milliseconds off the instants the caller works from. */
+function snapshots(at: number = now()) {
+  const metric = (label: string, used: number, resetInHours: number, periodHours: number, detail: string | null = null) => ({
+    label, kind: "progress", used_percent: used, detail, value: null, resets_at: at + resetInHours * HOUR, period_ms: periodHours * HOUR,
+  });
   // Limits drift a little with the clock so the demo does not look frozen.
-  const wobble = Math.round((Math.sin(now() / (20 * 60_000)) + 1) * 3);
+  const wobble = Math.round((Math.sin(at / (20 * 60_000)) + 1) * 3);
   const card = (id: string, name: string, plan: string, metrics: unknown[]) => ({
-    id, name, plan, status: "ok", error: null, metrics, stale: false, warning: null, fetched_at: now(),
+    id, name, plan, status: "ok", error: null, metrics, stale: false, warning: null, fetched_at: at,
   });
   return [
     card("claude", "Claude", "max", [metric("Session", 38 + wobble, 2.4, 5), metric("Weekly", 61, 52, 168), metric("Opus weekly", 78, 52, 168)]),
@@ -81,32 +84,78 @@ function spend() {
   return all;
 }
 
-function history(provider: string, hours: number) {
-  const snap = snapshots().find((s) => s.id === provider);
+/** One reading the demo's history store holds: the value, and the reset time it carried. */
+type Reading = { at: number; used: number; resetsAt: number };
+
+/** Past periods in which the fictional Claude account used a limit all the way up and then
+ *  waited for the reset: per limit, the periods back from the live one (1 is the one that has
+ *  just ended) and the minutes each sat at 100 percent before its reset. Every other past
+ *  period peaks short of it. Nothing else here is typed: the readings are the sawtooth below,
+ *  and the time at the limit is worked out from them. */
+const WALLS: Record<string, Record<number, number>> = {
+  "claude/Weekly": { 1: 200, 3: 110, 4: 40 },
+  "claude/Session": { 21: 35, 96: 45 },
+};
+
+/** One reading every half hour, each a little before its half hour. The time-at-the-limit rule
+ *  pairs readings only when they are 90 minutes apart or less, so a longer step would count
+ *  no time at all; and 30 days of this is 1,440 readings, under the 1,500 the app's own chart
+ *  is cut to. No reading falls on a reset, as a real one almost never does (the rule treats a
+ *  reset on the later reading's own instant as not between the two): every reset here is a
+ *  whole number of six minutes from a half hour, and the offset is under six and never zero. */
+const READING_STEP = 30 * 60_000;
+const READING_OFFSET = 5 * 60_000;
+/** The history store keeps 90 days, and the app's own command reads no more than that. */
+const MAX_HISTORY_HOURS = 24 * 90;
+
+/** One card's progress limits as the demo's history store holds them over the last `hours`,
+ *  oldest reading first. The chart (`history`) and the time at the limit (`limitTime`) both
+ *  read this, so the one cannot say what the other does not show. A sawtooth that lands exactly
+ *  on each limit's live value, built back from one reading of the clock: the same instants and
+ *  values whatever the range, so a shorter range is the newest part of a longer one. */
+function readings(provider: string, hours: number): { metric: string; points: Reading[] }[] {
+  const end = now();
+  const snap = snapshots(end).find((s) => s.id === provider);
   if (!snap) return [];
-  const rand = rng(provider.length * 7919);
+  const start = end - Math.min(Number(hours) || 0, MAX_HISTORY_HOURS) * HOUR;
+  const settle = (x: number) => Math.round(Math.max(0, Math.min(100, x)) * 10) / 10;
   return (snap.metrics as any[])
     .filter((m) => m.kind === "progress")
-    .map((m) => {
+    .map((m, slot) => {
       const period = m.period_ms as number;
-      const end = now();
-      const start = end - hours * HOUR;
-      const step = Math.max((hours * HOUR) / 220, 10 * 60_000);
-      // Work back from the live value: a sawtooth that lands exactly on it.
-      const points: { at: number; used: number }[] = [];
-      const resetAt = m.resets_at as number;
-      for (let at = end; at >= start; at -= step) {
-        const intoPeriod = ((at - (resetAt - period)) % period + period) % period;
-        const livePeriodAge = ((end - (resetAt - period)) % period + period) % period;
-        const samePeriod = end - at <= livePeriodAge;
-        const peak = samePeriod ? m.used_percent : 55 + rand() * 40;
-        const span = samePeriod ? livePeriodAge : period;
-        const used = Math.max(0, Math.min(100, (peak * intoPeriod) / Math.max(span, 1) + (rand() - 0.5) * 2.4));
-        points.unshift({ at, used: Math.round(used * 10) / 10 });
+      const livePeriodStart = (m.resets_at as number) - period;
+      const liveAge = end - livePeriodStart;
+      const walls = WALLS[`${provider}/${m.label}`] ?? {};
+      const rand = rng(provider.length * 7919 + slot * 104729);
+      const points: Reading[] = [];
+      for (let j = 0; ; j++) {
+        // The same three draws for every reading, so what one reading says never depends on how far back the range goes.
+        const offset = 1 + Math.floor(rand() * (READING_OFFSET - 1));
+        const peak = 55 + rand() * 40;
+        const noise = (rand() - 0.5) * 2.4;
+        const at = j === 0 ? end : end - j * READING_STEP - offset;
+        if (!(at >= start)) break;
+        const intoPeriod = (((at - livePeriodStart) % period) + period) % period;
+        const periodStart = at - intoPeriod;
+        const back = Math.round((livePeriodStart - periodStart) / period);
+        const ramp = (top: number, span: number) => (top * intoPeriod) / Math.max(span, 1) + noise;
+        const held = back > 0 ? walls[back] : undefined;
+        const wallAt = held === undefined ? Infinity : period - held * 60_000;
+        let used: number;
+        if (j === 0) used = m.used_percent;
+        else if (intoPeriod >= wallAt) used = 100;
+        else if (held !== undefined) used = Math.min(99.9, settle(ramp(100, wallAt)));
+        else if (back === 0) used = settle(ramp(m.used_percent, liveAge));
+        else used = settle(ramp(peak, period));
+        points.push({ at, used, resetsAt: periodStart + period });
       }
-      if (points.length) points[points.length - 1].used = m.used_percent;
-      return { metric: m.label, points };
+      return { metric: m.label as string, points: points.reverse() };
     });
+}
+
+/** Limit readings for one card over the last `hours`, for the chart. */
+function history(provider: string, hours: number) {
+  return readings(provider, hours).map(({ metric, points }) => ({ metric, points: points.map(({ at, used }) => ({ at, used })) }));
 }
 
 function burnProfile(provider: string) {
@@ -128,13 +177,73 @@ function burnProfile(provider: string) {
     }));
 }
 
-/** Time spent at 100 percent, for one card only: one limit over the finding's threshold, one under. */
-function limitTime(provider: string) {
-  if (provider !== "claude") return [];
-  return [
-    { provider, metric: "Weekly", times: 3, totalMs: 5 * HOUR + 40 * 60_000, longestMs: 3 * HOUR + 10 * 60_000 },
-    { provider, metric: "Session", times: 2, totalMs: 35 * 60_000, longestMs: 20 * 60_000 },
-  ];
+/** One limit's time at 100 percent, as `get_limit_time` answers it. */
+type LimitTimeRow = { provider: string; metric: string; times: number; totalMs: number; longestMs: number };
+
+/** A reading at or above this is a limit that has been reached (`AT_LIMIT` in limit_time.rs). */
+const AT_LIMIT = 100;
+/** Two readings further apart than this say nothing about the time between them (`MAX_GAP_MS`). */
+const MAX_PAIR_GAP_MS = 90 * 60_000;
+
+/** The stretches one limit spent at 100 percent, from its readings, oldest first: the rule of
+ *  `from_points` in crates/core/src/limit_time.rs, which scripts/demo-limit-time.test.mjs holds
+ *  this to case for case. Walking consecutive pairs A then B, a pair counts only when A is at the
+ *  limit and the two are within 90 minutes: up to A's own reset when that falls strictly between
+ *  them (the limit held until then, and the stretch ends), else the whole gap when B is at the
+ *  limit too, else nothing (B is lower with no reset between, so nobody knows when it dropped).
+ *  A longer gap, or readings out of order, count nothing and end the stretch. `null` when the
+ *  limit was never reached. */
+export function timeAtLimit(
+  provider: string,
+  metric: string,
+  points: { at: number; used: number; resetsAt: number | null }[],
+): LimitTimeRow | null {
+  let times = 0, total = 0, longest = 0, run = 0, open = false;
+  for (let i = 0; i < points.length; i++) {
+    const { at, used, resetsAt } = points[i];
+    if (!(used >= AT_LIMIT)) {
+      longest = Math.max(longest, run);
+      open = false;
+      continue;
+    }
+    if (!open) {
+      times++;
+      open = true;
+      run = 0;
+    }
+    const next = points[i + 1];
+    if (!next) break;
+    const gap = next.at - at;
+    let continues = false;
+    if (gap >= 0 && gap <= MAX_PAIR_GAP_MS) {
+      let counted: number | null = null;
+      if (resetsAt !== null && resetsAt > at && resetsAt < next.at) counted = resetsAt - at;
+      else if (next.used >= AT_LIMIT) {
+        continues = true;
+        counted = gap;
+      }
+      if (counted !== null) {
+        total += counted;
+        run += counted;
+      }
+    }
+    if (!continues) {
+      longest = Math.max(longest, run);
+      open = false;
+    }
+  }
+  longest = Math.max(longest, run);
+  return times > 0 ? { provider, metric, times, totalMs: total, longestMs: longest } : null;
+}
+
+/** Time spent at 100 percent over the last 30 days, one row per limit that reached it, most time
+ *  first. Worked out from the readings the chart draws (`readings`), the way the app works it out
+ *  from its history store, so the Detail view's line and its chart cannot disagree. */
+function limitTime(provider: string): LimitTimeRow[] {
+  return readings(provider, 24 * 30)
+    .map(({ metric, points }) => timeAtLimit(provider, metric, points))
+    .filter((row): row is LimitTimeRow => row !== null)
+    .sort((a, b) => b.totalMs - a.totalMs || b.longestMs - a.longestMs || (a.metric < b.metric ? -1 : a.metric > b.metric ? 1 : 0));
 }
 
 function forecast(metrics: any[]) {
@@ -332,49 +441,48 @@ const TRUST: Record<string, [string, string, number]> = {
 // this one refuses (a name that is not offered, a repeated name, a bad figure)
 // with the same translated keys, so the Budgets section and the two Settings
 // dropdowns behave in the browser exactly as they do in the app. Nothing here
-// is written anywhere: a reload starts again from the two budgets below.
-const BUILTIN_AGENT_NAMES = ["general-purpose", "Explore", "Plan", "claude-code-guide", "statusline-setup", "workflow-subagent"];
+// is written anywhere: a reload starts again from what the fixture holds.
 const MAX_WATCH_BUDGETS = 50;
 const MAX_WATCH_USD = 1_000_000;
 const MAX_WATCH_MINUTES = 1_000_000_000;
-// One over its budget, one under, both on names the fixture's own agent spend
-// carries: general-purpose has spent about $14.74 against $10, deploy-checker
-// about $1.69 against $5. The live rule starts unset.
-let agentWatch: { budgets: { agent: string; monthlyBudget: number }[]; live: { hourlyPaceUsd: number | null; maxMinutes: number | null } } = {
-  budgets: [
-    { agent: "general-purpose", monthlyBudget: 10 },
-    { agent: "deploy-checker", monthlyBudget: 5 },
-  ],
-  live: { hourlyPaceUsd: null, maxMinutes: null },
-};
 
+type AgentWatch = { budgets: { agent: string; monthlyBudget: number }[]; live: { hourlyPaceUsd: number | null; maxMinutes: number | null } };
+
+/** What the real engine answered for the fictional machine's own agent_watch.json
+ *  (scripts/make-demo-fixture.py, `live_agent_watch`): the saved budgets and live rule, each
+ *  budget's figure for the calendar month, and the names a budget may take. Read when first
+ *  asked for, not when this module loads. */
+const fixtureWatch = () =>
+  (fixture as any).agentWatch as { watch: AgentWatch; budgets: { agent: string; monthToDate: number }[]; known: string[] };
+
+/** What is saved: the fixture's watch until the visitor saves one of their own. */
+let agentWatch: AgentWatch | null = null;
+const savedWatch = (): AgentWatch => (agentWatch ??= structuredClone(fixtureWatch().watch));
+
+/** The engine's own list of the names a budget may take, plus any name just saved: the real
+ *  command rebuilds the list from what was saved, and every name this demo can save is one the
+ *  engine already offered, so nothing is typed here and the two lists agree. */
 function agentWatchKnown(saved: { agent: string }[]): string[] {
-  const spendRows: { name: string }[] = (fixture as any).agentSpend ?? [];
-  const defined: { name: string }[] = (fixture as any).inventory.agents ?? [];
-  const names = [...BUILTIN_AGENT_NAMES, ...defined.map((a) => a.name), ...saved.map((b) => b.agent), ...spendRows.map((r) => r.name)];
-  return [...new Set(names.filter((n) => n))].sort();
+  return [...new Set([...fixtureWatch().known, ...saved.map((b) => b.agent)])].sort();
 }
 
 function agentWatchView() {
-  // The fixture's agent spend covers 30 days and is the only per-agent series
-  // it has, so a budget's "this month" figure is that agent's figure there:
-  // the demo does not invent a second series for the calendar month.
-  const spendRows: { name: string; cost: number }[] = (fixture as any).agentSpend ?? [];
+  const saved = savedWatch();
+  // A budget's figure is the engine's for the fixture's own month; one the visitor adds in the
+  // demo has none (the fixture holds no second series to work one from), so it reads $0, as an
+  // agent with no spend this month does.
+  const monthToDate = new Map(fixtureWatch().budgets.map((b) => [b.agent, b.monthToDate]));
   // The same sum the real app makes: the fastest priced, non-idle running pace,
   // a dollar figure an hour (the last ten minutes carried over an hour).
   const paces = AGENTS.map((a) => a.pace as { priced: boolean; idleSecs: number; tokens10m: number; cost10m: number } | null)
     .filter((p) => p && p.priced && !(p.idleSecs >= 60 && p.tokens10m === 0))
     .map((p) => p!.cost10m * 6);
   return structuredClone({
-    watch: agentWatch,
-    budgets: agentWatch.budgets.map((b) => ({
-      agent: b.agent,
-      monthToDate: spendRows.find((r) => r.name === b.agent)?.cost ?? 0,
-      monthlyBudget: b.monthlyBudget,
-    })),
+    watch: saved,
+    budgets: saved.budgets.map((b) => ({ agent: b.agent, monthToDate: monthToDate.get(b.agent) ?? 0, monthlyBudget: b.monthlyBudget })),
     runaways: [],
     liveHint: paces.length ? Math.max(...paces) : null,
-    known: agentWatchKnown(agentWatch.budgets),
+    known: agentWatchKnown(saved.budgets),
   });
 }
 
@@ -408,7 +516,7 @@ function saveAgentWatch(v: any) {
     }
   }
   if (budgets.length > MAX_WATCH_BUDGETS) throw t("error.agentWatch.tooMany", { max: MAX_WATCH_BUDGETS });
-  const known = agentWatchKnown(agentWatch.budgets);
+  const known = agentWatchKnown(savedWatch().budgets);
   const seen = new Set<string>();
   for (const b of budgets) {
     if (!known.includes(b.agent)) throw t("error.agentWatch.pick");

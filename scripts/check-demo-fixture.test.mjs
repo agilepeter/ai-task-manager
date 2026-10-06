@@ -166,3 +166,27 @@ test("every audit.sections[] entry carries a section.* nameKey that exists in en
   }
   assert.deepEqual(errors, [], `\n${errors.join("\n")}`);
 });
+
+test("the agent watch the demo serves is complete, and shows one budget over and one under", () => {
+  const watch = fixture?.agentWatch;
+  assert.ok(watch && typeof watch === "object", "fixture.agentWatch is missing: the demo's Budgets section would have nothing to read");
+  const saved = watch.watch?.budgets;
+  assert.ok(Array.isArray(saved) && saved.length > 0, "the fixture's watch holds no budgets");
+  // The live rule is off until the user sets a figure, in the demo as in the app.
+  assert.deepEqual(watch.watch.live, { hourlyPaceUsd: null, maxMinutes: null });
+  // Every saved budget has its figure for the month, in the order it was saved, and its name is
+  // one the engine offers a budget for and one the machine's own subagent logs carry.
+  assert.deepEqual(watch.budgets.map((b) => b.agent), saved.map((b) => b.agent), "a month figure for each budget, in the same order");
+  const spendNames = new Set((fixture.agentSpend ?? []).map((r) => r.name));
+  saved.forEach((budget, i) => {
+    const row = watch.budgets[i];
+    assert.equal(row.monthlyBudget, budget.monthlyBudget, `${budget.agent}: the figure beside the month is the saved one`);
+    assert.ok(Number.isFinite(row.monthToDate) && row.monthToDate >= 0, `${budget.agent}: no month figure`);
+    assert.ok(watch.known.includes(budget.agent), `${budget.agent} is not among the names a budget may take`);
+    assert.ok(spendNames.has(budget.agent), `${budget.agent} has no subagent spend in the fixture, so its month figure says nothing`);
+  });
+  assert.deepEqual(watch.known, [...new Set(watch.known)].sort(), "the offered names are sorted and have no repeats");
+  // The demo is there to show both states of the section.
+  assert.ok(watch.budgets.some((b) => b.monthToDate >= b.monthlyBudget), "no budget is over its figure");
+  assert.ok(watch.budgets.some((b) => b.monthToDate < b.monthlyBudget), "no budget is under its figure");
+});

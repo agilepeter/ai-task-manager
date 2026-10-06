@@ -6,6 +6,83 @@ numbering at 0.1.0, so the numbers here do not continue upstream's. Pane's own
 release history is kept verbatim in
 [docs/upstream-changelog.md](docs/upstream-changelog.md).
 
+## 0.1.6 — 2026-10-06
+
+Budgets for agents, time spent at the limit, and a fix for client budgets on
+the 31st.
+
+### Added
+
+- **A budget for each agent, and an alert for a runaway one.** The Agents
+  view has a new Budgets section: a monthly dollar budget per agent, picked
+  from the agents the app knows, Claude Code's built-in ones included, and
+  never typed. The month is the calendar month. Each row shows what the agent
+  has spent so far this month, and you get one notification per agent per
+  month the first time it passes its budget. Two dropdowns in Settings >
+  Notifications watch the sessions running now: a spend per hour (the cost of
+  a session's last ten minutes, carried over an hour) and how long a session
+  can stay open and still working. Either one gets you one notification per
+  running agent per day. Under the spend setting the app shows what your own
+  fastest session running now is spending, when there is one, so there is
+  something to go by. Nothing is set by default, and nothing is computed or
+  shown until you set it. On a flat-rate plan the figures are API-equivalent
+  value, not a charge, as everywhere else here. The app only tells you: it
+  never stops, pauses or edits an agent. A budget that has been passed and a
+  session past your figure are also listed under Worth a look in the Agents
+  view, and as unscored rows in the Audit, which open the Agents view. The
+  figures are kept in `agent_watch.json` on your machine and never reach the
+  seat report or the local API ([docs/privacy.md](docs/privacy.md) says
+  exactly what).
+- **Time spent at the limit.** A provider's page says how often each limit
+  reached 100 percent in the last 30 days and for how long in all, one line
+  per limit, most time first, for example "Weekly: fully used 3 times in the
+  last 30 days, 5h 8m in all". A limit that never got there has no line. It is
+  worked out from the readings the app already keeps. Time counts only
+  between two readings taken within 90 minutes of each other, up to the reset
+  when one falls between them, so a stretch when the app was not running is
+  left out rather than guessed and the figure is a floor. When one limit adds
+  up to two hours or more, an unscored row in the Audit says so and opens the
+  Usage tab.
+
+### Changed
+
+- **The new wording was checked by back-translation in all nine languages.**
+  For each language other than English, an independent reader translated the
+  strings this release adds back into English without seeing the original,
+  and what they found was corrected: 128 strings across the nine languages.
+  Nine of those are English, reworded because several readers had misread the
+  same one. A limit that ran out reads "fully used" and not "at 100%", which
+  the app also says of a limit that is fully available. The spend figure is
+  labelled as spend per hour, so it reads as money. A figure you set is no
+  longer called a limit, the word for a provider's quota.
+- **The TLS library is updated to rustls 0.23.45, which clears
+  RUSTSEC-2026-0285.** A TLS 1.3 peer could send handshake messages at the
+  wrong encryption level without being refused. The handshake was still
+  authenticated, so this is closer to a correction than to an exposure, but
+  rustls is what the update check and the agent's push to a collector speak
+  through.
+- **Dependencies are audited every week.** A new workflow runs `cargo audit`
+  and `npm audit` on the dependencies that ship, whenever a lockfile changes
+  and every Monday, because an advisory is published against code that did
+  not change. It fails on a known vulnerability and only warns on a crate
+  that is unmaintained, unsound or yanked.
+
+### Fixed
+
+- **A client's month to date was short on the 31st.** It was cut out of a
+  30-day series, so on the 31st of a month with 31 days the 1st fell one day
+  outside it: the figure was short by whatever the 1st had spent, and a
+  budget the month had really crossed could go unreported, with the month
+  ending the next day. That is seven months a year, one day each. The scan now
+  adds up the calendar month itself, so the figure is whole on every day.
+- **A server's 30-day call figure could be another server's.** Claude Code
+  logs a call to a server whose name ends in punctuation, such as `foo!`,
+  under the shorter name `foo`, so a configured server called `foo` was shown
+  the other's calls and result sizes as its own. A server whose calls cannot
+  be told apart from another's now shows no figure, and so does the one it
+  would have been counted under, rather than a number that may be someone
+  else's.
+
 ## 0.1.5 — 2026-09-28
 
 A small release for people who use the keyboard.

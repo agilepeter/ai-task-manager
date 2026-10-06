@@ -243,11 +243,11 @@ pub struct AreaSpend {
     /// only when that month is `today`'s, and counts a figure for any other
     /// month as zero: the usual one is an earlier month's, from a scan that
     /// ended before this month began and so holds none of its spend. `Some`
-    /// for every area a scan makes. `None` only for an area built by hand (a
-    /// test) or read from the demo's committed fixture, which predates the
-    /// field: the UI ships inside the binary and keeps its areas in memory
-    /// only, so a real frontend never hands one back without it. The rollup
-    /// answers `None` by cutting the month out of `daily_cost`, never as zero.
+    /// for every area a scan makes, which includes every area in the demo's
+    /// committed fixture. `None` only for an area built by hand (a test): the
+    /// UI ships inside the binary and keeps its areas in memory only, so a
+    /// real frontend never hands one back without it. The rollup answers
+    /// `None` by cutting the month out of `daily_cost`, never as zero.
     ///
     /// An area with no spend in the last `TREND_DAYS` days is not listed at
     /// all, so on the 31st of a 31-day month an area used only on the 1st is
@@ -5380,6 +5380,25 @@ mod tests {
         let _ = collect(None);
         println!("{FIXTURE_BEGIN}");
         println!("{}", serde_json::to_string(&agent_spend(30)).unwrap());
+        println!("{FIXTURE_END}");
+    }
+
+    /// Prints what the Agents view's budgets are made of, built the way
+    /// `get_agent_watch` builds them (src-tauri/src/lib.rs): the watch this
+    /// machine's own `agent_watch.json` holds, each of its budgets against the
+    /// calendar month so far, and the names a budget may take. The running
+    /// agents and the live hint are left out: they come from the process list.
+    /// `cargo test -p aitm-core live_agent_watch -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_agent_watch() {
+        let _ = collect(None);
+        let saved = crate::agent_watch::load_from(&crate::agent_watch::path());
+        let defined: Vec<String> = crate::inventory::scan().agents.into_iter().map(|a| a.name).collect();
+        let known = crate::agent_watch::known_names(&defined, &agent_spend(31), &saved);
+        let budgets = crate::agent_watch::budget_rows(&agent_spend_month(), &saved);
+        println!("{FIXTURE_BEGIN}");
+        println!("{}", json!({ "watch": saved, "budgets": budgets, "known": known }));
         println!("{FIXTURE_END}");
     }
 

@@ -110,6 +110,24 @@ directory with upstream Pane would let the two apps overwrite each other.
   Changes section says so. It is read only to show what changed in
   Inventory's Changes section, is never sent anywhere, and is never part of
   the seat report.
+- **Agent budgets and the runaway rule, new in 0.1.6.** If you set a monthly
+  budget for an agent, or a figure for the runaway rule (Settings >
+  Notifications), the app writes them to `agent_watch.json` in the app's own
+  config folder: the agent names you chose, each one's monthly dollar budget,
+  and the rule's two figures (a dollar pace per hour, and minutes open).
+  Never a path, a prompt or a credential. A name you chose may match a client,
+  so the file stays on your machine: it is never sent anywhere, and a custom
+  agent's name reaches neither the seat report nor the `/v1/agents` feed (a
+  test, `a_custom_agent_name_never_reaches_the_seat_report_or_the_feed`,
+  plants one and checks both). Nothing is computed, shown or notified for a
+  figure you have not set.
+- **Alerts already given.** `alert_marks.json`, also in the app's own config
+  folder, remembers which alerts have fired so that a restart does not repeat
+  one: for a client budget the client's name and the month, for the weekly
+  digest a week, for a long-session reminder a session's id and the week, and
+  from 0.1.6 for an agent budget the agent's name and the month, and for a
+  runaway alert the tool, the work area's name, the process id and the day. It
+  stays on your machine and is never part of the seat report.
 - **Folder and client names stay local.** Work areas are your directory names
   and clients are your customers' names. Neither is published anywhere by
   default.
@@ -119,8 +137,10 @@ directory with upstream Pane would let the two apps overwrite each other.
   never part of the seat report, and kept out of the `/v1/agents` feed below
   even while that feed is on.
 - **The Agents view, new in 0.1.4, reads nothing new.** It shows what
-  Inventory and the Audit already held, in one place. It writes no file and
-  makes no network call, and nothing in it starts, stops or edits an agent.
+  Inventory and the Audit already held, in one place. It makes no network
+  call, and nothing in it starts, stops or edits an agent. The one thing it
+  writes, since 0.1.6, is the budgets you set in its Budgets section, to
+  `agent_watch.json` (above).
 
 ## What the app writes outside its own folder
 

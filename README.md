@@ -40,7 +40,7 @@ account and no admin rights. Everything below is written for both paths.
 
 | | State today |
 |---|---|
-| Downloadable release | [v0.1.5](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.5), 2026-09-28 (earlier: v0.1.4 on 2026-09-28, v0.1.3 on 2026-09-28, v0.1.2 on 2026-09-26, v0.1.1 on 2026-09-25, v0.1.0 on 2026-09-24), built and published by `release.yml` from the tagged commit. |
+| Downloadable release | [v0.1.6](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.6), 2026-10-06 (earlier: v0.1.5 on 2026-09-28, v0.1.4 on 2026-09-28, v0.1.3 on 2026-09-28, v0.1.2 on 2026-09-26, v0.1.1 on 2026-09-25, v0.1.0 on 2026-09-24), built and published by `release.yml` from the tagged commit. |
 | macOS signing | None yet. Open it once, then allow it under System Settings > Privacy & Security > Open Anyway (macOS 14 or earlier: right-click the app > Open). Or `xattr -dr com.apple.quarantine "/Applications/AI Task Manager.app"`. |
 | Windows signing | None yet. SmartScreen warns: More info, then Run anyway. |
 | Auto-update | **Opt-in, off by default.** See [Updates](#updates). |
@@ -169,7 +169,7 @@ files and `latest.json`, to a **draft** release. A final job then checks the dra
 signatures and dated changelog section, and publishes it only if every check
 passes; a failed check leaves the draft untouched. The first release was
 [v0.1.0](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.0); the latest is
-[v0.1.5](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.5), dated 2026-09-28.
+[v0.1.6](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.6), dated 2026-10-06.
 [v0.1.2](https://github.com/agilepeter/ai-task-manager/releases/tag/v0.1.2) was the first one the
 workflow published by itself. The
 artifacts are not signed, so building from source above remains the better
@@ -270,7 +270,8 @@ Three tabs.
 **Usage** (the default) is the limits, pace bars and spend. Click any card's
 name for a detail page: limits over time from a local 90-day history, spend
 grouped by model, project or day, a 7x24 heatmap of when a limit actually gets
-used, and a forecast that says when you run out at your recent rate. Click a
+used, a forecast that says when you run out at your recent rate, and how long
+each limit sat at 100 percent in the last 30 days. Click a
 work area or a day to see the sessions behind it, or group Spend by Session for
 every session of the last 30 days with its age and size. Each row has a Reveal
 button that shows the log file so you can archive it yourself; the app never
@@ -303,7 +304,11 @@ numbers alongside Claude Code. An agent nobody has run shows up as an
 opportunity, and each row names the client its spend mostly went to, the
 same matching the Clients tab uses, only when one client is a true majority.
 Agents that run somewhere else, such as a scheduled job on a build server,
-leave nothing on this machine for the app to read and are not shown.
+leave nothing on this machine for the app to read and are not shown. You can
+give any agent it knows, built-in ones included, a budget for the calendar
+month, and a runaway rule in Settings > Notifications watches the sessions
+running now for a dollar pace or a time open; both are off until you set a
+figure, and the app only tells you, never stopping or editing an agent.
 
 For Claude Code, a server's row also
 carries its own thirty-day context cost: how many tool calls it answered and
@@ -328,7 +333,7 @@ you. If you came looking for an MCP manager, this tab is it: every server, what
 it runs, whether it is pinned, and which copies are live.
 
 Also: work areas and client attribution with CSV export, budget alerts per
-client, an optional weekly digest, a read-only [local HTTP
+client and per agent, an optional weekly digest, a read-only [local HTTP
 API](docs/local-http-api.md) on `127.0.0.1:6736`, light and dark themes, a
 global shortcut, and a wide mode that grows the same window rather than
 opening a second one.
@@ -414,6 +419,10 @@ including every network call the app can make and the greps that prove it, is
   that has the plain shape of one. It is read only to show what
   changed in Inventory, and it is never sent anywhere or part of the seat
   report.
+- **Agent budgets and the runaway rule** live in `agent_watch.json` in the
+  app's own config folder: the agent names you chose and your figures, never a
+  path, a prompt or a credential. It is never sent anywhere, and a custom
+  agent's name reaches neither the seat report nor the local API's feeds.
 - **Prompts and conversation titles are never read.** Claude Code stores titles
   derived from your prompts in the same logs the spend scanner walks. It skips
   them on purpose.

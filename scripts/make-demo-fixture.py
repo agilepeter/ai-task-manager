@@ -99,6 +99,19 @@ write(home / "Library/Application Support/AITaskManager/clients.json", json.dump
         {"client": "Northwind", "patterns": ["northwind-api"]},
     ],
 }))
+# The user's own agent budgets and live rule, read by agent_watch::load_from at
+# agent_watch::path(). One budget over its figure and one under, both on names
+# this machine's subagent logs carry (below): general-purpose spends more than
+# $10 this month and deploy-checker less than $5. The live rule is unset, as it
+# is for every user until they set it. The Agents view's month figures come
+# from the real engine against this file (live_agent_watch), never typed.
+write(home / "Library/Application Support/AITaskManager/agent_watch.json", json.dumps({
+    "budgets": [
+        {"agent": "general-purpose", "monthlyBudget": 10},
+        {"agent": "deploy-checker", "monthlyBudget": 5},
+    ],
+    "live": {"hourlyPaceUsd": None, "maxMinutes": None},
+}))
 # A planted "one week ago" snapshot of the setup's own shape, so the real
 # changes::changes_at() comparison (live_setup_changes below) has an older
 # state to diff the config above against, instead of a fixture with an empty
@@ -348,10 +361,11 @@ def build_test_binary():
     """Compiles the aitm-core lib test binary once, in the real environment
     (the system linker and cargo's own toolchain lookup need the real PATH
     here -- it is only the run below that must be hermetic). live_scan,
-    live_spend, live_sessions, live_audit and live_agent_spend all live in
-    this one lib crate, so this single build backs every run_ignored_test()
-    call further down. `--no-run` compiles the whole lib test target no
-    matter what filter it is given, so none is passed here."""
+    live_spend, live_sessions, live_audit, live_agent_spend and
+    live_agent_watch all live in this one lib crate, so this single build
+    backs every run_ignored_test() call further down. `--no-run` compiles the
+    whole lib test target no matter what filter it is given, so none is
+    passed here."""
     build_env = dict(os.environ)
     build_env["PATH"] = f"{os.path.expanduser('~')}/.cargo/bin:" + build_env["PATH"]
     build_env["CARGO_HOME"] = os.path.expanduser("~/.cargo"); build_env["RUSTUP_HOME"] = os.path.expanduser("~/.rustup")
@@ -408,10 +422,10 @@ def live_fixture(test):
     """Same idea as live(), but for a result that can legitimately be an
     empty array: a leading-substring marker like "[{" never matches an
     empty `[]`, so that heuristic misread a real empty result as no output
-    at all. live_spend and live_agent_spend instead print their JSON
-    between two sentinel lines that can never themselves be a JSON prefix,
-    so an empty array is a valid result and a missing sentinel still fails
-    loudly rather than guessing."""
+    at all. live_spend, live_agent_spend and live_agent_watch instead print
+    their JSON between two sentinel lines that can never themselves be a
+    JSON prefix, so an empty array is a valid result and a missing sentinel
+    still fails loudly rather than guessing."""
     lines = run_ignored_test(test)
     if FIXTURE_BEGIN in lines and FIXTURE_END in lines:
         start, end = lines.index(FIXTURE_BEGIN) + 1, lines.index(FIXTURE_END)
@@ -425,6 +439,7 @@ fixture = {
     "sessions": live("spend::tests::live_sessions", '{"area"'),
     "audit": live("audit::tests::live_audit", '{"generatedAt"'),
     "agentSpend": live_fixture("spend::tests::live_agent_spend"),
+    "agentWatch": live_fixture("spend::tests::live_agent_watch"),
     "setupChanges": live("changes::tests::live_setup_changes", '{"since"'),
 }
 def round_floats(obj, ndigits=6):

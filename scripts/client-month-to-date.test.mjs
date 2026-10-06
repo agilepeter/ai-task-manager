@@ -14,7 +14,7 @@
 //    held is the one function both callers share;
 //  - the browser demo's stand-in for `client_rollup` (src/demo/mock.ts) uses the figure
 //    when it is for the current month and otherwise cuts its own month out of the series,
-//    as it does for an area with no figure (the committed fixture predates the field).
+//    as it does for an area with no figure.
 //    It differs from the app on purpose: the app has a scan that can be stale, the demo
 //    has none, its fixture is frozen at one month and its series is anchored to the
 //    viewer's today, so a label from another month says nothing about this one, and
@@ -91,8 +91,7 @@ test("the demo rollup uses the month figure the scan computed", async (t) => {
   // Zero is a figure too: a month that has spent nothing is not a missing one.
   assert.equal(rows([area("acme-portal", { month_to_date: october(0) })])["Acme Co"].monthToDate, 0);
 
-  // An area with no figure (the committed fixture has none yet), or a null one, keeps
-  // the demo's own cut of the series.
+  // An area with no figure, or a null one, keeps the demo's own cut of the series.
   const missing = rows([area("northwind-api"), area("acme-portal", { month_to_date: null })]);
   assert.equal(missing["Northwind"].monthToDate, 15);
   assert.equal(missing["Acme Co"].monthToDate, 15);

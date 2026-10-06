@@ -11,11 +11,6 @@ reads prompt text.
 
 ## Next
 
-- **A runaway alert and a budget per agent.** A warning when one agent's pace
-  would pass a figure you set, or when it has run past a duration you set.
-  Off until you set a figure.
-- **Time spent at the limit.** How often a limit reached 100 percent in the
-  last 30 days, and for how long.
 - **Unused MCP servers.** Servers with no tool calls over a stretch the app
   itself watched. It first needs the app to keep its own daily count of calls
   per server: working it out from the logs that are still on disk can name a

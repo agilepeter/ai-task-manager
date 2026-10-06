@@ -480,6 +480,10 @@
         "thisWeek": 156.6065,
         "lastWeek": 93.2977,
         "changePercent": 67.856764
+       },
+       "month_to_date": {
+        "month": "2026-09",
+        "cost": 476.0346
        }
       },
       {
@@ -538,6 +542,10 @@
         "thisWeek": 137.3522,
         "lastWeek": 92.1979,
         "changePercent": 48.975411
+       },
+       "month_to_date": {
+        "month": "2026-09",
+        "cost": 465.6369
        }
       },
       {
@@ -596,6 +604,10 @@
         "thisWeek": 70.705,
         "lastWeek": 6.5691,
         "changePercent": 976.327046
+       },
+       "month_to_date": {
+        "month": "2026-09",
+        "cost": 167.5892
        }
       },
       {
@@ -654,6 +666,10 @@
         "thisWeek": 61.4667,
         "lastWeek": 32.0507,
         "changePercent": 91.779587
+       },
+       "month_to_date": {
+        "month": "2026-09",
+        "cost": 163.4634
        }
       },
       {
@@ -712,6 +728,10 @@
         "thisWeek": 51.2195,
         "lastWeek": 15.5781,
         "changePercent": 228.791701
+       },
+       "month_to_date": {
+        "month": "2026-09",
+        "cost": 147.881
        }
       },
       {
@@ -770,6 +790,10 @@
         "thisWeek": 0.7081,
         "lastWeek": 19.6991,
         "changePercent": -96.40542
+       },
+       "month_to_date": {
+        "month": "2026-09",
+        "cost": 28.1245
        }
       }
      ]
@@ -3575,6 +3599,46 @@
    ]
   }
  ],
+ "agentWatch": {
+  "budgets": [
+   {
+    "agent": "general-purpose",
+    "monthToDate": 14.7362,
+    "monthlyBudget": 10.0
+   },
+   {
+    "agent": "deploy-checker",
+    "monthToDate": 1.6929,
+    "monthlyBudget": 5.0
+   }
+  ],
+  "known": [
+   "Explore",
+   "Plan",
+   "claude-code-guide",
+   "deploy-checker",
+   "general-purpose",
+   "release-notes",
+   "statusline-setup",
+   "workflow-subagent"
+  ],
+  "watch": {
+   "budgets": [
+    {
+     "agent": "general-purpose",
+     "monthlyBudget": 10.0
+    },
+    {
+     "agent": "deploy-checker",
+     "monthlyBudget": 5.0
+    }
+   ],
+   "live": {
+    "hourlyPaceUsd": null,
+    "maxMinutes": null
+   }
+  }
+ },
  "setupChanges": {
   "since": "2026-09-18",
   "changes": [

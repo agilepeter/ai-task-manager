@@ -97,9 +97,9 @@ interface AreaSpend {
    *  in what `client_rollup` and `export_clients_csv` are handed (`allAreas`), because
    *  a `daily_cost` series is a rolling window and cannot give the month on the 31st,
    *  and the backend uses the figure only while its month is the current one, counting
-   *  any other as zero. Absent or null only on an area in the demo's committed fixture,
-   *  which predates it: in the app the UI ships inside the binary and keeps its areas in
-   *  memory only, so they all come from a scan of the same build and carry it. */
+   *  any other as zero. Absent or null only on an area built by hand (a test): in the
+   *  app the UI ships inside the binary and keeps its areas in memory only, so they all
+   *  come from a scan of the same build and carry it, as do the demo's. */
   month_to_date?: { month: string; cost: number } | null;
 }
 
