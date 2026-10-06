@@ -27,14 +27,19 @@ pub const TREND_DAYS: usize = 30;
 /// written within this long is not walked at all. The calendar month to date is
 /// summed from what the scan read, so this is what keeps the 1st of a 31-day
 /// month in reach on the 31st.
-const LOG_HORIZON_DAYS: u64 = 31;
+pub(crate) const LOG_HORIZON_DAYS: u64 = 31;
 // The "no tool calls in the last N days" claim is read from the 30-day call sums
 // (`mcp_usage_30d`), so its window has to fit inside them.
 const _: () = assert!(crate::mcp_usage::UNUSED_WINDOW_DAYS <= TREND_DAYS as i64);
 // A log written on the 1st of a 31-day month is up to 31 days old on the 31st.
 const _: () = assert!(LOG_HORIZON_DAYS >= 31);
 
-/// Parses `AITM_TODAY`'s raw value as an ISO `YYYY-MM-DD` date -- the one
+/// The environment variable that overrides today's date for the scan, to an
+/// ISO `YYYY-MM-DD` date. Real users never set it; scripts/make-demo-fixture.py
+/// does. Every read of it goes through `today_for_clock`, under this name.
+pub const TODAY_OVERRIDE_ENV: &str = "AITM_TODAY";
+
+/// Parses the override's raw value as an ISO `YYYY-MM-DD` date -- the one
 /// shape scripts/make-demo-fixture.py ever writes. Kept separate from the
 /// env read so the parsing rule has one home and can be unit-tested without
 /// touching process environment state.
@@ -43,33 +48,51 @@ fn parse_today_override(raw: &str) -> Option<NaiveDate> {
 }
 
 /// The day to treat as today, given what the clock says: `clock`, unless
-/// `override_raw` (the raw value of `AITM_TODAY`, when it is set) holds an ISO
-/// `YYYY-MM-DD` date, which wins. Anything else in it is not an override and
-/// gives the clock. Pure, so a test can pick any pair without touching the
-/// process environment, which every test in the process shares.
-pub fn today_from(clock: NaiveDate, override_raw: Option<&str>) -> NaiveDate {
+/// `override_raw` (the raw value of the override variable, when it is set)
+/// holds an ISO `YYYY-MM-DD` date, which wins. Anything else in it is not an
+/// override and gives the clock. Pure, so a test can pick any pair without
+/// touching the process environment, which every test in the process shares.
+fn today_from(clock: NaiveDate, override_raw: Option<&str>) -> NaiveDate {
     override_raw.and_then(parse_today_override).unwrap_or(clock)
 }
 
-/// `today_from` for a caller that has already read the clock, so it can use
-/// the same reading for the hour, say: `AITM_TODAY` is read here, so no caller
-/// has to touch the environment, and the override is applied the way the scan
-/// applies it.
-pub fn today_for_clock(clock: NaiveDate) -> NaiveDate {
-    let raw = std::env::var("AITM_TODAY").ok();
+/// `today_from` with the environment read through `lookup`, so a test can
+/// stand in for it: the override is looked up under exactly
+/// `TODAY_OVERRIDE_ENV`, once, and nothing else is read.
+fn today_for_clock_with(clock: NaiveDate, lookup: impl Fn(&str) -> Option<String>) -> NaiveDate {
+    let raw = lookup(TODAY_OVERRIDE_ENV);
     // Set but not an ISO date -- almost certainly a typo in a shell
     // export while poking at the fixture script, so name the value
-    // that got rejected rather than silently reading the real clock
+    // that got rejected rather than silently using the clock reading
     // and leaving the mismatch to be found later. Debug-only: never
-    // worth a release build's stderr, and either way the real clock
-    // beneath this keeps a live install running normally.
+    // worth a release build's stderr, and either way the reading the
+    // caller took keeps a live install running normally.
     #[cfg(debug_assertions)]
     {
         if let Some(raw) = raw.as_deref().filter(|r| parse_today_override(r).is_none()) {
-            eprintln!("AITM_TODAY={raw:?} is not an ISO YYYY-MM-DD date; using the real date instead");
+            eprintln!("{TODAY_OVERRIDE_ENV}={raw:?} is not an ISO YYYY-MM-DD date; using the clock's date instead");
         }
     }
     today_from(clock, raw.as_deref())
+}
+
+/// The scan's day for a clock reading the caller took: `clock`, or the date in
+/// the process environment's override (`TODAY_OVERRIDE_ENV`) when that is an
+/// ISO date. The override is read from the environment here. A caller that
+/// needs the reading itself as well, for the hour, takes both from
+/// `scan_clock`; one that needs only the day asks `today_naive_date`.
+pub fn today_for_clock(clock: NaiveDate) -> NaiveDate {
+    today_for_clock_with(clock, |key| std::env::var(key).ok())
+}
+
+/// One reading of the clock, and the scan's day derived from that same
+/// reading. A pass that needs both an hour and a date takes them from here
+/// rather than reading the clock twice: two readings a moment apart can fall
+/// either side of midnight, and pair an hour from one day with the date of
+/// the next.
+pub fn scan_clock() -> (DateTime<Local>, NaiveDate) {
+    let now = Local::now();
+    (now, today_for_clock(now.date_naive()))
 }
 
 /// Which local calendar day counts as "today" for every day-bucketing
@@ -85,7 +108,7 @@ pub fn today_for_clock(clock: NaiveDate) -> NaiveDate {
 /// moved on, and every unrelated regeneration reshuffled the fixture's
 /// weekday-dependent random draws along the way.
 pub fn today_naive_date() -> NaiveDate {
-    today_for_clock(Local::now().date_naive())
+    scan_clock().1
 }
 
 /// The CE-ordinal form of `today_naive_date()` -- what every day-bucketing
@@ -194,8 +217,8 @@ pub struct AreaSpend {
     pub yesterday: Window,
     pub last30: Window,
     /// Dollars per day, oldest first with today last, like `daily_cost` on a
-    /// card. Only `TREND_DAYS` of them, so it cannot hold a whole calendar
-    /// month: see `month_to_date`.
+    /// card. Only `TREND_DAYS` of them, so on the 31st of a 31-day month it
+    /// is a day short of the month: see `month_to_date`.
     pub daily_cost: Vec<f64>,
     /// Last 7 days against the 7 before, like the card's. Recomputed after
     /// every scan, so a cache written before this field existed still loads.
@@ -2824,11 +2847,18 @@ fn agent_spend_month_from<'a>(entries: impl Iterator<Item = &'a PersistEntry>, t
     agent_spend_from(entries, today.day(), today.num_days_from_ce(), rules)
 }
 
-/// Subagent spend for this calendar month so far, by agent name.
-pub fn agent_spend_month() -> Vec<AgentSpend> {
+/// Subagent spend for the calendar month `today` falls in, so far, by agent
+/// name: for a pass that has already taken its date (see `scan_clock`) and must
+/// not read a day of its own.
+pub fn agent_spend_month_at(today: NaiveDate) -> Vec<AgentSpend> {
     let entries = subagent_entries();
     let rules = clients::load_from(&clients::path());
-    agent_spend_month_from(entries.iter(), today_naive_date(), &rules)
+    agent_spend_month_from(entries.iter(), today, &rules)
+}
+
+/// Subagent spend for this calendar month so far, by agent name.
+pub fn agent_spend_month() -> Vec<AgentSpend> {
+    agent_spend_month_at(today_naive_date())
 }
 
 /// Test seam for the month window: one agent's per-day costs, run through the
@@ -5239,6 +5269,37 @@ mod tests {
         }
     }
 
+    /// The environment is read through a lookup a test can replace, so what the wrapper asks
+    /// for, and what it does with the answer, are pinned without setting anything in the
+    /// process environment, which every test in the process would see.
+    #[test]
+    fn today_for_clock_with_asks_for_the_override_variable_and_applies_it() {
+        use std::cell::RefCell;
+        let clock = chrono::NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+        // The name scripts/make-demo-fixture.py sets.
+        assert_eq!(super::TODAY_OVERRIDE_ENV, "AITM_TODAY");
+
+        // The day a lookup that answers `reply` leads to, and every key it was asked for.
+        let ask = |reply: Option<&str>| {
+            let asked = RefCell::new(Vec::new());
+            let day = super::today_for_clock_with(clock, |key| {
+                asked.borrow_mut().push(key.to_string());
+                reply.map(str::to_string)
+            });
+            (day, asked.into_inner())
+        };
+
+        let (day, asked) = ask(Some("2026-09-25"));
+        assert_eq!(day, chrono::NaiveDate::from_ymd_opt(2026, 9, 25).unwrap(), "an override in the environment wins");
+        assert_eq!(asked, [super::TODAY_OVERRIDE_ENV], "it is looked up once, under exactly that name");
+        let (day, asked) = ask(Some("not-a-date"));
+        assert_eq!(day, clock, "a value that is not a date is not an override");
+        assert_eq!(asked, [super::TODAY_OVERRIDE_ENV]);
+        let (day, asked) = ask(None);
+        assert_eq!(day, clock, "nothing set: the clock");
+        assert_eq!(asked, [super::TODAY_OVERRIDE_ENV]);
+    }
+
     /// Prints real sessions as JSON: `{"area": [...], "day": [...]}` for the
     /// area and local day named in AITM_AREA / AITM_DAY.
     #[test]
@@ -7472,6 +7533,17 @@ mod tests {
             let before = month_spend_from_daily("Explore", &[(days_before(first, 1), 1.0)], today);
             assert!(before.is_empty(), "{today}: and not the day before it");
         }
+    }
+
+    #[test]
+    fn the_agent_month_figure_takes_the_date_it_is_given() {
+        // The same spend, asked on two dates a day apart across a month end: October's 1st and
+        // 31st on the one, November's 1st alone on the other. A figure that read a day of its
+        // own would answer both with the same month.
+        let daily = [(date(2026, 10, 1), 4.0), (date(2026, 10, 31), 2.0), (date(2026, 11, 1), 1.0)];
+        let total = |today| month_spend_from_daily("Explore", &daily, today).iter().map(|a| a.cost).sum::<f64>();
+        assert_eq!(total(date(2026, 10, 31)), 6.0, "asked on October 31st: October's days");
+        assert_eq!(total(date(2026, 11, 1)), 1.0, "asked on November 1st: November's day");
     }
 
     #[test]

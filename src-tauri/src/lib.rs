@@ -361,17 +361,12 @@ struct ClientView {
 
 /// Work areas rolled up to the user's clients. The frontend already holds
 /// the areas from the spend scan, so they are passed in rather than rescanned.
-///
-/// The date is the scan's own (`spend::today_naive_date`, which honours the
-/// `AITM_TODAY` override), not the clock read directly: the scan labels each
-/// area's month figure with the month of that date, and the rollup uses a
-/// figure only when its label is the month of the date it is given, so the two
-/// must read the same date. Every caller of `clients::rollup` here does, and
-/// `client_rollups_read_the_scans_clock` holds them to it.
+/// They are rolled up for the scan's own day (`clients::rollup_today`), and
+/// `client_rollups_read_the_scans_clock` holds every rollup in this file to it.
 #[tauri::command]
 fn client_rollup(areas: Vec<spend::AreaSpend>) -> ClientView {
     let rules = clients::load_from(&clients::path());
-    let rows = clients::rollup(&areas, &rules, spend::today_naive_date());
+    let rows = clients::rollup_today(&areas, &rules);
     ClientView { rules, rows }
 }
 
@@ -385,9 +380,11 @@ fn save_clients(rules: Vec<clients::ClientRule>) -> Result<Vec<clients::ClientRu
 #[tauri::command]
 fn export_clients_csv(app: tauri::AppHandle, areas: Vec<spend::AreaSpend>) -> Result<String, String> {
     let cfg = config_with_defaults(load_config());
-    let today = spend::today_naive_date(); // the scan's date, as in `client_rollup`
+    // The header's day and the file's name. The rows are for the scan's day too
+    // (`clients::rollup_today`), which is this one.
+    let today = spend::today_naive_date();
     let rules = clients::load_from(&clients::path());
-    let body = clients::csv(&clients::rollup(&areas, &rules, today), today);
+    let body = clients::csv(&clients::rollup_today(&areas, &rules), today);
     let dir = app
         .path()
         .download_dir()
@@ -2999,7 +2996,7 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
     let running_agents = {
         let cfg = config_with_defaults(load_config());
         let on = cfg.get("apiFeeds").and_then(Value::as_bool).unwrap_or(false);
-        let today = spend::today_naive_date(); // the scan's date, as in `client_rollup`
+        let today = spend::today_naive_date(); // for the subscriptions feed below
         let areas: Vec<spend::AreaSpend> = result
             .iter()
             .flat_map(|p| p.projects.iter())
@@ -3021,7 +3018,7 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
                 ("/v1/spend/areas", httpapi::areas_feed(&result)),
                 (
                     "/v1/spend/clients",
-                    serde_json::to_value(clients::rollup(&areas, &client_rules, today))
+                    serde_json::to_value(clients::rollup_today(&areas, &client_rules))
                         .unwrap_or(Value::Null),
                 ),
                 (
@@ -3043,13 +3040,12 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
     {
         use tauri_plugin_notification::NotificationExt;
         let cfg = config_with_defaults(load_config());
-        // One clock read, so the date and the hour below cannot come from either
-        // side of midnight. The date is the scan's (`AITM_TODAY` honoured), as in
-        // `client_rollup`: the client budgets roll up and mark their month by it,
-        // and so do the agent budgets and the runaway marks further down, the day
-        // `agent_spend_month()` reads, so "this month" and the mark's month agree.
-        let now = chrono::Local::now();
-        let today = spend::today_for_clock(now.date_naive());
+        // One clock reading for the whole pass, so the date and the hour below cannot
+        // come from either side of midnight. The date is the scan's day: the client
+        // budgets roll up and mark their month by it, and the agent budgets and the
+        // runaway marks further down are given the same one rather than a day of their
+        // own, so each month figure and its mark are of the same month.
+        let (now, today) = spend::scan_clock();
         let marks_path = providers::config_dir().join("alert_marks.json");
         let mut marks: Value = std::fs::read_to_string(&marks_path)
             .ok()
@@ -3095,7 +3091,7 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
         // Agent budgets: one notification per agent per calendar month.
         if !watch.budgets.is_empty() {
             // The per-cycle cost of having a budget: one read of the cached month's spend.
-            let rows = agent_watch::budget_rows(&spend::agent_spend_month(), &watch);
+            let rows = agent_watch::budget_rows(&spend::agent_spend_month_at(today), &watch);
             for row in agent_watch::newly_over_budget(&mut marks, &rows, today) {
                 let body = i18n::Msg::new("notify.agentBudget.body")
                     .var("agent", &row.agent)
@@ -6119,25 +6115,72 @@ mod tests {
     }
 
     /// A client's month figure is read only when its label is the month of the date the rollup
-    /// is given, and the scan labels it with `spend::today_naive_date()`, which honours the
-    /// process-wide `AITM_TODAY` override. A caller that read the clock itself would agree with
-    /// the scan in every ordinary run and read every figure as another month's under the
-    /// override. This is a source test because nothing else can show it: the callers read the
-    /// real config folder, and the override is an environment variable, which every test in the
-    /// process would see if one of them set it. So it reads this file, and checks that the
-    /// `today` each `clients::rollup(` and `clients::over_budget(` call is given comes from the
-    /// scan's clock.
+    /// is given, and the scan labels it with the month of `spend::today_naive_date()`, which
+    /// honours the override in the environment. Two arrangements keep every caller on that
+    /// date: the commands and the feeds use `clients::rollup_today`, which has no date to get
+    /// wrong, and the one alert pass that needs an hour as well takes its date from the same
+    /// `spend::scan_clock()` reading as its hour. This test holds the second, the only place
+    /// left where a caller could pick a clock of its own, and holds the first by counting: one
+    /// call of `clients::rollup(` and one of `clients::over_budget(` may exist in this file.
+    /// It also checks that the agent budgets in that pass take the pass's date
+    /// (`agent_spend_month_at`) rather than a day of their own. It is a source test because
+    /// nothing else can show it: the pass reads the real config folder, and the override is an
+    /// environment variable, which every test in the process would see if one of them set it.
     #[test]
     fn client_rollups_read_the_scans_clock() {
-        const CALLS: [&str; 2] = ["clients::rollup(", "clients::over_budget("];
-        // The scan's own clock, or the clock read once and the override applied to it.
-        const SCAN_CLOCK: [&str; 3] = ["spend::today_naive_date()", "spend::today_for_clock(", "spend::today_from("];
-
         // A Windows checkout may end its lines in CRLF, which the marker below would not match.
         let source = include_str!("lib.rs").replace("\r\n", "\n");
         // This module's own text mentions every pattern here, so only what comes before it is read.
         let marker = "#[cfg(test)]\nmod tests {";
         let code = &source[..source.rfind(marker).expect("the test module moved: update this test")];
+        let line_of = |at: usize| code[..at].matches('\n').count() + 1;
+
+        // Where `needle` is called in the code, comments left out.
+        let calls = |needle: &str| -> Vec<usize> {
+            code.match_indices(needle)
+                .map(|(at, _)| at)
+                .filter(|&at| !code[code[..at].rfind('\n').map_or(0, |n| n + 1)..at].trim_start().starts_with("//"))
+                .collect()
+        };
+
+        // The block that holds `at`: the `{` that opens it and the `}` that closes it.
+        fn enclosing_block(code: &str, at: usize) -> (usize, usize) {
+            let mut depth = 0;
+            let open = code[..at]
+                .char_indices()
+                .rev()
+                .find(|&(_, c)| match c {
+                    '}' => {
+                        depth += 1;
+                        false
+                    }
+                    '{' if depth == 0 => true,
+                    '{' => {
+                        depth -= 1;
+                        false
+                    }
+                    _ => false,
+                })
+                .map(|(i, _)| i)
+                .expect("a read outside any block");
+            let mut depth = 0;
+            let close = code[open..]
+                .char_indices()
+                .find(|&(_, c)| match c {
+                    '{' => {
+                        depth += 1;
+                        false
+                    }
+                    '}' => {
+                        depth -= 1;
+                        depth == 0
+                    }
+                    _ => false,
+                })
+                .map(|(i, _)| open + i)
+                .expect("a block that never closes");
+            (open, close)
+        }
 
         // The arguments of the call whose `(` is at `open`, split at the commas that are not nested.
         fn arguments(code: &str, open: usize) -> Vec<String> {
@@ -6168,60 +6211,101 @@ mod tests {
             panic!("a call that never closes");
         }
 
-        // What `today` was bound from where the call is: the nearest `let today = ...;` before
-        // it whose block still holds the call, that is, with no `}` between the two closing it.
-        let bound_from = |call_at: usize| -> Option<String> {
-            let mut before = call_at;
-            while let Some(at) = code[..before].rfind("let today = ") {
-                let start = at + "let today = ".len();
-                let end = start + code[start..].find(';')?;
-                let (mut depth, mut holds) = (0, true);
-                for c in code[end..call_at].chars() {
-                    match c {
-                        '{' => depth += 1,
-                        '}' => {
-                            depth -= 1;
-                            if depth < 0 {
-                                holds = false;
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                if holds {
-                    return Some(code[start..end].trim().to_string());
-                }
-                before = at;
-            }
-            None
-        };
-
-        let line_of = |at: usize| code[..at].matches('\n').count() + 1;
-        let (mut problems, mut found) = (Vec::new(), [0usize; 2]);
-        for (i, call) in CALLS.iter().enumerate() {
-            for (at, _) in code.match_indices(call) {
-                // A mention in a comment is not a call.
-                let line_start = code[..at].rfind('\n').map_or(0, |n| n + 1);
-                if code[line_start..at].trim_start().starts_with("//") {
-                    continue;
-                }
-                found[i] += 1;
-                let given = arguments(code, at + call.len() - 1).get(2).cloned().unwrap_or_default();
-                let expr = if given == "today" { bound_from(at) } else { Some(given) };
-                match expr {
-                    None => problems.push(format!("line {}: `{call}` is given `today`, and no `let today = ...;` holds it", line_of(at))),
-                    Some(expr) if !SCAN_CLOCK.iter().any(|ok| expr.starts_with(ok)) || expr.contains("Local::now()") => {
-                        problems.push(format!("line {}: `{call}` is given a date from `{expr}`, not the scan's clock", line_of(at)));
-                    }
-                    Some(_) => {}
-                }
-            }
+        // Whether `word` is in `text` as a whole identifier (`today`, not `today_cost`).
+        fn mentions(text: &str, word: &str) -> bool {
+            let is_word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+            text.match_indices(word).any(|(i, _)| {
+                !is_word(text[..i].chars().next_back()) && !is_word(text[i + word.len()..].chars().next())
+            })
         }
 
-        // So that finding nothing cannot pass: the four rollups and the client budget's check.
-        assert!(found[0] >= 4, "expected the four clients::rollup callers, found {}", found[0]);
-        assert!(found[1] >= 1, "expected the client budget's clients::over_budget call, found {}", found[1]);
+        // The `let` that binds the identifier `today` for the code at `at`: the nearest above it
+        // whose block still holds `at`. Its pattern and its right-hand side.
+        fn binding_of_today(code: &str, at: usize) -> Option<(String, String)> {
+            let mut before = at;
+            while let Some(let_at) = code[..before].rfind("let ") {
+                before = let_at;
+                // A comment, or the end of a longer word, is not a `let`.
+                let line_start = code[..let_at].rfind('\n').map_or(0, |n| n + 1);
+                let prefix = &code[line_start..let_at];
+                if prefix.contains("//") || prefix.ends_with(|c: char| c.is_alphanumeric() || c == '_') {
+                    continue;
+                }
+                let rest = &code[let_at + "let ".len()..];
+                let (Some(eq), Some(end)) = (rest.find('='), rest.find(';')) else { continue };
+                let pattern = rest[..eq.min(end)].split_whitespace().collect::<Vec<_>>().join(" ");
+                if !mentions(&pattern, "today") {
+                    continue;
+                }
+                // The binding's block must still hold `at`: no `}` between the two closes it.
+                let mut depth = 0;
+                let closed = code[let_at..at].chars().any(|c| {
+                    match c {
+                        '{' => depth += 1,
+                        '}' => depth -= 1,
+                        _ => {}
+                    }
+                    depth < 0
+                });
+                if closed {
+                    continue;
+                }
+                return Some((pattern, rest[(eq + 1).min(end)..end].trim().to_string()));
+            }
+            None
+        }
+
+        // The forms a `today` may be bound with. Any other `let` whose pattern mentions it fails.
+        let is_plain = |pattern: &str| {
+            matches!(pattern, "today" | "mut today" | "(now, today)")
+                || pattern.starts_with("today:")
+                || pattern.starts_with("mut today:")
+        };
+
+        let rollups = calls("clients::rollup(");
+        let budgets = calls("clients::over_budget(");
+        let clocks = calls("spend::scan_clock()");
+        let lines = |at: &[usize]| at.iter().map(|&a| line_of(a)).collect::<Vec<_>>();
+
+        // 1. One of each, and both in the block that reads the scan clock: the alert pass.
+        assert_eq!(
+            rollups.len(),
+            1,
+            "clients::rollup( is called once, in the alert pass: the rest use clients::rollup_today. Found it at lines {:?}",
+            lines(&rollups)
+        );
+        assert_eq!(budgets.len(), 1, "clients::over_budget( is called once, in the alert pass. Found it at lines {:?}", lines(&budgets));
+        assert_eq!(clocks.len(), 1, "the alert pass reads the scan clock once, with spend::scan_clock(). Found it at lines {:?}", lines(&clocks));
+        let (open, close) = enclosing_block(code, clocks[0]);
+        let mut problems = Vec::new();
+        for (name, at) in [("clients::rollup(", rollups[0]), ("clients::over_budget(", budgets[0])] {
+            let line = line_of(at);
+            if !(open < at && at < close) {
+                problems.push(format!("line {line}: {name} is outside the block that reads the scan clock"));
+            }
+            // 2. The `today` in force there is the one the scan clock gave.
+            match binding_of_today(code, at) {
+                None => problems.push(format!("line {line}: no `let` binds `today` above {name}")),
+                Some((pattern, _)) if !is_plain(&pattern) => {
+                    problems.push(format!("line {line}: `today` is bound with `let {pattern} = ...`, which this test does not accept"));
+                }
+                Some((_, rhs)) if rhs != "spend::scan_clock()" => {
+                    problems.push(format!("line {line}: `today` is bound from `{rhs}`, not from spend::scan_clock()"));
+                }
+                Some(_) => {}
+            }
+            // 3. The date the call is given is that `today`, and nothing that reads the clock.
+            let given = arguments(code, at + name.len() - 1).get(2).cloned().unwrap_or_default();
+            if given.contains("Local::now()") || given.contains(".date_naive()") {
+                problems.push(format!("line {line}: {name} is given a date read from the clock: `{given}`"));
+            } else if given != "today" {
+                problems.push(format!("line {line}: {name} is given `{given}`, not the `today` the alert pass took from the scan clock"));
+            }
+        }
+        // The agent budgets in the same pass take that date as well, and read no day of their own.
+        if code[open..close].contains("spend::agent_spend_month()") {
+            problems.push("the alert pass reads the agent month with spend::agent_spend_month(), which reads a day of its own: use agent_spend_month_at(today)".to_string());
+        }
         assert!(problems.is_empty(), "the client rollups must read the scan's clock:\n{}", problems.join("\n"));
     }
 }

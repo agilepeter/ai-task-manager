@@ -182,6 +182,17 @@ pub fn rollup(areas: &[AreaSpend], rules: &[ClientRule], today: NaiveDate) -> Ve
     out
 }
 
+/// `rollup` for today as the scan counts it (`spend::today_naive_date`, which
+/// honours the override in the environment). The scan labels each area's month
+/// figure with the month of that date, and `rollup` reads a figure only when
+/// its label is the month of the date it is given, so a caller with no reason
+/// to pick a day of its own uses this and passes none: there is then no wrong
+/// clock for it to reach for. A pass that already holds one reading of the
+/// clock, for an hour as well, calls `rollup` with the date from that reading.
+pub fn rollup_today(areas: &[AreaSpend], rules: &[ClientRule]) -> Vec<ClientSpend> {
+    rollup(areas, rules, crate::spend::today_naive_date())
+}
+
 // ---------------------------------------------------------------------------
 // CSV
 // ---------------------------------------------------------------------------

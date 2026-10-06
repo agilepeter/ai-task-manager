@@ -244,8 +244,8 @@ fn loads_in_every_session(server: &McpServer) -> bool {
 ///    age, whatever the retention setting is or was, and none has to be read
 ///    from any settings file. The whole 30 days the call counts cover cannot be
 ///    shown this way: the scan reads only files changed within its log horizon
-///    (31 days today), so a log idle for exactly 30 days is there only if
-///    something happened to be written that day.
+///    (`spend::LOG_HORIZON_DAYS` days), so a log idle for exactly 30 days is
+///    there only if something happened to be written that day.
 /// 2. The setup history holds a snapshot at least `UNUSED_WINDOW_DAYS` old,
 ///    and the server is in it and in every snapshot since. A snapshot keeps
 ///    no scope, so this is only about the name having been in the setup.
