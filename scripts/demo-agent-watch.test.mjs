@@ -149,3 +149,109 @@ test("the over-budget finding reads whole in every language", async () => {
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// The finding follows the visitor's budgets
+// ---------------------------------------------------------------------------
+//
+// The app works the finding out from the saved watch on every load. The demo does the same with
+// `buildOverBudgetRow` (src/demo/synthetic.ts), a twin of the budget half of
+// `agent_watch::opportunities`, over the saved budgets and the engine's month spend; the engine's
+// own check stays in the fixture file, as the machine was generated, and is not lifted.
+
+const row = (agent, monthToDate, monthlyBudget) => ({ agent, monthToDate, monthlyBudget });
+
+test("the over-budget finding built here is the engine's, word for word", async () => {
+  const { buildOverBudgetRow } = await freshDemo();
+  const check = fixture.audit.sections.flatMap((s) => s.checks).find((c) => c.id === "agent-over-budget");
+  const built = buildOverBudgetRow(engine.budgets);
+  assert.deepEqual(
+    [built.id, built.kind, built.learnUrl, built.title, built.detail, built.titleMsg, built.detailMsg],
+    ["agent-over-budget", "learn", null, check.title, check.detail, check.titleMsg, check.detailMsg],
+    "the twin and the engine make the same finding from the same budgets",
+  );
+});
+
+test("the over-budget finding follows the Rust rule's cases", async () => {
+  const { buildOverBudgetRow } = await freshDemo();
+  // crates/core/src/agent_watch.rs, `findings_count_what_their_detail_names`.
+  const found = buildOverBudgetRow([row("reviewer", 12.5, 10), row("Explore", 30, 30), row("Plan", 1, 2)]);
+  assert.equal(found.titleMsg.count, 2, "two budgets are over; the third is under");
+  assert.deepEqual(found.titleMsg.vars, {}, "a title carries a count only");
+  assert.equal(found.detailMsg.vars.names, "reviewer ($12.50 / $10.00), Explore ($30.00 / $30.00)");
+  assert.equal(found.title, "2 agents are over their monthly budget");
+  assert.equal(buildOverBudgetRow([row("Plan", 3, 2)]).title, "1 agent is over its monthly budget");
+  // Only what is over now is a finding; at the budget counts, a cent under does not.
+  assert.equal(buildOverBudgetRow([]), null);
+  assert.equal(buildOverBudgetRow([row("Plan", 1, 2)]), null);
+  assert.equal(buildOverBudgetRow([row("Plan", 1.99, 2)]), null);
+  assert.equal(buildOverBudgetRow([row("Plan", 2, 2)]).titleMsg.count, 1);
+  // The budgets are named in the order they were saved.
+  assert.equal(buildOverBudgetRow([row("b", 5, 1), row("a", 5, 1)]).detailMsg.vars.names, "b ($5.00 / $1.00), a ($5.00 / $1.00)");
+});
+
+/** The findings the demo lists about budgets right now: in the Inventory, and as a check of the Audit. */
+function budgetFindings(handle) {
+  const inventory = handle("get_inventory").opportunities.filter((o) => o.id === "agent-over-budget");
+  const audit = handle("get_audit").sections.flatMap((s) => s.checks).filter((c) => c.id === "agent-over-budget");
+  return { inventory, audit };
+}
+
+test("removing the budget that is over removes the finding, in the Inventory and in the Audit", async () => {
+  const { handle } = await freshDemo();
+  const before = budgetFindings(handle);
+  assert.equal(before.inventory.length, 1, "the finding is there to start with");
+  assert.equal(before.audit.length, 1);
+
+  const over = new Set(engine.budgets.filter((b) => b.monthToDate >= b.monthlyBudget).map((b) => b.agent));
+  const kept = engine.watch.budgets.filter((b) => !over.has(b.agent));
+  assert.ok(kept.length > 0, "a budget under its figure stays, so this is not the same as having none");
+  handle("set_agent_watch", { watch: { budgets: kept } });
+  const after = budgetFindings(handle);
+  assert.deepEqual([after.inventory.length, after.audit.length], [0, 0], "Worth a look, the Inventory row and the Audit check all follow the saved budgets");
+  // Nothing else about the Audit moved, and the other finding the demo builds is still there.
+  const ids = handle("get_audit").sections.flatMap((s) => s.checks).map((c) => c.id);
+  assert.ok(ids.includes("limit-time") && ids.includes("mix-top-heavy"));
+  const report = handle("get_audit");
+  assert.deepEqual([report.passed, report.attention, report.score], [fixture.audit.passed, fixture.audit.attention, fixture.audit.score]);
+
+  // No budgets at all is no finding either, and putting the saved ones back brings the engine's finding back.
+  handle("set_agent_watch", { watch: {} });
+  assert.deepEqual([budgetFindings(handle).inventory.length, budgetFindings(handle).audit.length], [0, 0]);
+  handle("set_agent_watch", { watch: engine.watch });
+  const restored = budgetFindings(handle);
+  assert.deepEqual([restored.inventory[0].titleMsg, restored.inventory[0].detailMsg], [before.inventory[0].titleMsg, before.inventory[0].detailMsg]);
+  assert.deepEqual(restored.audit[0], before.audit[0], "the Audit's check is the same one again");
+});
+
+test("a budget added below an agent's month spend joins the finding, and one above it does not", async () => {
+  const { handle } = await freshDemo();
+  const budgeted = new Set(engine.watch.budgets.map((b) => b.agent));
+  const withSpend = Object.keys(engine.monthSpend).find((name) => !budgeted.has(name));
+  assert.ok(withSpend && engine.monthSpend[withSpend] > 0, "the fixture has an agent with spend and no budget, or this test has nothing to add");
+  const spent = engine.monthSpend[withSpend];
+  const withBudget = (monthlyBudget) => ({ budgets: [...engine.watch.budgets, { agent: withSpend, monthlyBudget }] });
+  const state = () => {
+    const { inventory, audit } = budgetFindings(handle);
+    return { count: inventory[0]?.titleMsg.count ?? 0, names: inventory[0]?.detailMsg.vars.names ?? "", audit: audit.length };
+  };
+  const engineNames = engine.budgets
+    .filter((b) => b.monthToDate >= b.monthlyBudget)
+    .map((b) => `${b.agent} ($${b.monthToDate.toFixed(2)} / $${b.monthlyBudget.toFixed(2)})`)
+    .join(", ");
+  assert.deepEqual(state(), { count: 1, names: engineNames, audit: 1 }, "the engine's own finding to start with");
+
+  // Above its spend: no new finding. Exactly at its spend: it counts, as a client budget does.
+  handle("set_agent_watch", { watch: withBudget(Math.ceil(spent) + 1) });
+  assert.deepEqual(state(), { count: 1, names: engineNames, audit: 1 });
+  handle("set_agent_watch", { watch: withBudget(spent) });
+  assert.equal(state().count, 2, "a budget at the agent's spend is over");
+  // Below it: named after the budgets saved before it, to the cent, in the Inventory and the Audit alike.
+  handle("set_agent_watch", { watch: withBudget(0.5) });
+  const now = state();
+  assert.equal(now.count, 2);
+  assert.equal(now.names, `${engineNames}, ${withSpend} ($${spent.toFixed(2)} / $0.50)`);
+  assert.equal(now.audit, 1, "one check, not one per budget");
+  const { inventory, audit } = budgetFindings(handle);
+  assert.deepEqual([audit[0].titleMsg, audit[0].detailMsg, audit[0].title, audit[0].detail], [inventory[0].titleMsg, inventory[0].detailMsg, inventory[0].title, inventory[0].detail]);
+});

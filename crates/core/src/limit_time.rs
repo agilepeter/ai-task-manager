@@ -351,6 +351,18 @@ mod tests {
     }
 
     #[test]
+    fn a_stretch_that_runs_to_the_last_reading_is_counted_whole() {
+        // No later reading ends the stretch, so what it held is taken when the readings run out.
+        let points = [pt(0, 100.0), pt(30, 100.0), pt(60, 100.0)];
+        let got = from_points("p", "Weekly", &points).unwrap();
+        assert_eq!((got.times, got.total_ms, got.longest_ms), (1, 60 * MIN, 60 * MIN));
+        // And it is the longest one when a shorter stretch came before it.
+        let after_a_shorter = [pt(0, 100.0), pt(30, 100.0), pt(60, 80.0), pt(90, 100.0), pt(120, 100.0), pt(150, 100.0)];
+        let got = from_points("p", "Weekly", &after_a_shorter).unwrap();
+        assert_eq!((got.times, got.total_ms, got.longest_ms), (2, 90 * MIN, 60 * MIN));
+    }
+
+    #[test]
     fn ties_pick_the_same_limit_every_time() {
         let row = |provider: &str, metric: &str, total: i64, longest: i64| LimitTime {
             provider: provider.into(),

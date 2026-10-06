@@ -1,40 +1,30 @@
-// The demo's two hand-authored findings (src/demo/synthetic.ts) build their
-// own Msgs by hand, keyed and varred to match crates/core/src/procs.rs's and
-// crates/core/src/coaching.rs's real sentences -- nothing on either side
-// checks that the two agree. A var-name typo here leaves a literal
-// "{worstName}" (or whichever var drifted) sitting in the rendered sentence,
-// in every locale, silently: this renders every synthetic row in every
-// registered locale and fails if any title or detail still has an unfilled
-// {var}, or came back as its own raw key (t()'s fallback for a key that
-// resolves nowhere).
+// The demo's hand-authored findings (src/demo/synthetic.ts) build their own Msgs by hand,
+// keyed and varred to match the Rust modules' real sentences (crates/core/src/procs.rs for the
+// duplicate-process row, coaching.rs for the usage rows it lifts out of the audit, limit_time.rs
+// and agent_watch.rs for the two it builds from the demo's own state) -- nothing on either side
+// checks that the two agree. A var-name typo here leaves a literal "{worstName}" (or whichever
+// var drifted) sitting in the rendered sentence, in every locale, silently: this renders the
+// duplicate-process row and the lifted usage rows in every registered locale and fails if any
+// title or detail still has an unfilled {var}, or came back as its own raw key (t()'s fallback
+// for a key that resolves nowhere). The two built from state are rendered the same way in
+// scripts/demo-limit-time.test.mjs and scripts/demo-agent-watch.test.mjs, beside what they hold
+// them to. The last two tests here hold the list of findings that carry no Learn more link to
+// the Rust sources.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import ts from "typescript";
-import { inlineLocaleImports } from "./inline-locales.mjs";
+import { loadDemoBackend } from "./demo-backend.mjs";
 
-// inlineLocaleImports() (scripts/inline-locales.mjs) inlines src/i18n.ts's
-// dictionary imports as object literals, since ts.transpileModule handles
-// one file at a time and Node's loader cannot resolve a relative specifier
-// off a data: URL; this extends that to also load src/demo/synthetic.ts:
-// its own `import { render, type Msg } from "../i18n"` is stripped and the
-// file is appended after i18n's already-inlined source, so the combined
-// text transpiles as a single self-contained module with both files'
-// exports.
-async function loadSyntheticModule() {
-  const i18nSource = await readFile(new URL("../src/i18n.ts", import.meta.url), "utf8");
-  const localesDir = new URL("../src/locales/", import.meta.url);
-  const inlined = await inlineLocaleImports(i18nSource, localesDir);
-  const syntheticSource = await readFile(new URL("../src/demo/synthetic.ts", import.meta.url), "utf8");
-  const withoutI18nImport = syntheticSource.replace(/^import\s*\{[^}]*\}\s*from\s*["']\.\.\/i18n["'];\s*$/m, "");
-  const code = ts.transpileModule(`${inlined}\n${withoutI18nImport}`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
-  return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
-}
+// One instance of the demo's modules for the whole file: loading joins i18n.ts's nine dictionaries
+// and the two demo sources into one module (scripts/demo-backend.mjs). The tests here pick the
+// active language themselves.
+let demo = null;
+const loadDemo = () => (demo ??= loadDemoBackend());
 
 // Derived from i18n.ts's own export (not hand-copied), so a newly added
 // locale is covered here automatically instead of silently getting no
 // synthetic-row coverage.
-const { LOCALES } = await loadSyntheticModule();
+const { LOCALES } = await loadDemo();
 
 // A fixed, self-contained fixture rather than src/demo-fixture.json, so this
 // test always exercises both builders' var wiring regardless of whether a
@@ -99,7 +89,7 @@ function assertRendersCleanly(locale, label, msg, render) {
 
 for (const locale of LOCALES) {
   test(`buildUsageRows() renders cleanly in ${locale}`, async () => {
-    const { buildUsageRows, render, setActiveLocale } = await loadSyntheticModule();
+    const { buildUsageRows, render, setActiveLocale } = await loadDemo();
     setActiveLocale(locale);
     const rows = buildUsageRows(SECTIONS, new Set(["already-listed"]));
     assert.deepEqual(
@@ -114,7 +104,7 @@ for (const locale of LOCALES) {
   });
 
   test(`buildDuplicateProcessesRow() renders cleanly in ${locale}`, async () => {
-    const { buildDuplicateProcessesRow, render, setActiveLocale } = await loadSyntheticModule();
+    const { buildDuplicateProcessesRow, render, setActiveLocale } = await loadDemo();
     setActiveLocale(locale);
     const row = buildDuplicateProcessesRow(RUNNING);
     assert.ok(row, "two RUNNING entries have instances > 1, so a row must be built");
@@ -130,7 +120,7 @@ for (const locale of LOCALES) {
 }
 
 test("buildDuplicateProcessesRow() returns null when nothing is running more than once", async () => {
-  const { buildDuplicateProcessesRow } = await loadSyntheticModule();
+  const { buildDuplicateProcessesRow } = await loadDemo();
   assert.equal(buildDuplicateProcessesRow([{ name: "solo", instances: 1, rssBytes: 1048576 }]), null);
 });
 
@@ -141,7 +131,7 @@ test("buildDuplicateProcessesRow() returns null when nothing is running more tha
 // comment for why), so it needs its own case: without the alias, this
 // fixture would wrongly lift a second "inherits the session model" card.
 test("buildUsageRows() skips a check aliased to an existing Inventory opportunity under a different id", async () => {
-  const { buildUsageRows, AUDIT_ID_ALIASES } = await loadSyntheticModule();
+  const { buildUsageRows, AUDIT_ID_ALIASES } = await loadDemo();
   assert.equal(
     AUDIT_ID_ALIASES["agent-model"],
     "agents-model-unset",
@@ -184,7 +174,7 @@ test("buildUsageRows() skips a check aliased to an existing Inventory opportunit
 // findings it lifts into the Inventory tab the engine builds without a Learn more link.
 // NO_LEARN_LINK is that list; the Rust sources are what it is held to.
 test("buildUsageRows() gives a finding the engine builds without a link none, and a coaching one the classroom's", async () => {
-  const { buildUsageRows, NO_LEARN_LINK } = await loadSyntheticModule();
+  const { buildUsageRows, NO_LEARN_LINK } = await loadDemo();
   const check = (id) => ({
     id,
     status: "consider",
@@ -200,22 +190,82 @@ test("buildUsageRows() gives a finding the engine builds without a link none, an
   assert.equal(expected["mix-top-heavy"], "https://staas.fund/classroom/", "a coaching finding still has its link");
 });
 
-test("NO_LEARN_LINK is the findings the Rust modules build with a None link", async () => {
-  const { NO_LEARN_LINK } = await loadSyntheticModule();
-  const source = (file) => readFile(new URL(`../crates/core/src/${file}`, import.meta.url), "utf8");
-  const built = {
-    "agent-over-budget": await source("agent_watch.rs"),
-    "agent-runaway": await source("agent_watch.rs"),
-    "guardrail-removed": await source("changes.rs"),
-    "setup-changed": await source("changes.rs"),
-  };
-  // `Opportunity::from_msgs(id, kind, title, detail, learn_url)`: the id first, the link last.
-  const buildsWithNoLink = (id) => new RegExp(`from_msgs\\(\\s*"${id}",[^;]*?,\\s*None,?\\s*\\)`).test(built[id]);
-  for (const [id] of Object.entries(built)) {
-    assert.ok(buildsWithNoLink(id), `the Rust side no longer builds ${id} with no link: it is not a Learn-less finding`);
-    assert.ok(NO_LEARN_LINK.has(id), `${id} is built with no link but is missing from NO_LEARN_LINK`);
+/** The arguments of every `Opportunity::from_msgs(id, kind, title, detail, learn_url)` call in `source`,
+ *  split at the top level of the call: strings, parentheses, brackets and braces are skipped over. */
+function fromMsgsCalls(source) {
+  const needle = "Opportunity::from_msgs(";
+  const calls = [];
+  for (let at = source.indexOf(needle); at !== -1; at = source.indexOf(needle, at + needle.length)) {
+    const args = [];
+    let depth = 0;
+    let start = at + needle.length;
+    let i = start;
+    for (; i < source.length; i++) {
+      const c = source[i];
+      if (c === '"') {
+        for (i++; source[i] !== '"'; i++) if (source[i] === "\\") i++;
+      } else if (c === "(" || c === "[" || c === "{") depth++;
+      else if (c === "]" || c === "}") depth--;
+      else if (c === ")") {
+        if (depth === 0) break;
+        depth--;
+      } else if (c === "," && depth === 0) {
+        args.push(source.slice(start, i).trim());
+        start = i + 1;
+      }
+    }
+    const last = source.slice(start, i).trim();
+    if (last) args.push(last);
+    calls.push(args);
   }
-  assert.deepEqual([...NO_LEARN_LINK].sort(), Object.keys(built).sort(), "an id here that no Rust module builds without a link is a guess");
+  return calls;
+}
+
+test("the scanner reads a from_msgs call the way the Rust is written", () => {
+  const source = `
+    out.push(Opportunity::from_msgs(
+        "agent-over-budget",
+        "learn",
+        Msg::new("finding.x.title").count(n),
+        Some(Msg::new("finding.x.detail").var("names", format!("{} ({})", a, b))),
+        None,
+    ));
+    vec![Opportunity::from_msgs("limit-time", "learn", title, Some(detail), None)]
+    Opportunity::from_msgs(id, kind, title_msg, Some(detail_msg), Some(CLASSROOM))`;
+  assert.deepEqual(fromMsgsCalls(source).map((args) => [args.length, args[0], args.at(-1)]), [
+    [5, '"agent-over-budget"', "None"],
+    [5, '"limit-time"', "None"],
+    [5, "id", "Some(CLASSROOM)"],
+  ]);
+});
+
+test("NO_LEARN_LINK is every finding the two Rust modules build with no link, and nothing else", async () => {
+  const { NO_LEARN_LINK } = await loadDemo();
+  const source = (file) => readFile(new URL(`../crates/core/src/${file}`, import.meta.url), "utf8");
+  // The modules whose findings reach the demo through the audit alone, without their test module
+  // (a `#[cfg(test)]` on a constant higher up is not where the tests begin).
+  const noLink = new Set();
+  for (const file of ["agent_watch.rs", "changes.rs"]) {
+    const [production, ...rest] = (await source(file)).split(/#\[cfg\(test\)\]\s*mod tests\b/);
+    assert.equal(rest.length, 1, `${file}: expected one test module to cut at`);
+    const calls = fromMsgsCalls(production);
+    assert.ok(calls.length > 0, `${file}: no from_msgs call found, so the scanner or the file moved`);
+    for (const args of calls) {
+      assert.equal(args.length, 5, `${file}: a from_msgs call with ${args.length} arguments`);
+      const id = args[0].match(/^"([a-z0-9-]+)"$/);
+      assert.ok(id, `${file}: a finding built with an id that is not a string (${args[0]}): this test cannot say what link it has`);
+      if (args.at(-1) === "None") noLink.add(id[1]);
+    }
+  }
+  assert.deepEqual([...noLink].sort(), [...NO_LEARN_LINK].sort(), "a finding built with no link must be listed, and a listed one must still be built so");
+
+  // Two more findings have no link and are not listed, because neither passes through buildUsageRows:
+  // agent-unused arrives in the fixture's own opportunities, with its null link, and limit-time is
+  // built by buildLimitTimeRow (its link is held in scripts/demo-limit-time.test.mjs).
+  const fixture = JSON.parse(await readFile(new URL("../src/demo-fixture.json", import.meta.url), "utf8"));
+  const unused = fixture.inventory.opportunities.find((o) => o.id === "agent-unused");
+  assert.ok(unused, "the fixture's own opportunities carry agent-unused, or this note about it no longer holds");
+  assert.equal(unused.learnUrl, null);
   // What every other lifted check is made of: coaching findings, which carry the classroom link.
   const coaching = await source("coaching.rs");
   assert.match(coaching, /const CLASSROOM: &str = "https:\/\/staas\.fund\/classroom\/";/);

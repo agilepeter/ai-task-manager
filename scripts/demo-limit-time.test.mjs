@@ -1,19 +1,22 @@
 // The demo's "time at the limit" is not typed in: it is worked out from the same readings
 // the Detail view charts (`readings` in src/demo/mock.ts), by the rule the app applies to
-// its own history (`from_points` in crates/core/src/limit_time.rs), ported there as
-// `timeAtLimit`. Two things are held here.
+// its own history (`from_points` in crates/core/src/limit_time.rs), ported in
+// src/demo/synthetic.ts as `timeAtLimit`. Three things are held here.
 //
 //  - The port. The cases below are the Rust tests' own, input for input and answer for
 //    answer (`time_at_the_limit_skips_gaps_the_app_did_not_watch`, `a_span_ends_at_the_reset`,
 //    `a_limit_never_reached_says_nothing`, and the other `from_points` tests whose inputs
 //    JavaScript can hold), so that one side's rule cannot change without the other failing.
 //    The one Rust test left out feeds it i64::MIN and i64::MAX, which a double cannot hold.
+//  - The constants. AT_LIMIT, MAX_GAP_MS, WINDOW_MS and FINDING_AT_MS are read out of
+//    limit_time.rs, compared with the port's own, and the edge cases below run on the Rust
+//    gap, so a change to the rule in Rust fails here whichever constant it touches.
 //  - The demo. What `get_limit_time` answers for the card is what the chart `get_history`
 //    draws shows: a limit at 100 percent on the chart is a stretch counted in the figure,
 //    from its first reading to the reset, and a limit that never reaches it has no row.
 //
-// The browser demo's module is loaded by scripts/demo-backend.mjs, with inert stand-ins for the
-// imports none of these commands reaches.
+// The browser demo's module is loaded by scripts/demo-backend.mjs, with the real i18n and
+// synthetic modules it imports.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -22,8 +25,24 @@ import { loadDemoBackend as loadFreshDemoBackend } from "./demo-backend.mjs";
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const T0 = 1_790_000_000_000;
-// limit_time.rs: MAX_GAP_MS, 90 minutes.
-const MAX_GAP = 90 * MIN;
+
+const limitTimeRust = await readFile(new URL("../crates/core/src/limit_time.rs", import.meta.url), "utf8");
+const historyRust = await readFile(new URL("../crates/core/src/history.rs", import.meta.url), "utf8");
+
+/** A numeric `const NAME: type = a * b * c;` out of a Rust source, evaluated: what a rule is made of. */
+function rustConstant(source, name) {
+  const found = source.match(new RegExp(`const ${name}:\\s*\\w+\\s*=\\s*([0-9_.\\s*]+);`));
+  assert.ok(found, `could not find the constant ${name}`);
+  const value = found[1].split("*").map((factor) => Number(factor.replace(/_/g, "").trim())).reduce((a, b) => a * b, 1);
+  assert.ok(Number.isFinite(value), `${name} = ${found[1].trim()} is not a plain product of numbers`);
+  return value;
+}
+
+// The Rust rule's constants, as its source states them.
+const AT_LIMIT = rustConstant(limitTimeRust, "AT_LIMIT");
+const MAX_GAP = rustConstant(limitTimeRust, "MAX_GAP_MS");
+const WINDOW = rustConstant(limitTimeRust, "WINDOW_MS");
+const FINDING_AT = rustConstant(limitTimeRust, "FINDING_AT_MS");
 
 let demoModule = null;
 async function loadDemoBackend() {
@@ -123,6 +142,16 @@ test("a reset on either reading is not between them", async () => {
   assert.equal(timeAtLimit("p", "s", [pt(0, 100), pt(90, 100)]).totalMs, 90 * MIN);
 });
 
+test("a stretch that runs to the last reading is counted whole", async () => {
+  const { timeAtLimit } = await loadDemoBackend();
+  // limit_time.rs, `a_stretch_that_runs_to_the_last_reading_is_counted_whole`: no later reading ends
+  // the stretch, so what it held is taken when the readings run out.
+  assert.deepEqual(figures(timeAtLimit("p", "Weekly", [pt(0, 100), pt(30, 100), pt(60, 100)])), [1, 60 * MIN, 60 * MIN]);
+  // And it is the longest one when a shorter stretch came before it.
+  const afterAShorter = [pt(0, 100), pt(30, 100), pt(60, 80), pt(90, 100), pt(120, 100), pt(150, 100)];
+  assert.deepEqual(figures(timeAtLimit("p", "Weekly", afterAShorter)), [2, 90 * MIN, 60 * MIN]);
+});
+
 test("a shuffled series gives a fixed answer", async () => {
   const { timeAtLimit } = await loadDemoBackend();
   // Minutes 0, 30, 20, 20, 50 all at the limit, no resets. Pairs: 0->30 counts 30; 30->20
@@ -149,18 +178,25 @@ function setClock(t, ms) {
 
 const NOON = new Date(2026, 9, 6, 12, 0, 0).getTime();
 
-/** The finding's threshold in the Rust source: a total at or over it makes the finding. */
-async function findingThresholdMs() {
-  const rust = await readFile(new URL("../crates/core/src/limit_time.rs", import.meta.url), "utf8");
-  const found = rust.match(/const FINDING_AT_MS:\s*i64\s*=\s*(\d+)\s*\*\s*3_600_000;/);
-  assert.ok(found, "could not find FINDING_AT_MS in crates/core/src/limit_time.rs");
-  return Number(found[1]) * HOUR;
-}
+test("the port's constants are the Rust rule's, read from its source", async () => {
+  const demo = await loadDemoBackend();
+  assert.equal(demo.LIMIT_AT_PERCENT, AT_LIMIT, "AT_LIMIT");
+  assert.equal(demo.LIMIT_MAX_GAP_MS, MAX_GAP, "MAX_GAP_MS");
+  assert.equal(demo.LIMIT_WINDOW_MS, WINDOW, "WINDOW_MS");
+  assert.equal(demo.LIMIT_TIME_FINDING_MS, FINDING_AT, "FINDING_AT_MS");
+  // The rule runs on them: a reading at the limit counts and one a hair under does not, and a gap
+  // of the Rust length counts while a millisecond more does not.
+  const at = (used, atMs) => ({ at: atMs, used, resetsAt: null });
+  assert.ok(demo.timeAtLimit("p", "m", [at(AT_LIMIT, 0)]), "a reading at the limit is a time");
+  assert.equal(demo.timeAtLimit("p", "m", [at(AT_LIMIT - 0.001, 0)]), null, "a hair under is not");
+  assert.equal(demo.timeAtLimit("p", "m", [at(AT_LIMIT, 0), at(AT_LIMIT, MAX_GAP)]).totalMs, MAX_GAP);
+  assert.equal(demo.timeAtLimit("p", "m", [at(AT_LIMIT, 0), at(AT_LIMIT, MAX_GAP + 1)]).totalMs, 0);
+});
 
 test("the demo gives one limit over the finding's threshold and one under", async (t) => {
   const { handle } = await loadDemoBackend();
   setClock(t, NOON);
-  const threshold = await findingThresholdMs();
+  const threshold = FINDING_AT;
   const rows = handle("get_limit_time", { providerId: "claude" });
   assert.deepEqual(rows.map((r) => r.metric), ["Weekly", "Session"], "most time first; Opus weekly never reached it");
   const [weekly, session] = rows;
@@ -221,8 +257,7 @@ test("a shorter range is the newest part of a longer one", async (t) => {
   setClock(t, NOON);
   const day = handle("get_history", { providerId: "claude", hours: 24 });
   const month = handle("get_history", { providerId: "claude", hours: 24 * 30 });
-  const quarter = handle("get_history", { providerId: "claude", hours: 24 * 90 });
-  for (const [shorter, longer] of [[day, month], [month, quarter]]) {
+  for (const [shorter, longer] of [[day, month]]) {
     shorter.forEach((series, i) => {
       assert.equal(series.metric, longer[i].metric);
       assert.ok(series.points.length >= 2 && series.points.length < longer[i].points.length, series.metric);
@@ -236,6 +271,77 @@ test("a shorter range is the newest part of a longer one", async (t) => {
     assert.equal(last.at, NOON);
     assert.equal(last.used, live.find((m) => m.label === series.metric).used_percent);
   }
+});
+
+test("each earlier period climbs smoothly to a height of its own, and a short limit's unused windows leave gaps", async (t) => {
+  const { handle } = await loadDemoBackend();
+  setClock(t, NOON);
+  const claude = handle("cached_usage").find((c) => c.id === "claude");
+  const chart = handle("get_history", { providerId: "claude", hours: 24 * 30 });
+  for (const series of chart) {
+    const metric = claude.metrics.find((m) => m.label === series.metric);
+    // Every reading of one period gives the same number here; a reset starts the next.
+    const periodOf = (at) => Math.ceil((metric.resets_at - at) / metric.period_ms);
+    // The most a reading can climb on the one before it inside a period: the steepest ramp (to a wall
+    // that starts at 80 percent of the period at the earliest) over the widest gap between readings,
+    // plus the scatter of two readings. A height drawn per reading, and not per period, jumps by tens.
+    const steepest = (100 * 35 * MIN) / (0.8 * metric.period_ms) + 2.6;
+    const highest = new Map();
+    series.points.forEach((p, i) => {
+      highest.set(periodOf(p.at), Math.max(highest.get(periodOf(p.at)) ?? 0, p.used));
+      const before = series.points[i - 1];
+      if (before && periodOf(before.at) === periodOf(p.at)) {
+        assert.ok(Math.abs(p.used - before.used) <= steepest, `${series.metric}: ${before.used} then ${p.used} inside one period (at most ${steepest.toFixed(1)})`);
+      }
+    });
+    // Whole earlier periods only: the live one is still climbing, and the oldest is cut by the range.
+    const whole = [...highest.entries()].filter(([period]) => period > 1 && period < Math.max(...highest.keys()));
+    const unused = whole.filter(([, top]) => top < 12).length;
+    const climbed = whole.filter(([, top]) => top > 45).length;
+    if (metric.period_ms < 24 * HOUR) {
+      assert.ok(unused >= 20 && climbed >= 20, `${series.metric}: ${unused} windows unused, ${climbed} climbed: a line with gaps needs both`);
+    } else {
+      assert.equal(unused, 0, `${series.metric}: a ${metric.period_ms / HOUR}-hour period is always used`);
+    }
+  }
+});
+
+test("a long range is thinned to the app's cap, keeping real readings and the newest", async (t) => {
+  const { handle, HISTORY_MAX_POINTS } = await loadDemoBackend();
+  setClock(t, NOON);
+  assert.equal(HISTORY_MAX_POINTS, rustConstant(historyRust, "MAX_POINTS"), "MAX_POINTS in crates/core/src/history.rs");
+  const month = handle("get_history", { providerId: "claude", hours: 24 * 30 });
+  const quarter = handle("get_history", { providerId: "claude", hours: 24 * 90 });
+  const live = handle("cached_usage").find((c) => c.id === "claude").metrics;
+  for (const series of quarter) {
+    const name = series.metric;
+    assert.ok(series.points.length <= HISTORY_MAX_POINTS + 1, `${name}: ${series.points.length} points`);
+    assert.ok(series.points.length > month.find((m) => m.metric === name).points.length * 0.9, `${name}: thinned, not cut down to a stub`);
+    series.points.slice(1).forEach((p, i) => assert.ok(p.at > series.points[i].at, `${name}: in time order`));
+    const last = series.points[series.points.length - 1];
+    assert.equal(last.at, NOON, `${name}: the newest reading is kept`);
+    assert.equal(last.used, live.find((m) => m.label === name).used_percent);
+    // Thinning only drops readings: every point inside the last 30 days is one the 30-day series has, unchanged.
+    const inMonth = new Map(month.find((m) => m.metric === name).points.map((p) => [p.at, p.used]));
+    const start = month.find((m) => m.metric === name).points[0].at;
+    for (const p of series.points.filter((q) => q.at >= start)) assert.equal(inMonth.get(p.at), p.used, `${name}: a reading at ${p.at} the 30-day series does not have`);
+  }
+});
+
+test("a long range is thinned as the app thins it", async () => {
+  const { thin, HISTORY_MAX_POINTS } = await loadDemoBackend();
+  // crates/core/src/history.rs, `long_ranges_are_thinned_and_keep_the_newest_reading`.
+  const points = Array.from({ length: 4_000 }, (_, i) => ({ at: i, used: i }));
+  const thinned = thin(points);
+  assert.ok(thinned.length <= HISTORY_MAX_POINTS + 1, String(thinned.length));
+  assert.equal(thinned[0].at, 0);
+  assert.equal(thinned.at(-1).at, 3_999);
+  assert.deepEqual(thinned.slice(0, 4).map((p) => p.at), [0, 3, 6, 9], "every ceil(4000 / 1500) = 3rd reading");
+  assert.equal(points.length, 4_000, "the array passed in is not touched");
+  // At the cap nothing is dropped; one over it, every second reading goes and the newest stays.
+  assert.equal(thin(points.slice(0, HISTORY_MAX_POINTS)).length, HISTORY_MAX_POINTS);
+  const over = thin(points.slice(0, HISTORY_MAX_POINTS + 1));
+  assert.deepEqual([over.length, over[1].at, over.at(-1).at], [751, 2, HISTORY_MAX_POINTS]);
 });
 
 test("the figures do not move with the clock", async (t) => {
@@ -275,12 +381,14 @@ test("a duration is chosen by size, as the app's own is", async () => {
   assert.equal(shape(60), "time.hoursMins h=1,m=0");
   assert.equal(shape(1439), "time.hoursMins h=23,m=59");
   assert.equal(shape(1440), "time.daysHours d=1,h=0");
+  assert.equal(shape(59.9), "time.mins m=59", "whole minutes: the rest is dropped");
+  assert.equal(shape(0.4), "time.mins m=1", "and a fraction of a minute reads as one");
   assert.equal(durationMsg(130).count, null, "no count: it is a length, not a quantity");
 });
 
 test("the finding needs the threshold the Rust rule has, to the minute", async () => {
   const { buildLimitTimeRow, LIMIT_TIME_FINDING_MS } = await loadDemoBackend();
-  assert.equal(LIMIT_TIME_FINDING_MS, await findingThresholdMs(), "the same figure as FINDING_AT_MS in crates/core/src/limit_time.rs");
+  assert.equal(LIMIT_TIME_FINDING_MS, FINDING_AT, "the same figure as FINDING_AT_MS in crates/core/src/limit_time.rs");
   assert.equal(LIMIT_TIME_FINDING_MS, 2 * HOUR, "the strings say two hours in words");
   assert.equal(buildLimitTimeRow([]), null);
   assert.equal(buildLimitTimeRow([lt("claude", "Weekly", LIMIT_TIME_FINDING_MS - 1)]), null, "a millisecond under says nothing");
@@ -352,15 +460,14 @@ test("the finding reads whole in every language and size", async () => {
   }
 });
 
-test("the finding has no Learn more link, as the Rust one has none", async () => {
-  const rust = await readFile(new URL("../crates/core/src/limit_time.rs", import.meta.url), "utf8");
-  assert.match(rust, /Opportunity::from_msgs\("limit-time", "learn", title, Some\(detail\), None\)/, "limit_time.rs now builds the finding with a link");
+test("the finding has no Learn more link, as the Rust one has none", () => {
+  assert.match(limitTimeRust, /Opportunity::from_msgs\("limit-time", "learn", title, Some\(detail\), None\)/, "limit_time.rs now builds the finding with a link");
 });
 
 test("the demo's own readings make exactly one finding, in the Inventory and in the Audit", async (t) => {
   const { handle, durationMsg, limitTimeOrder, render, LOCALES } = await loadDemoBackend();
   setClock(t, NOON);
-  const threshold = await findingThresholdMs();
+  const threshold = FINDING_AT;
   // Every card's rows, as the app's finding reads them: the same ones the Detail view's lines are made of.
   const cards = handle("cached_usage").map((c) => c.id);
   const rows = cards.flatMap((providerId) => handle("get_limit_time", { providerId }));
@@ -413,19 +520,31 @@ test("the demo's own readings make exactly one finding, in the Inventory and in 
   }
 });
 
-test("a machine whose limits never ran out has no finding, and an audit with nothing added", async () => {
-  const { auditWithLimitTime, buildLimitTimeRow } = await loadDemoBackend();
+test("the audit carries the findings the demo built from its state, and the engine's checks for them go", async () => {
+  const { auditWithFindings, buildLimitTimeRow, buildOverBudgetRow } = await loadDemoBackend();
   const fixtureAudit = JSON.parse(await readFile(new URL("../src/demo-fixture.json", import.meta.url), "utf8")).audit;
-  const none = buildLimitTimeRow([lt("claude", "Weekly", HOUR)]);
-  assert.equal(none, null);
-  const same = auditWithLimitTime(fixtureAudit, none);
-  assert.deepEqual(same, fixtureAudit);
-  assert.notStrictEqual(same, fixtureAudit, "still a copy");
-  // A report that already has the finding is not given a second.
-  const row = buildLimitTimeRow([lt("claude", "Weekly", 3 * HOUR)]);
-  const once = auditWithLimitTime(fixtureAudit, row);
-  assert.deepEqual(auditWithLimitTime(once, row), once);
-  assert.equal(fixtureAudit.sections.flatMap((s) => s.checks).filter((c) => c.id === "limit-time").length, 0, "the argument is never written to");
+  const idsOf = (report) => report.sections.flatMap((s) => s.checks).map((c) => c.id);
+  assert.ok(idsOf(fixtureAudit).includes("agent-over-budget"), "the fixture has the engine's check, or this test proves nothing");
+
+  // Nothing built: the engine's frozen checks for the two are dropped, and everything else is as it was.
+  const none = auditWithFindings(fixtureAudit, [null, null]);
+  assert.deepEqual(idsOf(none), idsOf(fixtureAudit).filter((id) => id !== "agent-over-budget"));
+  assert.notStrictEqual(none, fixtureAudit, "a copy");
+  assert.ok(idsOf(fixtureAudit).includes("agent-over-budget"), "the argument is never written to");
+
+  // Both built: each once, unscored, where the engine puts them, and asking again changes nothing.
+  const over = buildOverBudgetRow([{ agent: "general-purpose", monthToDate: 14.7362, monthlyBudget: 10 }]);
+  const limit = buildLimitTimeRow([{ provider: "claude", metric: "Weekly", times: 3, totalMs: 5 * HOUR, longestMs: 3 * HOUR }]);
+  const both = auditWithFindings(fixtureAudit, [over, limit]);
+  const usage = both.sections.find((s) => s.nameKey === "section.usage").checks;
+  assert.deepEqual(usage.slice(0, 3).map((c) => [c.id, c.status]), [["pricing-cache-ttl", "pass"], ["agent-over-budget", "consider"], ["limit-time", "consider"]]);
+  assert.equal(idsOf(both).filter((id) => id === "agent-over-budget" || id === "limit-time").length, 2);
+  assert.deepEqual(auditWithFindings(both, [over, limit]), both);
+  // The score does not move: a "consider" check is unscored.
+  assert.deepEqual([both.passed, both.attention, both.score], [fixtureAudit.passed, fixtureAudit.attention, fixtureAudit.score]);
+  // A finding the demo does not build is not added, whatever the report held before.
+  const onlyLimit = auditWithFindings(both, [null, limit]);
+  assert.deepEqual(idsOf(onlyLimit).filter((id) => id === "agent-over-budget" || id === "limit-time"), ["limit-time"]);
 });
 
 test("the Audit opens the Usage tab for the time-at-the-limit check", async () => {

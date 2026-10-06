@@ -296,7 +296,9 @@ struct AgentWatchView {
 }
 
 /// The names a budget may be set for: built-in agents, agents defined on this
-/// machine, and any agent with spend. Never typed by the user.
+/// machine, and any agent with spend. Never typed by the user. The demo fixture
+/// builds the same view in `spend::tests::live_agent_watch`: a change to what
+/// the view is made of needs the same change there.
 fn known_agent_inputs() -> (Vec<String>, Vec<spend::AgentSpend>) {
     let defined: Vec<String> = inventory::scan().agents.into_iter().map(|a| a.name).collect();
     (defined, spend::agent_spend(31))
@@ -577,7 +579,8 @@ fn cache_is_fresh(captured: std::time::Instant, ttl: std::time::Duration, now: s
 /// The inventory plus every computed finding, and the spend it was built
 /// from. **Both the Inventory tab and the audit go through here**: they used
 /// to assemble the list separately, so the audit silently scored a shorter
-/// one than the tab displayed.
+/// one than the tab displayed. The demo fixture's audit takes the same steps in
+/// `audit::tests::live_audit`: a step added here needs adding there too.
 fn enriched_inventory() -> (inventory::Inventory, Vec<spend::ProviderSpend>) {
     let mut inv = inventory::scan();
     let spend = spend::collect(None);

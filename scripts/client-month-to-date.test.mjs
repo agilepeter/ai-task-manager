@@ -20,11 +20,12 @@
 //    viewer's today, so a label from another month says nothing about this one, and
 //    zeroing on it would show "$0 of $600" beside bars of hundreds.
 //
-// Same combined-module technique as scripts/detail-focus.test.mjs.
+// The detail page is loaded by the combined-module technique of scripts/detail-focus.test.mjs.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import ts from "typescript";
+import { loadDemoBackend as loadFreshDemoBackend } from "./demo-backend.mjs";
 import { inlineLocaleImports } from "./inline-locales.mjs";
 
 const win = (cost) => ({ cost, tokens: cost * 10, cache_read: 0, models: [] });
@@ -43,30 +44,11 @@ const area = (name, extra = {}) => ({
 // The demo's stand-in backend
 // ---------------------------------------------------------------------------
 
+// Loaded by scripts/demo-backend.mjs, with the real modules it imports and the committed fixture.
 let demoModule = null;
 async function loadDemoBackend() {
-  if (!demoModule) demoModule = buildDemoBackend();
+  if (!demoModule) demoModule = loadFreshDemoBackend();
   return demoModule;
-}
-
-async function buildDemoBackend() {
-  const source = await readFile(new URL("../src/demo/mock.ts", import.meta.url), "utf8");
-  // None of the three imports is reachable from `client_rollup`: the fixture and the
-  // synthetic-finding builders are read only by other commands, and `t` only by the
-  // agent-watch validation, so each becomes an inert stand-in.
-  const stripped = source
-    .replace('import fixture from "../demo-fixture.json";', "const fixture = {};")
-    .replace('import { t } from "../i18n";', "const t = (key) => key;")
-    .replace(
-      /^import \{[^}]*\} from "\.\/synthetic";$/m,
-      "const auditWithLimitTime = (report) => report;\nconst buildDuplicateProcessesRow = () => null;\nconst buildLimitTimeRow = () => null;\nconst buildUsageRows = () => [];\nconst limitTimeOrder = () => 0;",
-    );
-  if (stripped === source) throw new Error("no substitution matched -- src/demo/mock.ts's imports moved under this test");
-  // The build hands the demo its version through a `declare const`, which transpiling erases.
-  const code = ts.transpileModule(`const __APP_VERSION__ = "test";\n${stripped}`, {
-    compilerOptions: { module: ts.ModuleKind.ESNext },
-  }).outputText;
-  return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 
 /** The demo's clock, pinned: local noon on the given day. */

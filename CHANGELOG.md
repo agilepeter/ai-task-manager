@@ -8,8 +8,8 @@ release history is kept verbatim in
 
 ## 0.1.6 — 2026-10-06
 
-Budgets for agents, time spent at the limit, and a fix for client budgets on
-the 31st.
+Budgets for agents and time spent at the limit, both in all nine languages,
+and a fix for client budgets on the 31st.
 
 ### Added
 
@@ -36,7 +36,7 @@ the 31st.
 - **Time spent at the limit.** A provider's page says how often each limit
   reached 100 percent in the last 30 days and for how long in all, one line
   per limit, most time first, for example "Weekly: fully used 3 times in the
-  last 30 days, 5h 8m in all". A limit that never got there has no line. It is
+  last 30 days, 5h 7m in all". A limit that never got there has no line. It is
   worked out from the readings the app already keeps. Time counts only
   between two readings taken within 90 minutes of each other, up to the reset
   when one falls between them, so a stretch when the app was not running is
@@ -46,15 +46,6 @@ the 31st.
 
 ### Changed
 
-- **The new wording was checked by back-translation in all nine languages.**
-  For each language other than English, an independent reader translated the
-  strings this release adds back into English without seeing the original,
-  and what they found was corrected: 128 strings across the nine languages.
-  Nine of those are English, reworded because several readers had misread the
-  same one. A limit that ran out reads "fully used" and not "at 100%", which
-  the app also says of a limit that is fully available. The spend figure is
-  labelled as spend per hour, so it reads as money. A figure you set is no
-  longer called a limit, the word for a provider's quota.
 - **The TLS library is updated to rustls 0.23.45, which clears
   RUSTSEC-2026-0285.** A TLS 1.3 peer could send handshake messages at the
   wrong encryption level without being refused. The handshake was still

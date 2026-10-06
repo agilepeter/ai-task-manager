@@ -12,7 +12,19 @@
 
 import fixture from "../demo-fixture.json";
 import { t } from "../i18n";
-import { auditWithLimitTime, buildDuplicateProcessesRow, buildLimitTimeRow, buildUsageRows, limitTimeOrder, type LimitTimeRow } from "./synthetic";
+import {
+  auditWithFindings,
+  buildDuplicateProcessesRow,
+  buildLimitTimeRow,
+  buildOverBudgetRow,
+  buildUsageRows,
+  LIMIT_WINDOW_MS,
+  limitTimeOrder,
+  STATE_FINDING_IDS,
+  thin,
+  timeAtLimit,
+  type LimitTimeRow,
+} from "./synthetic";
 
 // Set by the build from package.json (vite.config.ts), never typed in here.
 declare const __APP_VERSION__: string;
@@ -99,20 +111,25 @@ const WALLS: Record<string, Record<number, number>> = {
 
 /** One reading every half hour, each a little before its half hour. The time-at-the-limit rule
  *  pairs readings only when they are 90 minutes apart or less, so a longer step would count
- *  no time at all; and 30 days of this is 1,440 readings, under the 1,500 the app's own chart
- *  is cut to. No reading falls on a reset, as a real one almost never does (the rule treats a
- *  reset on the later reading's own instant as not between the two): every reset here is a
- *  whole number of six minutes from a half hour, and the offset is under six and never zero. */
+ *  no time at all. 30 days of this is 1,440 readings, under the 1,500 the app's own chart is
+ *  cut to; 90 days is 4,320, which `history` thins to that cap the way the app does. No reading
+ *  falls on a reset, as a real one almost never does (the rule treats a reset on the later
+ *  reading's own instant as not between the two): every reset here is a whole number of six
+ *  minutes from a half hour, and the offset is under six and never zero. */
 const READING_STEP = 30 * 60_000;
 const READING_OFFSET = 5 * 60_000;
+/** The share of a short limit's past windows that go unused, and the most such a window reaches. */
+const IDLE_WINDOW_SHARE = 0.45;
+const IDLE_PEAK = 8;
 /** The history store keeps 90 days, and the app's own command reads no more than that. */
 const MAX_HISTORY_HOURS = 24 * 90;
 
 /** One card's progress limits as the demo's history store holds them over the last `hours`,
  *  oldest reading first. The chart (`history`) and the time at the limit (`limitTime`) both
  *  read this, so the one cannot say what the other does not show. A sawtooth that lands exactly
- *  on each limit's live value, built back from one reading of the clock: the same instants and
- *  values whatever the range, so a shorter range is the newest part of a longer one. */
+ *  on each limit's live value, built back from one reading of the clock: each earlier period
+ *  climbs to a height of its own, and the same instants and values come back whatever the range,
+ *  so a shorter range is the newest part of a longer one. */
 function readings(provider: string, hours: number): { metric: string; points: Reading[] }[] {
   const end = now();
   const snap = snapshots(end).find((s) => s.id === provider);
@@ -126,12 +143,26 @@ function readings(provider: string, hours: number): { metric: string; points: Re
       const livePeriodStart = (m.resets_at as number) - period;
       const liveAge = end - livePeriodStart;
       const walls = WALLS[`${provider}/${m.label}`] ?? {};
+      // Two streams. Each reading draws its own offset and noise, the same two draws every time, so
+      // what one reading says never depends on how far back the range goes. The height an earlier
+      // period climbs to is drawn once for the period, the first time a reading meets it, and the
+      // periods are met in order, so each keeps its own height whatever the range. A 5-hour window
+      // often goes unused (the account is not working round the clock), which leaves the 30- and
+      // 90-day line a sawtooth with gaps instead of a solid band; a week or a month always sees use.
       const rand = rng(provider.length * 7919 + slot * 104729);
+      const peakRand = rng(provider.length * 6007 + slot * 90001 + 3);
+      const idleShare = period < 24 * HOUR ? IDLE_WINDOW_SHARE : 0;
+      const peaks: number[] = [];
+      const peakOf = (back: number) => {
+        while (peaks.length < back) {
+          const u = peakRand();
+          peaks.push(u < idleShare ? (u / idleShare) * IDLE_PEAK : 55 + ((u - idleShare) / (1 - idleShare)) * 40);
+        }
+        return peaks[back - 1];
+      };
       const points: Reading[] = [];
       for (let j = 0; ; j++) {
-        // The same three draws for every reading, so what one reading says never depends on how far back the range goes.
         const offset = 1 + Math.floor(rand() * (READING_OFFSET - 1));
-        const peak = 55 + rand() * 40;
         const noise = (rand() - 0.5) * 2.4;
         const at = j === 0 ? end : end - j * READING_STEP - offset;
         if (!(at >= start)) break;
@@ -146,16 +177,17 @@ function readings(provider: string, hours: number): { metric: string; points: Re
         else if (intoPeriod >= wallAt) used = 100;
         else if (held !== undefined) used = Math.min(99.9, settle(ramp(100, wallAt)));
         else if (back === 0) used = settle(ramp(m.used_percent, liveAge));
-        else used = settle(ramp(peak, period));
+        else used = settle(ramp(peakOf(back), period));
         points.push({ at, used, resetsAt: periodStart + period });
       }
       return { metric: m.label as string, points: points.reverse() };
     });
 }
 
-/** Limit readings for one card over the last `hours`, for the chart. */
+/** Limit readings for one card over the last `hours`, for the chart, a long range cut to the cap
+ *  the app cuts it to. */
 function history(provider: string, hours: number) {
-  return readings(provider, hours).map(({ metric, points }) => ({ metric, points: points.map(({ at, used }) => ({ at, used })) }));
+  return readings(provider, hours).map(({ metric, points }) => ({ metric, points: thin(points.map(({ at, used }) => ({ at, used }))) }));
 }
 
 function burnProfile(provider: string) {
@@ -177,77 +209,23 @@ function burnProfile(provider: string) {
     }));
 }
 
-/** A reading at or above this is a limit that has been reached (`AT_LIMIT` in limit_time.rs). */
-const AT_LIMIT = 100;
-/** Two readings further apart than this say nothing about the time between them (`MAX_GAP_MS`). */
-const MAX_PAIR_GAP_MS = 90 * 60_000;
-
-/** The stretches one limit spent at 100 percent, from its readings, oldest first: the rule of
- *  `from_points` in crates/core/src/limit_time.rs, which scripts/demo-limit-time.test.mjs holds
- *  this to case for case. Walking consecutive pairs A then B, a pair counts only when A is at the
- *  limit and the two are within 90 minutes: up to A's own reset when that falls strictly between
- *  them (the limit held until then, and the stretch ends), else the whole gap when B is at the
- *  limit too, else nothing (B is lower with no reset between, so nobody knows when it dropped).
- *  A longer gap, or readings out of order, count nothing and end the stretch. `null` when the
- *  limit was never reached. */
-export function timeAtLimit(
-  provider: string,
-  metric: string,
-  points: { at: number; used: number; resetsAt: number | null }[],
-): LimitTimeRow | null {
-  let times = 0, total = 0, longest = 0, run = 0, open = false;
-  for (let i = 0; i < points.length; i++) {
-    const { at, used, resetsAt } = points[i];
-    if (!(used >= AT_LIMIT)) {
-      longest = Math.max(longest, run);
-      open = false;
-      continue;
-    }
-    if (!open) {
-      times++;
-      open = true;
-      run = 0;
-    }
-    const next = points[i + 1];
-    if (!next) break;
-    const gap = next.at - at;
-    let continues = false;
-    if (gap >= 0 && gap <= MAX_PAIR_GAP_MS) {
-      let counted: number | null = null;
-      if (resetsAt !== null && resetsAt > at && resetsAt < next.at) counted = resetsAt - at;
-      else if (next.used >= AT_LIMIT) {
-        continues = true;
-        counted = gap;
-      }
-      if (counted !== null) {
-        total += counted;
-        run += counted;
-      }
-    }
-    if (!continues) {
-      longest = Math.max(longest, run);
-      open = false;
-    }
-  }
-  longest = Math.max(longest, run);
-  return times > 0 ? { provider, metric, times, totalMs: total, longestMs: longest } : null;
-}
-
 /** Time spent at 100 percent over the last 30 days, one row per limit that reached it, most time
  *  first. Worked out from the readings the chart draws (`readings`), the way the app works it out
  *  from its history store, so the Detail view's line and its chart cannot disagree. */
 function limitTime(provider: string): LimitTimeRow[] {
-  return readings(provider, 24 * 30)
+  return readings(provider, LIMIT_WINDOW_MS / HOUR)
     .map(({ metric, points }) => timeAtLimit(provider, metric, points))
     .filter((row): row is LimitTimeRow => row !== null)
     .sort(limitTimeOrder);
 }
 
-/** The time-at-the-limit finding for the whole machine, as the app computes it: over every card's
- *  limits at once, from the same rows the Detail view's line is made of. The fictional machine
- *  keeps no history of limit readings for the engine to read, so this one is built here. */
-function limitTimeFinding() {
-  return buildLimitTimeRow(snapshots().flatMap((s) => limitTime(s.id)));
+/** The findings the demo works out from its own state, in the order the app lists them (the
+ *  budgets, then time at the limit), null where there is nothing to say. As the app does on every
+ *  load, so a budget the visitor removes or adds changes the first at once. The time at the limit
+ *  is read over every card's limits at once, from the same rows the Detail view's line is made of:
+ *  the fictional machine keeps no history of limit readings for the engine to read. */
+function stateFindings() {
+  return [buildOverBudgetRow(budgetRows()), buildLimitTimeRow(snapshots().flatMap((s) => limitTime(s.id)))];
 }
 
 function forecast(metrics: any[]) {
@@ -420,14 +398,13 @@ function inventory() {
     else if (pin) s.pinTo = pin[0];
   }
   // The app adds the usage findings to the setup ones; the audit carries
-  // them, Msg and all, so they translate exactly as they do on that panel.
-  const existingIds = new Set<string>(inv.opportunities.map((o: any) => o.id));
-  inv.opportunities.push(...buildUsageRows((fixture as any).audit.sections, existingIds));
-  // The one finding the engine cannot compute for this machine: it keeps no history of limit
-  // readings, so this is built from the demo's own. Pushed last, as the app lists the learn
-  // findings after the tighten ones.
-  const limitRow = limitTimeFinding();
-  if (limitRow && !existingIds.has(limitRow.id)) inv.opportunities.push(limitRow);
+  // them, Msg and all, so they translate exactly as they do on that panel. The
+  // engine's checks for the findings built from the demo's state below are not
+  // lifted: they describe the machine as it was generated.
+  const liftable = new Set<string>([...inv.opportunities.map((o: any) => o.id), ...STATE_FINDING_IDS]);
+  inv.opportunities.push(...buildUsageRows((fixture as any).audit.sections, liftable));
+  // Those, last, as the app lists the learn findings after the tighten ones.
+  inv.opportunities.push(...stateFindings().filter((row) => row !== null));
   // The real app computes this one from the live process list; the demo has
   // a fixed process list, so derive it the same way rather than hard-coding
   // text -- see synthetic.ts for the shared keys and vars with procs.rs.
@@ -482,13 +459,17 @@ function agentWatchKnown(saved: { agent: string }[]): string[] {
   return [...new Set([...fixtureWatch().known, ...saved.map((b) => b.agent)])].sort();
 }
 
+/** The saved budgets as the app lists them: one row each, in the order saved. A budget reads its
+ *  agent's spend for the calendar month, as the engine summed it for every agent that has any (a
+ *  Map, so an agent named like an Object property is no special case): a budget the visitor adds on
+ *  an agent with spend reads that spend, and one on an agent with none reads $0, as in the app. */
+function budgetRows() {
+  const monthToDate = new Map(Object.entries(fixtureWatch().monthSpend));
+  return savedWatch().budgets.map((b) => ({ agent: b.agent, monthToDate: monthToDate.get(b.agent) ?? 0, monthlyBudget: b.monthlyBudget }));
+}
+
 function agentWatchView() {
   const saved = savedWatch();
-  // A budget reads its agent's spend for the calendar month, as the engine summed it for every
-  // agent that has any (a Map, so an agent named like an Object property is no special case):
-  // a budget the visitor adds on an agent with spend reads that spend, and one on an agent
-  // with none reads $0, as in the app.
-  const monthToDate = new Map(Object.entries(fixtureWatch().monthSpend));
   // The same sum the real app makes: the fastest priced, non-idle running pace,
   // a dollar figure an hour (the last ten minutes carried over an hour).
   const paces = AGENTS.map((a) => a.pace as { priced: boolean; idleSecs: number; tokens10m: number; cost10m: number } | null)
@@ -496,7 +477,7 @@ function agentWatchView() {
     .map((p) => p!.cost10m * 6);
   return structuredClone({
     watch: saved,
-    budgets: saved.budgets.map((b) => ({ agent: b.agent, monthToDate: monthToDate.get(b.agent) ?? 0, monthlyBudget: b.monthlyBudget })),
+    budgets: budgetRows(),
     runaways: [],
     liveHint: paces.length ? Math.max(...paces) : null,
     known: agentWatchKnown(saved.budgets),
@@ -574,7 +555,7 @@ export function handle(cmd: string, args: Args = {}): unknown {
     case "get_limit_time": return limitTime(args.providerId);
     case "get_forecast": return forecast(args.metrics ?? []);
     case "get_sessions": return args.day ? (fixture as any).sessions.day.slice(0, 12) : (fixture as any).sessions.area;
-    case "get_audit": return auditWithLimitTime((fixture as any).audit, limitTimeFinding());
+    case "get_audit": return auditWithFindings((fixture as any).audit, stateFindings());
     case "get_ledger": return ledger(args.usage30 ?? {});
     case "save_subscription": {
       const s = { ...args.subscription };

@@ -117,8 +117,7 @@ directory with upstream Pane would let the two apps overwrite each other.
   and the rule's two figures (a dollar pace per hour, and minutes open).
   Never a path, a prompt or a credential. A name you chose may match a client,
   so the file stays on your machine: it is never sent anywhere, and nothing in
-  it reaches the seat report or the local API's feeds (a test,
-  `nothing_in_the_watch_reaches_the_seat_report_or_the_feed`, plants a
+  it reaches the seat report or the local API's feeds (a test plants a
   budget name, a budget and both figures in a watch and checks that none of
   them appears in either). The `/v1/agents` feed is a separate matter: while
   `apiFeeds` is on, on loopback, it lists every agent with spend in the last

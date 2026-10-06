@@ -9,10 +9,22 @@
 // the committed one, so a test runs against what the demo ships. Each call is a new instance of
 // the module, with the in-memory state and active language of a fresh page load.
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { inlineLocaleImports } from "./inline-locales.mjs";
 
 let instances = 0;
+
+/** The language level tsconfig.json builds the demo at. `ts.transpileModule` left to itself targets
+ *  ES5, where spreading a Set turns into an empty array, which the build the demo ships in never does. */
+const target = (() => {
+  const file = fileURLToPath(new URL("../tsconfig.json", import.meta.url));
+  const read = ts.readConfigFile(file, ts.sys.readFile);
+  if (read.error) throw new Error(`could not read tsconfig.json: ${ts.flattenDiagnosticMessageText(read.error.messageText, "\n")}`);
+  const { options, errors } = ts.convertCompilerOptionsFromJson(read.config.compilerOptions ?? {}, ".");
+  if (errors.length || options.target === undefined) throw new Error("tsconfig.json names no usable compilerOptions.target");
+  return options.target;
+})();
 
 const read = (rel) => readFile(new URL(`../src/${rel}`, import.meta.url), "utf8");
 
@@ -31,10 +43,8 @@ export async function loadDemoBackend(fixture) {
   mock = without(mock, /^import\s*\{[^}]*\}\s*from\s*["']\.\.\/i18n["'];[ \t]*$/m, "i18n");
   mock = without(mock, /^import\s*\{[^}]*\}\s*from\s*["']\.\/synthetic["'];[ \t]*$/m, "synthetic");
   // The build hands the demo its version through a `declare const`, which transpiling erases.
-  // The target is tsconfig.json's own: left to its ES5 default, transpiling turns spreading a Set
-  // into an empty array, which the build the demo ships in never does.
   const code = ts.transpileModule(`const __APP_VERSION__ = "test";\n${i18n}\n${synthetic}\n${mock}\n// instance ${instances++}`, {
-    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 },
+    compilerOptions: { module: ts.ModuleKind.ESNext, target },
   }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
