@@ -918,6 +918,17 @@ mod tests {
         // And the same setup-changes step, read from the history on file.
         let today = crate::spend::today_naive_date().format("%Y-%m-%d").to_string();
         inv.opportunities.extend(crate::changes::opportunities(&crate::changes::changes_at(&crate::providers::config_dir(), &inv, &today)));
+        // And the agent-watch step: nothing set means nothing is read. The fictional machine
+        // runs no agents and its live rule is unset, so no runaway can exist and the empty
+        // slice is what the real step would pass; the budgets over their figure are what add
+        // a finding. The limit-time step is left out on purpose: that finding is worked out
+        // from a history of limit readings, which this machine does not keep, so the demo
+        // builds it from its own readings (src/demo/synthetic.ts).
+        let watch = crate::agent_watch::load_from(&crate::agent_watch::path());
+        if !watch.is_empty() {
+            let rows = crate::agent_watch::budget_rows(&crate::spend::agent_spend_month(), &watch);
+            inv.opportunities.extend(crate::agent_watch::opportunities(&crate::agent_watch::currently_over(&rows), &[]));
+        }
         let l = view(&crate::ledger::load_from(&crate::ledger::path()), crate::spend::today_naive_date(), &HashMap::new());
         let areas: std::collections::HashSet<&str> = spend.iter().flat_map(|p| p.projects.iter())
             .flat_map(|pr| pr.areas.iter()).map(|a| crate::spend::area_top(&a.area)).filter(|a| !a.starts_with('(')).collect();

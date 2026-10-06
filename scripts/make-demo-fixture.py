@@ -104,7 +104,8 @@ write(home / "Library/Application Support/AITaskManager/clients.json", json.dump
 # this machine's subagent logs carry (below): general-purpose spends more than
 # $10 this month and deploy-checker less than $5. The live rule is unset, as it
 # is for every user until they set it. The Agents view's month figures come
-# from the real engine against this file (live_agent_watch), never typed.
+# from the real engine against this file (live_agent_watch), and so does the
+# audit's over-budget check (live_audit), never typed.
 write(home / "Library/Application Support/AITaskManager/agent_watch.json", json.dumps({
     "budgets": [
         {"agent": "general-purpose", "monthlyBudget": 10},

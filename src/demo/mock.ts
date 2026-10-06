@@ -12,7 +12,7 @@
 
 import fixture from "../demo-fixture.json";
 import { t } from "../i18n";
-import { buildDuplicateProcessesRow, buildUsageRows } from "./synthetic";
+import { auditWithLimitTime, buildDuplicateProcessesRow, buildLimitTimeRow, buildUsageRows, limitTimeOrder, type LimitTimeRow } from "./synthetic";
 
 // Set by the build from package.json (vite.config.ts), never typed in here.
 declare const __APP_VERSION__: string;
@@ -177,9 +177,6 @@ function burnProfile(provider: string) {
     }));
 }
 
-/** One limit's time at 100 percent, as `get_limit_time` answers it. */
-type LimitTimeRow = { provider: string; metric: string; times: number; totalMs: number; longestMs: number };
-
 /** A reading at or above this is a limit that has been reached (`AT_LIMIT` in limit_time.rs). */
 const AT_LIMIT = 100;
 /** Two readings further apart than this say nothing about the time between them (`MAX_GAP_MS`). */
@@ -243,7 +240,14 @@ function limitTime(provider: string): LimitTimeRow[] {
   return readings(provider, 24 * 30)
     .map(({ metric, points }) => timeAtLimit(provider, metric, points))
     .filter((row): row is LimitTimeRow => row !== null)
-    .sort((a, b) => b.totalMs - a.totalMs || b.longestMs - a.longestMs || (a.metric < b.metric ? -1 : a.metric > b.metric ? 1 : 0));
+    .sort(limitTimeOrder);
+}
+
+/** The time-at-the-limit finding for the whole machine, as the app computes it: over every card's
+ *  limits at once, from the same rows the Detail view's line is made of. The fictional machine
+ *  keeps no history of limit readings for the engine to read, so this one is built here. */
+function limitTimeFinding() {
+  return buildLimitTimeRow(snapshots().flatMap((s) => limitTime(s.id)));
 }
 
 function forecast(metrics: any[]) {
@@ -419,6 +423,11 @@ function inventory() {
   // them, Msg and all, so they translate exactly as they do on that panel.
   const existingIds = new Set<string>(inv.opportunities.map((o: any) => o.id));
   inv.opportunities.push(...buildUsageRows((fixture as any).audit.sections, existingIds));
+  // The one finding the engine cannot compute for this machine: it keeps no history of limit
+  // readings, so this is built from the demo's own. Pushed last, as the app lists the learn
+  // findings after the tighten ones.
+  const limitRow = limitTimeFinding();
+  if (limitRow && !existingIds.has(limitRow.id)) inv.opportunities.push(limitRow);
   // The real app computes this one from the live process list; the demo has
   // a fixed process list, so derive it the same way rather than hard-coding
   // text -- see synthetic.ts for the shared keys and vars with procs.rs.
@@ -557,7 +566,7 @@ export function handle(cmd: string, args: Args = {}): unknown {
     case "get_limit_time": return limitTime(args.providerId);
     case "get_forecast": return forecast(args.metrics ?? []);
     case "get_sessions": return args.day ? (fixture as any).sessions.day.slice(0, 12) : (fixture as any).sessions.area;
-    case "get_audit": return (fixture as any).audit;
+    case "get_audit": return auditWithLimitTime((fixture as any).audit, limitTimeFinding());
     case "get_ledger": return ledger(args.usage30 ?? {});
     case "save_subscription": {
       const s = { ...args.subscription };

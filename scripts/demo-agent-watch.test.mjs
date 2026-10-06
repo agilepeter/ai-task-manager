@@ -13,8 +13,10 @@ import { loadDemoBackend } from "./demo-backend.mjs";
 const fixture = JSON.parse(await readFile(new URL("../src/demo-fixture.json", import.meta.url), "utf8"));
 const engine = fixture.agentWatch;
 
-/** A fresh page load of the demo, over the real fixture's agent watch alone. */
-const freshDemo = () => loadDemoBackend({ agentWatch: engine });
+/** A fresh page load of the demo, over the committed fixture. */
+const freshDemo = () => loadDemoBackend(fixture);
+
+const en = JSON.parse(await readFile(new URL("../src/locales/en.json", import.meta.url), "utf8"));
 
 test("the demo's budgets are the engine's answer for the fictional machine", async () => {
   const { handle } = await freshDemo();
@@ -66,11 +68,66 @@ test("the demo refuses what the app refuses", async () => {
     }
     return null;
   };
-  assert.equal(refused([{ agent: "an-agent-nobody-has", monthlyBudget: 5 }]), "error.agentWatch.pick", "a name that is not offered");
-  assert.equal(refused([{ agent: first.agent, monthlyBudget: 5 }, { agent: first.agent, monthlyBudget: 6 }]), "error.agentWatch.duplicate");
-  assert.equal(refused([{ agent: first.agent, monthlyBudget: 0 }]), "error.agentWatch.figure", "a figure of zero");
-  assert.equal(refused([{ agent: first.agent, monthlyBudget: 1_000_001 }]), "error.agentWatch.figure", "a figure above the cap");
+  // The refusals are the app's own translated messages, not keys.
+  assert.equal(refused([{ agent: "an-agent-nobody-has", monthlyBudget: 5 }]), en["error.agentWatch.pick"], "a name that is not offered");
+  assert.equal(refused([{ agent: first.agent, monthlyBudget: 5 }, { agent: first.agent, monthlyBudget: 6 }]), en["error.agentWatch.duplicate"]);
+  assert.equal(refused([{ agent: first.agent, monthlyBudget: 0 }]), en["error.agentWatch.figure"], "a figure of zero");
+  assert.equal(refused([{ agent: first.agent, monthlyBudget: 1_000_001 }]), en["error.agentWatch.figure"], "a figure above the cap");
   assert.equal(refused([{ agent: engine.known[0], monthlyBudget: 5 }]), null, "a name the engine offers is accepted");
   // A save that failed changed nothing.
   assert.deepEqual(handle("get_agent_watch").watch.budgets, [{ agent: engine.known[0], monthlyBudget: 5 }]);
+});
+
+// ---------------------------------------------------------------------------
+// The finding that goes with the budgets
+// ---------------------------------------------------------------------------
+
+test("the audit carries the over-budget finding for exactly the budgets that are over", () => {
+  const checks = fixture.audit.sections.flatMap((s) => s.checks);
+  const finding = checks.find((c) => c.id === "agent-over-budget");
+  assert.ok(finding, "a budget is over its figure, so the engine's audit has the finding: live_audit has to read agent_watch.json");
+  assert.equal(finding.status, "consider", "an unscored row: a budget passed is worth a look, not a failing");
+  assert.equal(checks.filter((c) => c.id === "agent-over-budget").length, 1);
+
+  const over = engine.budgets.filter((b) => b.monthToDate >= b.monthlyBudget);
+  assert.ok(over.length > 0 && over.length < engine.budgets.length, "the demo shows a budget over and one that is not");
+  // The title is a count and nothing else, so consistency runs through the budgets: how many are
+  // over, and which, from the detail's own list, "name ($spent / $budget)", figures to the cent.
+  assert.equal(finding.titleMsg.count, over.length);
+  assert.deepEqual(finding.titleMsg.vars, {});
+  const listed = finding.detailMsg.vars.names.split(", ").map((entry) => {
+    const parts = entry.match(/^(.+) \(\$(\d+\.\d\d) \/ \$(\d+\.\d\d)\)$/);
+    assert.ok(parts, `not a "name ($spent / $budget)" entry: ${entry}`);
+    return { agent: parts[1], spent: Number(parts[2]), budget: Number(parts[3]) };
+  });
+  assert.deepEqual(listed.map((e) => e.agent).sort(), over.map((b) => b.agent).sort(), "the agents it names are the ones over in the budgets");
+  for (const entry of listed) {
+    const budget = over.find((b) => b.agent === entry.agent);
+    assert.ok(Math.abs(entry.spent - budget.monthToDate) < 0.005 + 1e-9, `${entry.agent}: spent ${entry.spent} against ${budget.monthToDate}`);
+    assert.ok(Math.abs(entry.budget - budget.monthlyBudget) < 0.005 + 1e-9, `${entry.agent}: budget ${entry.budget} against ${budget.monthlyBudget}`);
+  }
+});
+
+test("the demo lists the over-budget finding in the Inventory and the Audit, with no Learn more link", async () => {
+  const { handle } = await freshDemo();
+  const row = handle("get_inventory").opportunities.find((o) => o.id === "agent-over-budget");
+  assert.ok(row, "the Agents view's Worth a look reads this list");
+  const check = fixture.audit.sections.flatMap((s) => s.checks).find((c) => c.id === "agent-over-budget");
+  assert.deepEqual([row.title, row.detail, row.titleMsg, row.detailMsg], [check.title, check.detail, check.titleMsg, check.detailMsg], "the engine's own words, not a second copy");
+  assert.deepEqual([row.kind, row.learnUrl], ["learn", null], "the app's finding has no Learn more link");
+  assert.equal(handle("get_inventory").opportunities.filter((o) => o.id === "agent-over-budget").length, 1);
+  const usage = handle("get_audit").sections.find((s) => s.nameKey === "section.usage");
+  assert.equal(usage.checks.filter((c) => c.id === "agent-over-budget").length, 1);
+});
+
+test("the over-budget finding reads whole in every language", async () => {
+  const { render, LOCALES } = await freshDemo();
+  const check = fixture.audit.sections.flatMap((s) => s.checks).find((c) => c.id === "agent-over-budget");
+  for (const locale of LOCALES) {
+    for (const [label, msg] of [["title", check.titleMsg], ["detail", check.detailMsg]]) {
+      const text = render(locale, msg);
+      assert.ok(!/[{}]/.test(text), `${locale} ${label} left a {var} unfilled: ${text}`);
+      assert.notEqual(text, msg.key, `${locale} ${label} rendered as its own key`);
+    }
+  }
 });

@@ -22,7 +22,7 @@ export type SyntheticOpportunity = {
 };
 
 type AuditCheck = { id: string; status: string; title: string; detail: string; titleMsg: Msg; detailMsg?: Msg | null };
-type AuditSection = { checks: AuditCheck[] };
+type AuditSection = { nameKey?: string; checks: AuditCheck[] };
 
 /** Audit-check ids whose "consider" fact is already told, under a
  *  *different* id, by an Inventory-tab opportunity -- so comparing ids
@@ -38,6 +38,13 @@ export const AUDIT_ID_ALIASES: Readonly<Record<string, string>> = {
   "agent-model": "agents-model-unset",
 };
 
+/** Findings the engine builds with no Learn more link: the `None` last argument of
+ *  `Opportunity::from_msgs` in crates/core/src/agent_watch.rs and crates/core/src/changes.rs. The
+ *  other checks the audit carries that the Inventory tab does not are usage-coaching ones, which
+ *  crates/core/src/coaching.rs gives the classroom link. Held to the Rust sources by
+ *  scripts/demo-synthetic.test.mjs. */
+export const NO_LEARN_LINK: ReadonlySet<string> = new Set(["agent-over-budget", "agent-runaway", "guardrail-removed", "setup-changed"]);
+
 /** The app adds the usage findings to the setup ones; the audit carries
  *  them, Msg and all, so they translate exactly as they do on that panel. */
 export function buildUsageRows(sections: readonly AuditSection[], existingIds: ReadonlySet<string>): SyntheticOpportunity[] {
@@ -52,7 +59,7 @@ export function buildUsageRows(sections: readonly AuditSection[], existingIds: R
         detail: c.detail,
         titleMsg: c.titleMsg,
         detailMsg: c.detailMsg ?? null,
-        learnUrl: "https://staas.fund/classroom/",
+        learnUrl: NO_LEARN_LINK.has(c.id) ? null : "https://staas.fund/classroom/",
       }),
     );
 }
@@ -96,4 +103,91 @@ export function buildDuplicateProcessesRow(running: readonly RunningServer[]): S
     detailMsg,
     learnUrl: "https://staas.fund/mcp/",
   };
+}
+
+/** A length of time as the locale's own short duration, chosen by size the way `i18n::duration_msg`
+ *  does (crates/core/src/i18n.rs): days and hours, hours and minutes, or minutes. Whole minutes, and
+ *  anything under a minute reads as one. A Msg and not text, so that each language words it itself
+ *  wherever the sentence it sits in is painted: the choosers in detail.ts, inventory.ts and main.ts
+ *  return finished text, which a Msg cannot carry. */
+export function durationMsg(minutes: number): Msg {
+  const d = Math.floor(minutes / 1440);
+  const h = Math.floor((minutes % 1440) / 60);
+  const m = minutes % 60;
+  if (d > 0) return { key: "time.daysHours", vars: { d: String(d), h: String(h) }, count: null };
+  if (h > 0) return { key: "time.hoursMins", vars: { h: String(h), m: String(m) }, count: null };
+  return { key: "time.mins", vars: { m: String(Math.max(m, 1)) }, count: null };
+}
+
+/** One limit's time at 100 percent, as `get_limit_time` answers it. */
+export type LimitTimeRow = { provider: string; metric: string; times: number; totalMs: number; longestMs: number };
+
+/** A limit's total at 100 percent that is worth a finding: `FINDING_AT_MS` in
+ *  crates/core/src/limit_time.rs, which scripts/demo-limit-time.test.mjs reads to hold the two together. */
+export const LIMIT_TIME_FINDING_MS = 2 * 3_600_000;
+
+/** The one order limits are listed and chosen in, `limit_time::order`: most time at the limit, then
+ *  the longest single stretch, then provider, then metric. It is total, so a tie never depends on
+ *  the order the rows arrive in. */
+export function limitTimeOrder(a: LimitTimeRow, b: LimitTimeRow): number {
+  const by = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+  return b.totalMs - a.totalMs || b.longestMs - a.longestMs || by(a.provider, b.provider) || by(a.metric, b.metric);
+}
+
+/** The time-at-the-limit finding, as `limit_time::opportunities` and its `messages` build it, for a
+ *  machine whose limit history the engine cannot read (the fictional one keeps none): absent unless
+ *  some limit's total is at or over `LIMIT_TIME_FINDING_MS`. The title is a count of such limits and
+ *  nothing else; the detail carries the figures of the one that spent longest, every duration and
+ *  count a nested Msg so each language words it itself, and there is no Learn more link. English is
+ *  rendered from the same Msgs rather than written a second time. */
+export function buildLimitTimeRow(rows: readonly LimitTimeRow[]): SyntheticOpportunity | null {
+  const over = rows.filter((r) => r.totalMs >= LIMIT_TIME_FINDING_MS);
+  if (!over.length) return null;
+  const top = [...over].sort(limitTimeOrder)[0];
+  const minutes = (ms: number) => Math.floor(Math.max(ms, 0) / 60_000);
+  const titleMsg: Msg = { key: "finding.limit-time.title", vars: {}, count: over.length };
+  const detailMsg: Msg = {
+    key: "finding.limit-time.detail",
+    vars: {
+      total: durationMsg(minutes(top.totalMs)),
+      times: { key: "unit.times", vars: {}, count: top.times },
+      longest: durationMsg(minutes(top.longestMs)),
+    },
+    count: null,
+  };
+  return {
+    id: "limit-time",
+    kind: "learn",
+    title: render("en", titleMsg),
+    detail: render("en", detailMsg),
+    titleMsg,
+    detailMsg,
+    learnUrl: null,
+  };
+}
+
+/** The checks crates/core/src/audit.rs lists first in the Usage section, in its order: the pricing
+ *  check, then the findings it adds only when they are present, ahead of the checks that depend on
+ *  spend. The time-at-the-limit check is the last of those present-only ones. */
+const USAGE_HEAD = new Set(["pricing-cache-ttl", "pricing-drift", "agent-over-budget", "agent-runaway"]);
+
+/** A copy of the audit report with the time-at-the-limit finding as a check in its Usage section,
+ *  "consider" and so unscored, in the shape the audit's own checks have and where the engine puts
+ *  it: right after the checks that lead that section. The report passed in is never touched. With
+ *  no finding, or one the report already carries, the copy is the report as it was. */
+export function auditWithLimitTime<R extends { sections: AuditSection[] }>(report: R, row: SyntheticOpportunity | null): R {
+  const copy = structuredClone(report);
+  const usage = copy.sections.find((s) => s.nameKey === "section.usage");
+  if (!row || !usage || usage.checks.some((c) => c.id === row.id)) return copy;
+  let at = 0;
+  while (at < usage.checks.length && USAGE_HEAD.has(usage.checks[at].id)) at++;
+  usage.checks.splice(at, 0, {
+    id: row.id,
+    status: "consider",
+    title: row.title,
+    detail: row.detail,
+    titleMsg: row.titleMsg,
+    detailMsg: row.detailMsg,
+  });
+  return copy;
 }

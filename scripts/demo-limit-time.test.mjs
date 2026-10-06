@@ -250,3 +250,188 @@ test("the figures do not move with the clock", async (t) => {
     assert.deepEqual(handle("get_limit_time", { providerId: "claude" }), expected, `${later} ms later`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// The finding
+// ---------------------------------------------------------------------------
+//
+// `buildLimitTimeRow` (src/demo/synthetic.ts) mirrors `limit_time::opportunities` and `messages`
+// for a machine whose limit history the engine cannot read. The cases below are the Rust tests'
+// own, with the same numbers and the same English, so the two cannot change apart.
+
+/** A row as the Rust tests build one: two times, the longest stretch half the total. */
+const lt = (provider, metric, totalMs) => ({ provider, metric, times: 2, totalMs, longestMs: Math.floor(totalMs / 2) });
+const stretch = (provider, metric, totalMs, longestMs) => ({ provider, metric, times: 1, totalMs, longestMs });
+
+test("a duration is chosen by size, as the app's own is", async () => {
+  const { durationMsg } = await loadDemoBackend();
+  // crates/core/src/i18n.rs, `duration_msg_picks_the_unit_by_size`: the key and the vars, by name.
+  const shape = (minutes) => {
+    const m = durationMsg(minutes);
+    return `${m.key} ${Object.keys(m.vars).sort().map((k) => `${k}=${m.vars[k]}`).join(",")}`;
+  };
+  assert.equal(shape(0), "time.mins m=1", "under a minute reads as one");
+  assert.equal(shape(59), "time.mins m=59");
+  assert.equal(shape(60), "time.hoursMins h=1,m=0");
+  assert.equal(shape(1439), "time.hoursMins h=23,m=59");
+  assert.equal(shape(1440), "time.daysHours d=1,h=0");
+  assert.equal(durationMsg(130).count, null, "no count: it is a length, not a quantity");
+});
+
+test("the finding needs the threshold the Rust rule has, to the minute", async () => {
+  const { buildLimitTimeRow, LIMIT_TIME_FINDING_MS } = await loadDemoBackend();
+  assert.equal(LIMIT_TIME_FINDING_MS, await findingThresholdMs(), "the same figure as FINDING_AT_MS in crates/core/src/limit_time.rs");
+  assert.equal(LIMIT_TIME_FINDING_MS, 2 * HOUR, "the strings say two hours in words");
+  assert.equal(buildLimitTimeRow([]), null);
+  assert.equal(buildLimitTimeRow([lt("claude", "Weekly", LIMIT_TIME_FINDING_MS - 1)]), null, "a millisecond under says nothing");
+  assert.equal(buildLimitTimeRow([lt("claude", "Weekly", LIMIT_TIME_FINDING_MS - MIN)]), null, "a minute under says nothing");
+  const found = buildLimitTimeRow([lt("claude", "Weekly", LIMIT_TIME_FINDING_MS)]);
+  assert.ok(found, "at the threshold is a finding");
+  assert.deepEqual([found.id, found.kind, found.learnUrl], ["limit-time", "learn", null]);
+  assert.equal(found.title, "1 limit was fully used for two hours or more in the last 30 days");
+});
+
+test("the finding counts the limits over and details the longest", async () => {
+  const { buildLimitTimeRow } = await loadDemoBackend();
+  const rows = [lt("claude", "Weekly", 3 * HOUR), lt("codex", "Session", 5 * HOUR + 10 * MIN), lt("claude", "Session", HOUR)];
+  const found = buildLimitTimeRow(rows);
+  assert.deepEqual(found.titleMsg, { key: "finding.limit-time.title", vars: {}, count: 2 }, "two limits are over; the third is not");
+  assert.equal(found.title, "2 limits were fully used for two hours or more in the last 30 days");
+  assert.equal(
+    found.detail,
+    "Over the last 30 days, the limit that stayed fully used longest was that way for 5h 10m (2 times); its longest stretch was 2h 35m. While a limit is fully used, that tool cannot be used on your plan. Each provider's page shows which limit and when.",
+  );
+  assert.deepEqual(found.detailMsg.vars.times, { key: "unit.times", vars: {}, count: 2 }, "the count is a Msg, so each language words it");
+  assert.equal(found.detailMsg.vars.total.key, "time.hoursMins");
+  assert.equal(found.detailMsg.vars.longest.key, "time.hoursMins");
+});
+
+test("the finding's title carries a count only", async () => {
+  const { buildLimitTimeRow } = await loadDemoBackend();
+  const found = buildLimitTimeRow([lt("northwind-seat-card@ab12cd34", "Northwind Reviewer weekly", 9 * HOUR)]);
+  assert.ok(found, "the finding has to exist, or this proves nothing");
+  assert.deepEqual(found.titleMsg.vars, {}, "a title carries a count only");
+  for (const text of [found.title, found.detail]) assert.ok(!/northwind/i.test(text), text);
+});
+
+test("ties pick the same limit every time", async () => {
+  const { buildLimitTimeRow, limitTimeOrder } = await loadDemoBackend();
+  const rows = [
+    stretch("b", "Weekly", 3 * HOUR, HOUR),
+    stretch("a", "Weekly", 3 * HOUR, HOUR),
+    stretch("a", "Session", 3 * HOUR, HOUR),
+    stretch("z", "Session", 3 * HOUR, 2 * HOUR),
+    stretch("z", "Weekly", 4 * HOUR, 0),
+  ];
+  const ordered = [...rows].sort(limitTimeOrder).map((r) => [r.provider, r.metric]);
+  assert.deepEqual(ordered, [["z", "Weekly"], ["z", "Session"], ["a", "Session"], ["a", "Weekly"], ["b", "Weekly"]]);
+  // The finding takes the first of that order whichever way the rows arrive.
+  assert.deepEqual(buildLimitTimeRow(rows).detailMsg, buildLimitTimeRow([...rows].reverse()).detailMsg);
+  const tied = [stretch("b", "Weekly", 3 * HOUR, HOUR), stretch("a", "Weekly", 3 * HOUR, 2 * HOUR)];
+  assert.deepEqual(buildLimitTimeRow(tied).detailMsg, buildLimitTimeRow([tied[1], tied[0]]).detailMsg);
+  assert.equal(Object.keys(buildLimitTimeRow(tied).detailMsg.vars).length, 3);
+});
+
+test("the finding reads whole in every language and size", async () => {
+  const { buildLimitTimeRow, render, LOCALES } = await loadDemoBackend();
+  const durations = [["2 hours 10 minutes", 2 * HOUR + 10 * MIN], ["1 day 3 hours", 27 * HOUR], ["5 days", 120 * HOUR]];
+  for (const locale of LOCALES) {
+    for (const [name, total] of durations) {
+      for (const times of [1, 2, 5, 21]) {
+        const found = buildLimitTimeRow([{ provider: "p", metric: "m", times, totalMs: total, longestMs: Math.floor(total / 3) }]);
+        const detail = render(locale, found.detailMsg);
+        const title = render(locale, found.titleMsg);
+        assert.ok(!/[{}]/.test(detail) && !/finding\.|unit\.|time\./.test(detail), `${locale} ${name} ${times}: ${detail}`);
+        assert.ok(!/[{}]/.test(title) && !title.includes("finding."), `${locale}: ${title}`);
+        if (locale !== "en") {
+          assert.ok(!detail.includes("While a limit is fully used"), `${locale} detail still reads in English: ${detail}`);
+          assert.notEqual(title, render("en", found.titleMsg), `${locale} title still reads in English`);
+        }
+      }
+    }
+  }
+});
+
+test("the finding has no Learn more link, as the Rust one has none", async () => {
+  const rust = await readFile(new URL("../crates/core/src/limit_time.rs", import.meta.url), "utf8");
+  assert.match(rust, /Opportunity::from_msgs\("limit-time", "learn", title, Some\(detail\), None\)/, "limit_time.rs now builds the finding with a link");
+});
+
+test("the demo's own readings make exactly one finding, in the Inventory and in the Audit", async (t) => {
+  const { handle, durationMsg, limitTimeOrder, render, LOCALES } = await loadDemoBackend();
+  setClock(t, NOON);
+  const threshold = await findingThresholdMs();
+  // Every card's rows, as the app's finding reads them: the same ones the Detail view's lines are made of.
+  const cards = handle("cached_usage").map((c) => c.id);
+  const rows = cards.flatMap((providerId) => handle("get_limit_time", { providerId }));
+  const over = rows.filter((r) => r.totalMs >= threshold);
+  assert.equal(over.length, 1, "one limit is over the threshold, which is what this machine shows");
+  const top = [...over].sort(limitTimeOrder)[0];
+
+  const inventory = handle("get_inventory");
+  const found = inventory.opportunities.filter((o) => o.id === "limit-time");
+  assert.equal(found.length, 1, "exactly one row, however often the Inventory is read");
+  assert.equal(handle("get_inventory").opportunities.filter((o) => o.id === "limit-time").length, 1);
+  const [row] = found;
+  assert.deepEqual([row.kind, row.learnUrl], ["learn", null]);
+  assert.equal(row.titleMsg.count, over.length);
+  assert.deepEqual(row.detailMsg.vars.total, durationMsg(Math.floor(top.totalMs / MIN)), "the longest limit's total");
+  assert.deepEqual(row.detailMsg.vars.times, { key: "unit.times", vars: {}, count: top.times });
+  assert.deepEqual(row.detailMsg.vars.longest, durationMsg(Math.floor(top.longestMs / MIN)));
+  // A learn finding is listed after the tighten ones, as the app sorts them; this one is the last.
+  const kinds = inventory.opportunities.map((o) => o.kind);
+  assert.ok(kinds.includes("tighten"), "there are tighten findings, or the order proves nothing");
+  assert.ok(kinds.slice(kinds.indexOf("learn")).every((k) => k === "learn"), kinds.join(","));
+  assert.equal(inventory.opportunities.at(-1).id, "limit-time");
+
+  // The Audit: the same words as one check of the Usage section, unscored, where the engine puts it.
+  const report = handle("get_audit");
+  const usage = report.sections.find((s) => s.nameKey === "section.usage");
+  const ids = usage.checks.map((c) => c.id);
+  assert.equal(ids.filter((id) => id === "limit-time").length, 1);
+  const check = usage.checks.find((c) => c.id === "limit-time");
+  assert.deepEqual(check, { id: "limit-time", status: "consider", title: row.title, detail: row.detail, titleMsg: row.titleMsg, detailMsg: row.detailMsg });
+  assert.equal(ids[ids.indexOf("limit-time") - 1], "agent-over-budget", "straight after the engine's own present-only checks");
+  assert.equal(ids[ids.indexOf("limit-time") + 1], "mix-top-heavy", "ahead of the checks that depend on spend");
+  const fixtureAudit = JSON.parse(await readFile(new URL("../src/demo-fixture.json", import.meta.url), "utf8")).audit;
+  assert.deepEqual([report.passed, report.attention, report.score], [fixtureAudit.passed, fixtureAudit.attention, fixtureAudit.score], "unscored");
+
+  // The report is a copy: nothing done to it, and nothing the app does on a second read, reaches the fixture.
+  usage.checks.length = 0;
+  report.sections.length = 0;
+  const again = handle("get_audit").sections.find((s) => s.nameKey === "section.usage");
+  assert.equal(again.checks.filter((c) => c.id === "limit-time").length, 1, "once, not once more for every read");
+  assert.equal(again.checks.length, ids.length);
+
+  // Both Msgs, nested ones included, read whole in every language.
+  for (const locale of LOCALES) {
+    for (const [label, msg] of [["title", row.titleMsg], ["detail", row.detailMsg], ["total", row.detailMsg.vars.total], ["times", row.detailMsg.vars.times]]) {
+      const text = render(locale, msg);
+      assert.ok(!/[{}]/.test(text), `${locale} ${label} left a {var} unfilled: ${text}`);
+      assert.notEqual(text, msg.key, `${locale} ${label} rendered as its own key`);
+    }
+  }
+});
+
+test("a machine whose limits never ran out has no finding, and an audit with nothing added", async () => {
+  const { auditWithLimitTime, buildLimitTimeRow } = await loadDemoBackend();
+  const fixtureAudit = JSON.parse(await readFile(new URL("../src/demo-fixture.json", import.meta.url), "utf8")).audit;
+  const none = buildLimitTimeRow([lt("claude", "Weekly", HOUR)]);
+  assert.equal(none, null);
+  const same = auditWithLimitTime(fixtureAudit, none);
+  assert.deepEqual(same, fixtureAudit);
+  assert.notStrictEqual(same, fixtureAudit, "still a copy");
+  // A report that already has the finding is not given a second.
+  const row = buildLimitTimeRow([lt("claude", "Weekly", 3 * HOUR)]);
+  const once = auditWithLimitTime(fixtureAudit, row);
+  assert.deepEqual(auditWithLimitTime(once, row), once);
+  assert.equal(fixtureAudit.sections.flatMap((s) => s.checks).filter((c) => c.id === "limit-time").length, 0, "the argument is never written to");
+});
+
+test("the Audit opens the Usage tab for the time-at-the-limit check", async () => {
+  // src/audit.ts's WHERE map is what puts an "Open ..." link under a check; a finding missing from
+  // it shows a row with nowhere to go.
+  const source = await readFile(new URL("../src/audit.ts", import.meta.url), "utf8");
+  assert.match(source, /"limit-time": "usage"/);
+  assert.match(source, /"agent-over-budget": "agents"/);
+});

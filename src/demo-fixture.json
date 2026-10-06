@@ -3391,6 +3391,24 @@
       }
      },
      {
+      "id": "agent-over-budget",
+      "status": "consider",
+      "title": "1 agent is over its monthly budget",
+      "detail": "This month so far, against the monthly budget you set (spent / budget): general-purpose ($14.74 / $10.00). A budget runs on the calendar month. The app only tells you; it never stops an agent.",
+      "titleMsg": {
+       "key": "finding.agent-over-budget.title",
+       "vars": {},
+       "count": 1
+      },
+      "detailMsg": {
+       "key": "finding.agent-over-budget.detail",
+       "vars": {
+        "names": "general-purpose ($14.74 / $10.00)"
+       },
+       "count": null
+      }
+     },
+     {
       "id": "mix-top-heavy",
       "status": "consider",
       "title": "80% of spend is on the largest models",

@@ -51,15 +51,15 @@ async function loadDemoBackend() {
 
 async function buildDemoBackend() {
   const source = await readFile(new URL("../src/demo/mock.ts", import.meta.url), "utf8");
-  // None of the three imports is reachable from `client_rollup`: the fixture and the two
+  // None of the three imports is reachable from `client_rollup`: the fixture and the
   // synthetic-finding builders are read only by other commands, and `t` only by the
   // agent-watch validation, so each becomes an inert stand-in.
   const stripped = source
     .replace('import fixture from "../demo-fixture.json";', "const fixture = {};")
     .replace('import { t } from "../i18n";', "const t = (key) => key;")
     .replace(
-      'import { buildDuplicateProcessesRow, buildUsageRows } from "./synthetic";',
-      "const buildDuplicateProcessesRow = () => null;\nconst buildUsageRows = () => [];",
+      /^import \{[^}]*\} from "\.\/synthetic";$/m,
+      "const auditWithLimitTime = (report) => report;\nconst buildDuplicateProcessesRow = () => null;\nconst buildLimitTimeRow = () => null;\nconst buildUsageRows = () => [];\nconst limitTimeOrder = () => 0;",
     );
   if (stripped === source) throw new Error("no substitution matched -- src/demo/mock.ts's imports moved under this test");
   // The build hands the demo its version through a `declare const`, which transpiling erases.
