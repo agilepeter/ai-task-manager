@@ -6216,7 +6216,8 @@ mod tests {
             ("\"a\\\\\"", "\"   \""),
             ("\"a\nb\"", "\" \n \""),
             ("let a = r#\"a\"b{\"#; x", "let a = r#\"    \"#; x"),
-            ("br#\"..\"#", "br#\"  \"#"),
+            ("br\"a\\\"; x", "br\"  \"; x"),
+            ("r##\"a\"#b\"##", "r##\"    \"##"),
             ("cr\"a\\\"; let b = \"q\"; z", "cr\"  \"; let b = \" \"; z"),
             ("b\"{\"", "b\" \""),
             ("'\"'", "' '"),
@@ -6224,6 +6225,8 @@ mod tests {
             ("'{'", "' '"),
             ("b'{'", "b' '"),
             ("'\\u{7b}'", "'      '"),
+            // One character of two bytes: two spaces, so no offset after it moves.
+            ("'\u{e9}'", "'  '"),
             ("fn f<'a>(x: &'a str) { 'outer: loop { break 'outer; } }", "fn f<'a>(x: &'a str) { 'outer: loop { break 'outer; } }"),
             ("a /* x /* y */ z */ b", "a                   b"),
             ("/* don't \" */ x", "              x"),
@@ -6261,9 +6264,9 @@ mod tests {
     ///   second time, so no other day can be had from either.
     ///
     /// It reads the pass's own text, not what it calls: a day read inside a helper the pass
-    /// calls, and handed to one of the guarded calls, is beyond it. spend.rs keeps its other
-    /// readers of the day (`today_for_clock`, `today_days_from_ce`) private so that the two
-    /// public ones are the two named here.
+    /// calls, and handed to one of the guarded calls, is beyond it. In spend.rs the only public
+    /// functions that return the scan's day are `scan_clock` and `today_naive_date`, the two
+    /// named here; `today_for_clock` and `today_days_from_ce` are private.
     ///
     /// It is a source test because nothing else can show it: the pass reads the real config
     /// folder, and the override is an environment variable, which every test in the process
