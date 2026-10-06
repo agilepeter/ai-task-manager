@@ -37,7 +37,7 @@ const _: () = assert!(LOG_HORIZON_DAYS >= 31);
 /// The environment variable that overrides today's date for the scan, to an
 /// ISO `YYYY-MM-DD` date. Real users never set it; scripts/make-demo-fixture.py
 /// does. Every read of it goes through `today_for_clock`, under this name.
-pub const TODAY_OVERRIDE_ENV: &str = "AITM_TODAY";
+const TODAY_OVERRIDE_ENV: &str = "AITM_TODAY";
 
 /// Parses the override's raw value as an ISO `YYYY-MM-DD` date -- the one
 /// shape scripts/make-demo-fixture.py ever writes. Kept separate from the
@@ -76,12 +76,13 @@ fn today_for_clock_with(clock: NaiveDate, lookup: impl Fn(&str) -> Option<String
     today_from(clock, raw.as_deref())
 }
 
-/// The scan's day for a clock reading the caller took: `clock`, or the date in
-/// the process environment's override (`TODAY_OVERRIDE_ENV`) when that is an
-/// ISO date. The override is read from the environment here. A caller that
-/// needs the reading itself as well, for the hour, takes both from
-/// `scan_clock`; one that needs only the day asks `today_naive_date`.
-pub fn today_for_clock(clock: NaiveDate) -> NaiveDate {
+/// The scan's day for a clock reading: `clock`, or the date in the process
+/// environment's override (`TODAY_OVERRIDE_ENV`) when that is an ISO date. The
+/// override is read from the environment here. Private on purpose: the way to
+/// a day together with the reading it came from is `scan_clock`, and to a day
+/// alone `today_naive_date`, so no caller can pair a date with an hour that it
+/// read separately.
+fn today_for_clock(clock: NaiveDate) -> NaiveDate {
     today_for_clock_with(clock, |key| std::env::var(key).ok())
 }
 
@@ -5300,6 +5301,49 @@ mod tests {
         assert_eq!(asked, [super::TODAY_OVERRIDE_ENV]);
     }
 
+    /// The override is read from the process environment, which a test must not set: every test
+    /// in the process would see it. So this runs a second copy of this test binary as a child
+    /// whose environment alone carries the override, and has the child check that every reader
+    /// of the scan's day honours it: the closure that reads the environment (through
+    /// `scan_clock`), `today_naive_date`, `today_days_from_ce` and `clients::rollup_today`. No
+    /// shell is involved, so it runs the same on Windows, and nothing here reads the real config
+    /// folder: the rollup is given its areas and its rules. If the child cannot be started the
+    /// test fails, since there is then nothing it has shown.
+    #[test]
+    fn the_override_reaches_every_reader_of_the_scans_day() {
+        // Set only in the child, so that it runs the probe below instead of starting another.
+        const IN_CHILD: &str = "AITM_TEST_OVERRIDE_PROBE";
+        const PROBE_OK: &str = "override probe: every reader of the scan's day honoured it";
+        // A day the real clock can no longer show.
+        let override_day = date(2001, 2, 3);
+
+        if std::env::var_os(IN_CHILD).is_some() {
+            assert_eq!(today_naive_date(), override_day, "today_naive_date");
+            let (clock, day) = scan_clock();
+            assert_eq!(day, override_day, "the day scan_clock derives");
+            assert_ne!(clock.date_naive(), override_day, "scan_clock's reading is the clock, not the override");
+            assert_eq!(today_days_from_ce(), override_day.num_days_from_ce(), "today_days_from_ce");
+            // An area the scan labelled for the override's month gets its figure from the rollup
+            // for today; a rollup that read the real clock would count it as another month's.
+            let areas = scanned_areas(&[("acme-portal", override_day, 7.0)], override_day);
+            let rows = clients::rollup_today(&areas, &[]);
+            assert_eq!(rows[0].month_to_date, 7.0, "rollup_today reads the scan's day");
+            println!("{PROBE_OK}");
+            return;
+        }
+
+        let exe = std::env::current_exe().expect("this test binary's own path, to run it again as a child");
+        let child = std::process::Command::new(exe)
+            .args(["the_override_reaches_every_reader_of_the_scans_day", "--nocapture", "--test-threads=1"])
+            .env(TODAY_OVERRIDE_ENV, override_day.format("%Y-%m-%d").to_string())
+            .env(IN_CHILD, "1")
+            .output()
+            .expect("could not start this test binary as a child process, and this test cannot pass without doing so");
+        let (out, err) = (String::from_utf8_lossy(&child.stdout), String::from_utf8_lossy(&child.stderr));
+        assert!(child.status.success(), "the child failed:\n{out}\n{err}");
+        assert!(out.contains(PROBE_OK), "the child ran no probe (did no test match?):\n{out}\n{err}");
+    }
+
     /// Prints real sessions as JSON: `{"area": [...], "day": [...]}` for the
     /// area and local day named in AITM_AREA / AITM_DAY.
     #[test]
@@ -7537,9 +7581,14 @@ mod tests {
 
     #[test]
     fn the_agent_month_figure_takes_the_date_it_is_given() {
-        // The same spend, asked on two dates a day apart across a month end: October's 1st and
-        // 31st on the one, November's 1st alone on the other. A figure that read a day of its
-        // own would answer both with the same month.
+        // This holds `agent_spend_month_from`, the window behind both agent entry points: the
+        // same spend, asked on two dates a day apart across a month end, gives October's 1st
+        // and 31st on the one and November's 1st alone on the other, so a window that read a
+        // day of its own would answer both with the same month. It cannot see
+        // `agent_spend_month_at` ignore its argument, which reads the global scan cache and the
+        // real config folder and so is not driven here: that the alert pass hands it the pass's
+        // own day is held by the source test in lib.rs, which requires that call and its
+        // argument.
         let daily = [(date(2026, 10, 1), 4.0), (date(2026, 10, 31), 2.0), (date(2026, 11, 1), 1.0)];
         let total = |today| month_spend_from_daily("Explore", &daily, today).iter().map(|a| a.cost).sum::<f64>();
         assert_eq!(total(date(2026, 10, 31)), 6.0, "asked on October 31st: October's days");

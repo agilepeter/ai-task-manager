@@ -380,8 +380,8 @@ fn save_clients(rules: Vec<clients::ClientRule>) -> Result<Vec<clients::ClientRu
 #[tauri::command]
 fn export_clients_csv(app: tauri::AppHandle, areas: Vec<spend::AreaSpend>) -> Result<String, String> {
     let cfg = config_with_defaults(load_config());
-    // The header's day and the file's name. The rows are for the scan's day too
-    // (`clients::rollup_today`), which is this one.
+    // The header's day and the file's name. The rows are for the scan's day too, read a
+    // moment apart by `clients::rollup_today`: the two can differ only across midnight.
     let today = spend::today_naive_date();
     let rules = clients::load_from(&clients::path());
     let body = clients::csv(&clients::rollup_today(&areas, &rules), today);
@@ -6118,30 +6118,133 @@ mod tests {
     /// is given, and the scan labels it with the month of `spend::today_naive_date()`, which
     /// honours the override in the environment. Two arrangements keep every caller on that
     /// date: the commands and the feeds use `clients::rollup_today`, which has no date to get
-    /// wrong, and the one alert pass that needs an hour as well takes its date from the same
-    /// `spend::scan_clock()` reading as its hour. This test holds the second, the only place
-    /// left where a caller could pick a clock of its own, and holds the first by counting: one
-    /// call of `clients::rollup(` and one of `clients::over_budget(` may exist in this file.
-    /// It also checks that the agent budgets in that pass take the pass's date
-    /// (`agent_spend_month_at`) rather than a day of their own. It is a source test because
-    /// nothing else can show it: the pass reads the real config folder, and the override is an
-    /// environment variable, which every test in the process would see if one of them set it.
+    /// wrong, and the one alert pass that needs an hour as well takes its day and its hour from
+    /// one `spend::scan_clock()` reading. This test holds the second, the only place left where
+    /// a caller could pick a clock of its own, and holds the first by counting: this file may
+    /// call `clients::rollup(`, `clients::over_budget(` and `spend::scan_clock()` once each.
+    ///
+    /// It reads the code with its comments and the insides of its literals blanked, so a
+    /// mention in either counts for none of the checks, and it takes the two names from the
+    /// pass's own `let (now, today) = spend::scan_clock();`, so renaming them breaks nothing.
+    /// In the block that holds that reading:
+    /// - the rollup and the budget check are each given the day that `let` bound, and that
+    ///   `let` is the binding in force at the call;
+    /// - `agent_spend_month_at(` is called once, given that day, and `agent_spend_month(`, which
+    ///   reads a day of its own, not at all;
+    /// - no other clock is read: none of `.date_naive()`, `today_naive_date(` or
+    ///   `today_for_clock(`, and no call of `now(` other than the `Utc::now().timestamp_millis()`
+    ///   that measures a session's age, which is a timestamp and not a day;
+    /// - the reading itself is asked for its hour and nothing else, and neither name is bound a
+    ///   second time, so no other day can be had from either.
+    ///
+    /// It is a source test because nothing else can show it: the pass reads the real config
+    /// folder, and the override is an environment variable, which every test in the process
+    /// would see if one of them set it.
     #[test]
     fn client_rollups_read_the_scans_clock() {
         // A Windows checkout may end its lines in CRLF, which the marker below would not match.
         let source = include_str!("lib.rs").replace("\r\n", "\n");
         // This module's own text mentions every pattern here, so only what comes before it is read.
         let marker = "#[cfg(test)]\nmod tests {";
-        let code = &source[..source.rfind(marker).expect("the test module moved: update this test")];
-        let line_of = |at: usize| code[..at].matches('\n').count() + 1;
+        let production = &source[..source.rfind(marker).expect("the test module moved: update this test")];
 
-        // Where `needle` is called in the code, comments left out.
-        let calls = |needle: &str| -> Vec<usize> {
-            code.match_indices(needle)
-                .map(|(at, _)| at)
-                .filter(|&at| !code[code[..at].rfind('\n').map_or(0, |n| n + 1)..at].trim_start().starts_with("//"))
-                .collect()
-        };
+        // The code with every comment, and the inside of every string and character literal,
+        // replaced by spaces. Newlines stay, so an offset in the result is the same offset in the
+        // file and a line number is the file's. Every check below reads this one text: a mention
+        // in a comment or a message counts for none of them, and a brace in a literal moves no
+        // block's edge.
+        fn blanked(code: &str) -> String {
+            // The number of `#`s of the raw string (`r"..."`, `r#"..."#`, `br"..."`) that starts at `i`.
+            fn raw_hashes(b: &[u8], i: usize) -> Option<usize> {
+                let word = |at: usize| b.get(at).is_some_and(|&c| c.is_ascii_alphanumeric() || c == b'_');
+                // An `r` opens a raw string when it starts a word, or follows a `b` that does.
+                let starts_word = i == 0 || !word(i - 1) || (b[i - 1] == b'b' && (i == 1 || !word(i - 2)));
+                if b[i] != b'r' || !starts_word {
+                    return None;
+                }
+                let hashes = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
+                (b.get(i + 1 + hashes) == Some(&b'"')).then_some(hashes)
+            }
+
+            let b = code.as_bytes();
+            let mut out = b.to_vec();
+            let mut blank = |from: usize, to: usize| {
+                for byte in &mut out[from..to.min(b.len())] {
+                    if *byte != b'\n' {
+                        *byte = b' ';
+                    }
+                }
+            };
+            let mut i = 0;
+            while i < b.len() {
+                if b[i] == b'/' && b.get(i + 1) == Some(&b'/') {
+                    let end = b[i..].iter().position(|&c| c == b'\n').map_or(b.len(), |n| i + n);
+                    blank(i, end);
+                    i = end;
+                } else if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                    // Block comments nest.
+                    let (mut depth, mut j) = (1, i + 2);
+                    while j < b.len() && depth > 0 {
+                        match (b[j], b.get(j + 1)) {
+                            (b'/', Some(&b'*')) => {
+                                depth += 1;
+                                j += 2;
+                            }
+                            (b'*', Some(&b'/')) => {
+                                depth -= 1;
+                                j += 2;
+                            }
+                            _ => j += 1,
+                        }
+                    }
+                    blank(i, j);
+                    i = j;
+                } else if let Some(hashes) = raw_hashes(b, i) {
+                    // A raw string ends at a quote followed by as many `#`s as opened it.
+                    let start = i + 1 + hashes + 1;
+                    let closes = |j: usize| b[j] == b'"' && b[j + 1..].iter().take(hashes).filter(|&&c| c == b'#').count() == hashes;
+                    let end = (start..b.len()).find(|&j| closes(j)).unwrap_or(b.len());
+                    blank(start, end);
+                    i = end + 1 + hashes;
+                } else if b[i] == b'"' {
+                    let mut j = i + 1;
+                    while j < b.len() && b[j] != b'"' {
+                        j += if b[j] == b'\\' { 2 } else { 1 };
+                    }
+                    blank(i + 1, j);
+                    i = j + 1;
+                } else if b[i] == b'\'' && b.get(i + 1) == Some(&b'\\') {
+                    // A character with an escape ('\n', '\'', '\u{2014}'): step over the escaped
+                    // byte, then on to the closing quote.
+                    let end = (i + 3..b.len()).find(|&j| b[j] == b'\'').unwrap_or(b.len());
+                    blank(i + 1, end);
+                    i = end + 1;
+                } else if b[i] == b'\'' {
+                    let width = code[i + 1..].chars().next().map_or(0, char::len_utf8);
+                    if width > 0 && b.get(i + 1 + width) == Some(&b'\'') {
+                        blank(i + 1, i + 1 + width);
+                        i += width + 2;
+                    } else {
+                        // A lifetime or a loop label: no closing quote.
+                        i += 1;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            String::from_utf8(out).expect("blanking whole spans leaves the text valid UTF-8")
+        }
+        let code = blanked(production);
+        let code = code.as_str();
+        // The reading above is only as good as the blanking, so check what it cannot get wrong
+        // quietly: a literal it misread leaves a brace or a comment behind.
+        assert_eq!(
+            code.matches('{').count(),
+            code.matches('}').count(),
+            "the braces in the code do not balance once its literals are blanked: a literal confused this test's reading"
+        );
+        assert!(!code.contains("//"), "a comment survived the blanking: a literal confused this test's reading");
+        let line_of = |at: usize| code[..at].matches('\n').count() + 1;
 
         // The block that holds `at`: the `{` that opens it and the `}` that closes it.
         fn enclosing_block(code: &str, at: usize) -> (usize, usize) {
@@ -6182,6 +6285,19 @@ mod tests {
             (open, close)
         }
 
+        // Whether a block that is open at `from` has closed by `to`.
+        fn closed_between(code: &str, from: usize, to: usize) -> bool {
+            let mut depth = 0;
+            code[from..to].chars().any(|c| {
+                match c {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                depth < 0
+            })
+        }
+
         // The arguments of the call whose `(` is at `open`, split at the commas that are not nested.
         fn arguments(code: &str, open: usize) -> Vec<String> {
             let (mut args, mut current, mut depth) = (Vec::new(), String::new(), 0);
@@ -6211,63 +6327,28 @@ mod tests {
             panic!("a call that never closes");
         }
 
-        // Whether `word` is in `text` as a whole identifier (`today`, not `today_cost`).
-        fn mentions(text: &str, word: &str) -> bool {
+        // Where `word` stands as a whole identifier in `text` (`today`, not `today_cost`).
+        fn words(text: &str, word: &str) -> Vec<usize> {
             let is_word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
-            text.match_indices(word).any(|(i, _)| {
-                !is_word(text[..i].chars().next_back()) && !is_word(text[i + word.len()..].chars().next())
-            })
+            text.match_indices(word)
+                .map(|(at, _)| at)
+                .filter(|&at| !is_word(text[..at].chars().next_back()) && !is_word(text[at + word.len()..].chars().next()))
+                .collect()
         }
 
-        // The `let` that binds the identifier `today` for the code at `at`: the nearest above it
-        // whose block still holds `at`. Its pattern and its right-hand side.
-        fn binding_of_today(code: &str, at: usize) -> Option<(String, String)> {
-            let mut before = at;
-            while let Some(let_at) = code[..before].rfind("let ") {
-                before = let_at;
-                // A comment, or the end of a longer word, is not a `let`.
-                let line_start = code[..let_at].rfind('\n').map_or(0, |n| n + 1);
-                let prefix = &code[line_start..let_at];
-                if prefix.contains("//") || prefix.ends_with(|c: char| c.is_alphanumeric() || c == '_') {
-                    continue;
-                }
-                let rest = &code[let_at + "let ".len()..];
-                let (Some(eq), Some(end)) = (rest.find('='), rest.find(';')) else { continue };
-                let pattern = rest[..eq.min(end)].split_whitespace().collect::<Vec<_>>().join(" ");
-                if !mentions(&pattern, "today") {
-                    continue;
-                }
-                // The binding's block must still hold `at`: no `}` between the two closes it.
-                let mut depth = 0;
-                let closed = code[let_at..at].chars().any(|c| {
-                    match c {
-                        '{' => depth += 1,
-                        '}' => depth -= 1,
-                        _ => {}
-                    }
-                    depth < 0
-                });
-                if closed {
-                    continue;
-                }
-                return Some((pattern, rest[(eq + 1).min(end)..end].trim().to_string()));
-            }
-            None
+        // The pattern of the `let` at `let_at`: what stands between the keyword and its `=` or `;`.
+        fn pattern_of(code: &str, let_at: usize) -> &str {
+            let rest = &code[let_at + "let".len()..];
+            &rest[..rest.find(['=', ';']).unwrap_or(rest.len())]
         }
 
-        // The forms a `today` may be bound with. Any other `let` whose pattern mentions it fails.
-        let is_plain = |pattern: &str| {
-            matches!(pattern, "today" | "mut today" | "(now, today)")
-                || pattern.starts_with("today:")
-                || pattern.starts_with("mut today:")
-        };
-
+        let calls = |needle: &str| code.match_indices(needle).map(|(at, _)| at).collect::<Vec<_>>();
         let rollups = calls("clients::rollup(");
         let budgets = calls("clients::over_budget(");
         let clocks = calls("spend::scan_clock()");
         let lines = |at: &[usize]| at.iter().map(|&a| line_of(a)).collect::<Vec<_>>();
 
-        // 1. One of each, and both in the block that reads the scan clock: the alert pass.
+        // 1. One of each in the file.
         assert_eq!(
             rollups.len(),
             1,
@@ -6275,37 +6356,145 @@ mod tests {
             lines(&rollups)
         );
         assert_eq!(budgets.len(), 1, "clients::over_budget( is called once, in the alert pass. Found it at lines {:?}", lines(&budgets));
-        assert_eq!(clocks.len(), 1, "the alert pass reads the scan clock once, with spend::scan_clock(). Found it at lines {:?}", lines(&clocks));
-        let (open, close) = enclosing_block(code, clocks[0]);
+        assert_eq!(
+            clocks.len(),
+            1,
+            "the alert pass reads the scan clock once, with spend::scan_clock(). Found it at lines {:?}",
+            lines(&clocks)
+        );
+
+        // 2. The two names that reading is bound to, read from its own `let`.
+        let clock_at = clocks[0];
+        let all_lets = words(code, "let");
+        let scan_let = all_lets.iter().rev().copied().find(|&l| l < clock_at).expect("the scan clock is not bound by a `let`");
+        let stmt_end = clock_at + code[clock_at..].find(';').expect("a statement that never ends");
+        let pattern = code[scan_let + "let".len()..clock_at].chars().filter(|c| !c.is_whitespace()).collect::<String>();
+        let is_name =
+            |n: &str| !n.is_empty() && !n.starts_with(|c: char| c.is_ascii_digit()) && n.chars().all(|c| c.is_alphanumeric() || c == '_');
+        let names = pattern
+            .strip_suffix('=')
+            .and_then(|p| p.strip_prefix('('))
+            .and_then(|p| p.strip_suffix(')'))
+            .and_then(|p| p.split_once(','))
+            .filter(|&(a, b)| is_name(a) && is_name(b) && code[clock_at + "spend::scan_clock()".len()..stmt_end].trim().is_empty());
+        let Some((now_id, today_id)) = names else {
+            panic!(
+                "the scan clock is read as `let {pattern} spend::scan_clock();`, and this test cannot tell which names \
+                 carry its two readings: bind it as `let (now, today) = spend::scan_clock();`, with any two names"
+            );
+        };
+
+        // The alert pass: the block that holds that reading.
+        let (open, close) = enclosing_block(code, clock_at);
+        let block = &code[open..=close];
         let mut problems = Vec::new();
+
+        // 3. The rollup and the budget check lie in it, and each is given that `today`.
         for (name, at) in [("clients::rollup(", rollups[0]), ("clients::over_budget(", budgets[0])] {
             let line = line_of(at);
             if !(open < at && at < close) {
                 problems.push(format!("line {line}: {name} is outside the block that reads the scan clock"));
             }
-            // 2. The `today` in force there is the one the scan clock gave.
-            match binding_of_today(code, at) {
-                None => problems.push(format!("line {line}: no `let` binds `today` above {name}")),
-                Some((pattern, _)) if !is_plain(&pattern) => {
-                    problems.push(format!("line {line}: `today` is bound with `let {pattern} = ...`, which this test does not accept"));
-                }
-                Some((_, rhs)) if rhs != "spend::scan_clock()" => {
-                    problems.push(format!("line {line}: `today` is bound from `{rhs}`, not from spend::scan_clock()"));
-                }
+            // The binding of `today` in force at the call: the nearest `let` above it that names it
+            // and whose block still holds the call.
+            let binding = all_lets
+                .iter()
+                .rev()
+                .copied()
+                .filter(|&l| l < at)
+                .find(|&l| !words(pattern_of(code, l), today_id).is_empty() && !closed_between(code, l, at));
+            match binding {
+                None => problems.push(format!("line {line}: no `let` binds `{today_id}` above {name}")),
+                Some(l) if l != scan_let => problems.push(format!(
+                    "line {line}: `{today_id}` is bound by the `let` at line {}, not by the scan clock's at line {}",
+                    line_of(l),
+                    line_of(scan_let)
+                )),
                 Some(_) => {}
             }
-            // 3. The date the call is given is that `today`, and nothing that reads the clock.
             let given = arguments(code, at + name.len() - 1).get(2).cloned().unwrap_or_default();
-            if given.contains("Local::now()") || given.contains(".date_naive()") {
-                problems.push(format!("line {line}: {name} is given a date read from the clock: `{given}`"));
-            } else if given != "today" {
-                problems.push(format!("line {line}: {name} is given `{given}`, not the `today` the alert pass took from the scan clock"));
+            if given != today_id {
+                problems.push(format!(
+                    "line {line}: {name} is given `{given}`, not the `{today_id}` the alert pass took from the scan clock"
+                ));
             }
         }
-        // The agent budgets in the same pass take that date as well, and read no day of their own.
-        if code[open..close].contains("spend::agent_spend_month()") {
-            problems.push("the alert pass reads the agent month with spend::agent_spend_month(), which reads a day of its own: use agent_spend_month_at(today)".to_string());
+
+        // 4. The agent budgets take that day too, and read none of their own.
+        let calls_in_block = |name: &str| {
+            words(block, name).into_iter().filter(|&a| block[a + name.len()..].starts_with('(')).collect::<Vec<_>>()
+        };
+        let agent_month_at = "agent_spend_month_at";
+        let at_calls = calls_in_block(agent_month_at);
+        if at_calls.len() != 1 {
+            problems.push(format!(
+                "the alert pass calls {agent_month_at}( {} times, at lines {:?}: it reads the agent month once, for its own day",
+                at_calls.len(),
+                at_calls.iter().map(|&a| line_of(open + a)).collect::<Vec<_>>()
+            ));
         }
+        for &a in &at_calls {
+            let given = arguments(code, open + a + agent_month_at.len()).first().cloned().unwrap_or_default();
+            if given != today_id {
+                problems.push(format!(
+                    "line {}: {agent_month_at}( is given `{given}`, not the `{today_id}` the alert pass took from the scan clock",
+                    line_of(open + a)
+                ));
+            }
+        }
+        for a in calls_in_block("agent_spend_month") {
+            problems.push(format!(
+                "line {}: agent_spend_month( reads a day of its own: use {agent_month_at}({today_id})",
+                line_of(open + a)
+            ));
+        }
+
+        // 5. No other clock.
+        for token in [".date_naive()", "today_naive_date(", "today_for_clock("] {
+            for (a, _) in block.match_indices(token) {
+                problems.push(format!("line {}: the alert pass reads `{token}`, a day the scan clock did not give it", line_of(open + a)));
+            }
+        }
+        for a in calls_in_block("now") {
+            let path_from = block[..a]
+                .char_indices()
+                .rev()
+                .find(|&(_, c)| !(c.is_alphanumeric() || c == '_' || c == ':'))
+                .map_or(0, |(i, c)| i + c.len_utf8());
+            // The age of a session is measured from a timestamp, which is no day.
+            if block[path_from..a].ends_with("Utc::") && block[a..].starts_with("now().timestamp_millis()") {
+                continue;
+            }
+            problems.push(format!("line {}: the alert pass reads a clock of its own, `{}now()`", line_of(open + a), &block[path_from..a]));
+        }
+
+        // 6. The reading is asked for its hour and nothing else, and neither name is bound again.
+        for a in words(block, now_id) {
+            let (before, after) = (block[..a].trim_end(), &block[a + now_id.len()..]);
+            let in_the_scan_let = (scan_let..stmt_end).contains(&(open + a));
+            // A path or a method of that name (`Utc::now`) is not the variable.
+            if in_the_scan_let || before.ends_with('.') || before.ends_with("::") || after.starts_with('(') {
+                continue;
+            }
+            if !after.starts_with(".hour()") {
+                problems.push(format!(
+                    "line {}: `{now_id}` is used for more than its hour, so a day could be had from it",
+                    line_of(open + a)
+                ));
+            }
+        }
+        for l in all_lets.iter().copied().filter(|&l| open < l && l < close && l != scan_let) {
+            for id in [now_id, today_id] {
+                if !words(pattern_of(code, l), id).is_empty() {
+                    problems.push(format!(
+                        "line {}: `let{}` binds `{id}` a second time, so a day or an hour other than the scan clock's could come from it",
+                        line_of(l),
+                        pattern_of(code, l).trim_end()
+                    ));
+                }
+            }
+        }
+
         assert!(problems.is_empty(), "the client rollups must read the scan's clock:\n{}", problems.join("\n"));
     }
 }
