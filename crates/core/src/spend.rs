@@ -78,10 +78,10 @@ fn today_for_clock_with(clock: NaiveDate, lookup: impl Fn(&str) -> Option<String
 
 /// The scan's day for a clock reading: `clock`, or the date in the process
 /// environment's override (`TODAY_OVERRIDE_ENV`) when that is an ISO date. The
-/// override is read from the environment here. Private on purpose: the way to
-/// a day together with the reading it came from is `scan_clock`, and to a day
-/// alone `today_naive_date`, so no caller can pair a date with an hour that it
-/// read separately.
+/// override is read from the environment here. Private on purpose: the only
+/// day that comes with the reading it was derived from is the one `scan_clock`
+/// returns beside it, and a day alone comes from `today_naive_date`, so no
+/// caller applies the override to a reading it took itself.
 fn today_for_clock(clock: NaiveDate) -> NaiveDate {
     today_for_clock_with(clock, |key| std::env::var(key).ok())
 }
@@ -113,8 +113,10 @@ pub fn today_naive_date() -> NaiveDate {
 }
 
 /// The CE-ordinal form of `today_naive_date()` -- what every day-bucketing
-/// cutoff in this file actually compares against.
-pub fn today_days_from_ce() -> i32 {
+/// cutoff in this file actually compares against. Private: nothing outside this
+/// file buckets by day, and a caller elsewhere would be one more reader of the
+/// day that the alert pass's source test would have to know about.
+fn today_days_from_ce() -> i32 {
     today_naive_date().num_days_from_ce()
 }
 
@@ -5333,8 +5335,10 @@ mod tests {
         }
 
         let exe = std::env::current_exe().expect("this test binary's own path, to run it again as a child");
+        // `--exact` matches the whole path, so a later test whose name begins with this one's
+        // cannot run in the child and have its result reported as this test's.
         let child = std::process::Command::new(exe)
-            .args(["the_override_reaches_every_reader_of_the_scans_day", "--nocapture", "--test-threads=1"])
+            .args(["spend::tests::the_override_reaches_every_reader_of_the_scans_day", "--exact", "--nocapture", "--test-threads=1"])
             .env(TODAY_OVERRIDE_ENV, override_day.format("%Y-%m-%d").to_string())
             .env(IN_CHILD, "1")
             .output()
@@ -7581,14 +7585,14 @@ mod tests {
 
     #[test]
     fn the_agent_month_figure_takes_the_date_it_is_given() {
-        // This holds `agent_spend_month_from`, the window behind both agent entry points: the
-        // same spend, asked on two dates a day apart across a month end, gives October's 1st
-        // and 31st on the one and November's 1st alone on the other, so a window that read a
-        // day of its own would answer both with the same month. It cannot see
-        // `agent_spend_month_at` ignore its argument, which reads the global scan cache and the
-        // real config folder and so is not driven here: that the alert pass hands it the pass's
-        // own day is held by the source test in lib.rs, which requires that call and its
-        // argument.
+        // This holds `agent_spend_month_from`, the window behind both month entry points
+        // (`agent_spend_month_at` and `agent_spend_month`): the same spend, asked on two dates a
+        // day apart across a month end, gives October's 1st and 31st on the one and November's
+        // 1st alone on the other, so a window that read a day of its own would answer both with
+        // the same month. It cannot see `agent_spend_month_at` ignore its argument, which reads
+        // the global scan cache and the real config folder and so is not driven here: that the
+        // alert pass hands it the pass's own day is held by the source test in lib.rs, which
+        // requires that call and its argument.
         let daily = [(date(2026, 10, 1), 4.0), (date(2026, 10, 31), 2.0), (date(2026, 11, 1), 1.0)];
         let total = |today| month_spend_from_daily("Explore", &daily, today).iter().map(|a| a.cost).sum::<f64>();
         assert_eq!(total(date(2026, 10, 31)), 6.0, "asked on October 31st: October's days");

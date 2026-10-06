@@ -6114,6 +6114,128 @@ mod tests {
         alerts::forget_snapshot("onenewapi@ticket07-b1");
     }
 
+    /// `code` with every comment, and the inside of every string and character literal, replaced
+    /// by spaces. Newlines stay, so an offset in the result is the same offset in the source and
+    /// a line number is the source's. The source test below reads this one text in place of the
+    /// file. It knows each literal form Rust has: `"..."` with escapes, `r"..."` and `r#"..."#`
+    /// with a `b` or `c` prefix, `'x'` and `'\n'`, and `//` and nesting `/* */` comments; a
+    /// lifetime or a label is left alone. `blanking_reads_every_literal_form` holds each of
+    /// them, because a form it misread would swallow text up to the next quote without a word.
+    fn blanked(code: &str) -> String {
+        // The number of `#`s of the raw string (`r"..."`, `r#"..."#`, `br"..."`, `cr"..."`) that
+        // starts at `i`.
+        fn raw_hashes(b: &[u8], i: usize) -> Option<usize> {
+            let word = |at: usize| b.get(at).is_some_and(|&c| c.is_ascii_alphanumeric() || c == b'_');
+            // An `r` opens a raw string when it starts a word, or follows a `b` or a `c` that does.
+            let starts_word = i == 0 || !word(i - 1) || (matches!(b[i - 1], b'b' | b'c') && (i == 1 || !word(i - 2)));
+            if b[i] != b'r' || !starts_word {
+                return None;
+            }
+            let hashes = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
+            (b.get(i + 1 + hashes) == Some(&b'"')).then_some(hashes)
+        }
+
+        let b = code.as_bytes();
+        let mut out = b.to_vec();
+        let mut blank = |from: usize, to: usize| {
+            for byte in &mut out[from..to.min(b.len())] {
+                if *byte != b'\n' {
+                    *byte = b' ';
+                }
+            }
+        };
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'/' && b.get(i + 1) == Some(&b'/') {
+                let end = b[i..].iter().position(|&c| c == b'\n').map_or(b.len(), |n| i + n);
+                blank(i, end);
+                i = end;
+            } else if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                // Block comments nest.
+                let (mut depth, mut j) = (1, i + 2);
+                while j < b.len() && depth > 0 {
+                    match (b[j], b.get(j + 1)) {
+                        (b'/', Some(&b'*')) => {
+                            depth += 1;
+                            j += 2;
+                        }
+                        (b'*', Some(&b'/')) => {
+                            depth -= 1;
+                            j += 2;
+                        }
+                        _ => j += 1,
+                    }
+                }
+                blank(i, j);
+                i = j;
+            } else if let Some(hashes) = raw_hashes(b, i) {
+                // A raw string ends at a quote followed by as many `#`s as opened it.
+                let start = i + 1 + hashes + 1;
+                let closes = |j: usize| b[j] == b'"' && b[j + 1..].iter().take(hashes).filter(|&&c| c == b'#').count() == hashes;
+                let end = (start..b.len()).find(|&j| closes(j)).unwrap_or(b.len());
+                blank(start, end);
+                i = end + 1 + hashes;
+            } else if b[i] == b'"' {
+                let mut j = i + 1;
+                while j < b.len() && b[j] != b'"' {
+                    j += if b[j] == b'\\' { 2 } else { 1 };
+                }
+                blank(i + 1, j);
+                i = j + 1;
+            } else if b[i] == b'\'' && b.get(i + 1) == Some(&b'\\') {
+                // A character with an escape ('\n', '\'', '\u{2014}'): step over the escaped
+                // byte, then on to the closing quote.
+                let end = (i + 3..b.len()).find(|&j| b[j] == b'\'').unwrap_or(b.len());
+                blank(i + 1, end);
+                i = end + 1;
+            } else if b[i] == b'\'' {
+                let width = code[i + 1..].chars().next().map_or(0, char::len_utf8);
+                if width > 0 && b.get(i + 1 + width) == Some(&b'\'') {
+                    blank(i + 1, i + 1 + width);
+                    i += width + 2;
+                } else {
+                    // A lifetime or a loop label: no closing quote.
+                    i += 1;
+                }
+            } else {
+                i += 1;
+            }
+        }
+        String::from_utf8(out).expect("blanking whole spans leaves the text valid UTF-8")
+    }
+
+    /// Each literal form, as `blanked` reads it. A misread does not announce itself: a raw string
+    /// taken for a plain one swallows the text up to the next quote, which a brace count can
+    /// miss, so each form is held here on its own.
+    #[test]
+    fn blanking_reads_every_literal_form() {
+        let cases = [
+            // (the source, what `blanked` makes of it)
+            ("let s = \"it's // not a comment\"; y", "let s = \"                     \"; y"),
+            ("\"\\\"\"", "\"  \""),
+            ("\"a\\\\\"", "\"   \""),
+            ("\"a\nb\"", "\" \n \""),
+            ("let a = r#\"a\"b{\"#; x", "let a = r#\"    \"#; x"),
+            ("br#\"..\"#", "br#\"  \"#"),
+            ("cr\"a\\\"; let b = \"q\"; z", "cr\"  \"; let b = \" \"; z"),
+            ("b\"{\"", "b\" \""),
+            ("'\"'", "' '"),
+            ("'\\''", "'  '"),
+            ("'{'", "' '"),
+            ("b'{'", "b' '"),
+            ("'\\u{7b}'", "'      '"),
+            ("fn f<'a>(x: &'a str) { 'outer: loop { break 'outer; } }", "fn f<'a>(x: &'a str) { 'outer: loop { break 'outer; } }"),
+            ("a /* x /* y */ z */ b", "a                   b"),
+            ("/* don't \" */ x", "              x"),
+            ("x // \"unclosed\ny", "x             \ny"),
+        ];
+        for (source, expected) in cases {
+            let got = blanked(source);
+            assert_eq!(got, expected, "blanking {source:?}");
+            assert_eq!(got.len(), source.len(), "blanking {source:?} must keep every byte offset");
+        }
+    }
+
     /// A client's month figure is read only when its label is the month of the date the rollup
     /// is given, and the scan labels it with the month of `spend::today_naive_date()`, which
     /// honours the override in the environment. Two arrangements keep every caller on that
@@ -6131,11 +6253,17 @@ mod tests {
     ///   `let` is the binding in force at the call;
     /// - `agent_spend_month_at(` is called once, given that day, and `agent_spend_month(`, which
     ///   reads a day of its own, not at all;
-    /// - no other clock is read: none of `.date_naive()`, `today_naive_date(` or
-    ///   `today_for_clock(`, and no call of `now(` other than the `Utc::now().timestamp_millis()`
-    ///   that measures a session's age, which is a timestamp and not a day;
+    /// - none of these is read in the pass's own text: `.date_naive()`, `today_naive_date(`,
+    ///   `today_for_clock(`, `today_days_from_ce(`, or a call of `now(` other than the
+    ///   `Utc::now().timestamp_millis()` that measures a session's age, which is a timestamp and
+    ///   not a day;
     /// - the reading itself is asked for its hour and nothing else, and neither name is bound a
     ///   second time, so no other day can be had from either.
+    ///
+    /// It reads the pass's own text, not what it calls: a day read inside a helper the pass
+    /// calls, and handed to one of the guarded calls, is beyond it. spend.rs keeps its other
+    /// readers of the day (`today_for_clock`, `today_days_from_ce`) private so that the two
+    /// public ones are the two named here.
     ///
     /// It is a source test because nothing else can show it: the pass reads the real config
     /// folder, and the override is an environment variable, which every test in the process
@@ -6148,92 +6276,8 @@ mod tests {
         let marker = "#[cfg(test)]\nmod tests {";
         let production = &source[..source.rfind(marker).expect("the test module moved: update this test")];
 
-        // The code with every comment, and the inside of every string and character literal,
-        // replaced by spaces. Newlines stay, so an offset in the result is the same offset in the
-        // file and a line number is the file's. Every check below reads this one text: a mention
-        // in a comment or a message counts for none of them, and a brace in a literal moves no
-        // block's edge.
-        fn blanked(code: &str) -> String {
-            // The number of `#`s of the raw string (`r"..."`, `r#"..."#`, `br"..."`) that starts at `i`.
-            fn raw_hashes(b: &[u8], i: usize) -> Option<usize> {
-                let word = |at: usize| b.get(at).is_some_and(|&c| c.is_ascii_alphanumeric() || c == b'_');
-                // An `r` opens a raw string when it starts a word, or follows a `b` that does.
-                let starts_word = i == 0 || !word(i - 1) || (b[i - 1] == b'b' && (i == 1 || !word(i - 2)));
-                if b[i] != b'r' || !starts_word {
-                    return None;
-                }
-                let hashes = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
-                (b.get(i + 1 + hashes) == Some(&b'"')).then_some(hashes)
-            }
-
-            let b = code.as_bytes();
-            let mut out = b.to_vec();
-            let mut blank = |from: usize, to: usize| {
-                for byte in &mut out[from..to.min(b.len())] {
-                    if *byte != b'\n' {
-                        *byte = b' ';
-                    }
-                }
-            };
-            let mut i = 0;
-            while i < b.len() {
-                if b[i] == b'/' && b.get(i + 1) == Some(&b'/') {
-                    let end = b[i..].iter().position(|&c| c == b'\n').map_or(b.len(), |n| i + n);
-                    blank(i, end);
-                    i = end;
-                } else if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
-                    // Block comments nest.
-                    let (mut depth, mut j) = (1, i + 2);
-                    while j < b.len() && depth > 0 {
-                        match (b[j], b.get(j + 1)) {
-                            (b'/', Some(&b'*')) => {
-                                depth += 1;
-                                j += 2;
-                            }
-                            (b'*', Some(&b'/')) => {
-                                depth -= 1;
-                                j += 2;
-                            }
-                            _ => j += 1,
-                        }
-                    }
-                    blank(i, j);
-                    i = j;
-                } else if let Some(hashes) = raw_hashes(b, i) {
-                    // A raw string ends at a quote followed by as many `#`s as opened it.
-                    let start = i + 1 + hashes + 1;
-                    let closes = |j: usize| b[j] == b'"' && b[j + 1..].iter().take(hashes).filter(|&&c| c == b'#').count() == hashes;
-                    let end = (start..b.len()).find(|&j| closes(j)).unwrap_or(b.len());
-                    blank(start, end);
-                    i = end + 1 + hashes;
-                } else if b[i] == b'"' {
-                    let mut j = i + 1;
-                    while j < b.len() && b[j] != b'"' {
-                        j += if b[j] == b'\\' { 2 } else { 1 };
-                    }
-                    blank(i + 1, j);
-                    i = j + 1;
-                } else if b[i] == b'\'' && b.get(i + 1) == Some(&b'\\') {
-                    // A character with an escape ('\n', '\'', '\u{2014}'): step over the escaped
-                    // byte, then on to the closing quote.
-                    let end = (i + 3..b.len()).find(|&j| b[j] == b'\'').unwrap_or(b.len());
-                    blank(i + 1, end);
-                    i = end + 1;
-                } else if b[i] == b'\'' {
-                    let width = code[i + 1..].chars().next().map_or(0, char::len_utf8);
-                    if width > 0 && b.get(i + 1 + width) == Some(&b'\'') {
-                        blank(i + 1, i + 1 + width);
-                        i += width + 2;
-                    } else {
-                        // A lifetime or a loop label: no closing quote.
-                        i += 1;
-                    }
-                } else {
-                    i += 1;
-                }
-            }
-            String::from_utf8(out).expect("blanking whole spans leaves the text valid UTF-8")
-        }
+        // Every check below reads the blanked text (`blanked`, above): a mention in a comment or
+        // a message counts for none of them, and a brace in a literal moves no block's edge.
         let code = blanked(production);
         let code = code.as_str();
         // The reading above is only as good as the blanking, so check what it cannot get wrong
@@ -6450,7 +6494,7 @@ mod tests {
         }
 
         // 5. No other clock.
-        for token in [".date_naive()", "today_naive_date(", "today_for_clock("] {
+        for token in [".date_naive()", "today_naive_date(", "today_for_clock(", "today_days_from_ce("] {
             for (a, _) in block.match_indices(token) {
                 problems.push(format!("line {}: the alert pass reads `{token}`, a day the scan clock did not give it", line_of(open + a)));
             }
