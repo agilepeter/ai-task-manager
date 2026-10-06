@@ -186,6 +186,18 @@ test("the agent watch the demo serves is complete, and shows one budget over and
     assert.ok(spendNames.has(budget.agent), `${budget.agent} has no subagent spend in the fixture, so its month figure says nothing`);
   });
   assert.deepEqual(watch.known, [...new Set(watch.known)].sort(), "the offered names are sorted and have no repeats");
+  // The month's spend of every agent that has any, by name: what a budget the visitor adds is read
+  // against. The engine's own budget rows are made from the same figures, so each saved budget's
+  // row is its entry here (zero for a name with none), and every name in it is an agent with spend.
+  const month = watch.monthSpend;
+  assert.ok(month && typeof month === "object" && !Array.isArray(month), "fixture.agentWatch.monthSpend is missing");
+  for (const [name, cost] of Object.entries(month)) {
+    assert.ok(Number.isFinite(cost) && cost >= 0, `${name}: no month spend`);
+    assert.ok(spendNames.has(name), `${name} has month spend but no subagent spend in the fixture`);
+  }
+  saved.forEach((budget, i) => {
+    assert.equal(watch.budgets[i].monthToDate, Object.hasOwn(month, budget.agent) ? month[budget.agent] : 0, `${budget.agent}: its budget row is not its month spend`);
+  });
   // The demo is there to show both states of the section.
   assert.ok(watch.budgets.some((b) => b.monthToDate >= b.monthlyBudget), "no budget is over its figure");
   assert.ok(watch.budgets.some((b) => b.monthToDate < b.monthlyBudget), "no budget is under its figure");

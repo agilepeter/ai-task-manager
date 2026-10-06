@@ -421,8 +421,10 @@ including every network call the app can make and the greps that prove it, is
   report.
 - **Agent budgets and the runaway rule** live in `agent_watch.json` in the
   app's own config folder: the agent names you chose and your figures, never a
-  path, a prompt or a credential. It is never sent anywhere, and a custom
-  agent's name reaches neither the seat report nor the local API's feeds.
+  path, a prompt or a credential. It is never sent anywhere, and nothing in it
+  reaches the seat report or the local API's feeds. (The opt-in `/v1/agents`
+  feed is a separate matter: while it is on it lists the agents that have
+  spend by name, on loopback, as before.)
 - **Prompts and conversation titles are never read.** Claude Code stores titles
   derived from your prompts in the same logs the spend scanner walks. It skips
   them on purpose.

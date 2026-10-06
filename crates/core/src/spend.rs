@@ -5386,8 +5386,11 @@ mod tests {
     /// Prints what the Agents view's budgets are made of, built the way
     /// `get_agent_watch` builds them (src-tauri/src/lib.rs): the watch this
     /// machine's own `agent_watch.json` holds, each of its budgets against the
-    /// calendar month so far, and the names a budget may take. The running
-    /// agents and the live hint are left out: they come from the process list.
+    /// calendar month so far, and the names a budget may take. Also the month's
+    /// spend of every agent, by name (`monthSpend`): the rows the budgets are
+    /// made from, so that a budget added later to the browser demo is read
+    /// against the engine's own month. The running agents and the live hint are
+    /// left out: they come from the process list.
     /// `cargo test -p aitm-core live_agent_watch -- --ignored --nocapture`
     #[test]
     #[ignore]
@@ -5396,9 +5399,11 @@ mod tests {
         let saved = crate::agent_watch::load_from(&crate::agent_watch::path());
         let defined: Vec<String> = crate::inventory::scan().agents.into_iter().map(|a| a.name).collect();
         let known = crate::agent_watch::known_names(&defined, &agent_spend(31), &saved);
-        let budgets = crate::agent_watch::budget_rows(&agent_spend_month(), &saved);
+        let month = agent_spend_month();
+        let budgets = crate::agent_watch::budget_rows(&month, &saved);
+        let month_spend: std::collections::BTreeMap<String, f64> = month.into_iter().map(|a| (a.name, a.cost)).collect();
         println!("{FIXTURE_BEGIN}");
-        println!("{}", json!({ "watch": saved, "budgets": budgets, "known": known }));
+        println!("{}", json!({ "watch": saved, "budgets": budgets, "known": known, "monthSpend": month_spend }));
         println!("{FIXTURE_END}");
     }
 

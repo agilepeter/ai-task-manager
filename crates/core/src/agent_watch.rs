@@ -1051,7 +1051,7 @@ mod tests {
     }
 
     #[test]
-    fn a_custom_agent_name_never_reaches_the_seat_report_or_the_feed() {
+    fn nothing_in_the_watch_reaches_the_seat_report_or_the_feed() {
         use crate::inventory::Inventory;
         const NAME: &str = "northwind-intake-reviewer";
         const AREA: &str = "northwind-portal/billing";

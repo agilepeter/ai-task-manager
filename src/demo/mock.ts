@@ -459,10 +459,17 @@ type AgentWatch = { budgets: { agent: string; monthlyBudget: number }[]; live: {
 
 /** What the real engine answered for the fictional machine's own agent_watch.json
  *  (scripts/make-demo-fixture.py, `live_agent_watch`): the saved budgets and live rule, each
- *  budget's figure for the calendar month, and the names a budget may take. Read when first
- *  asked for, not when this module loads. */
+ *  saved budget's figure for the calendar month, the names a budget may take, and `monthSpend`,
+ *  the month's spend of every agent that has any, by name: what a budget is read against, the
+ *  ones the fixture saved and the ones a visitor adds alike. Read when first asked for, not
+ *  when this module loads. */
 const fixtureWatch = () =>
-  (fixture as any).agentWatch as { watch: AgentWatch; budgets: { agent: string; monthToDate: number }[]; known: string[] };
+  (fixture as any).agentWatch as {
+    watch: AgentWatch;
+    budgets: { agent: string; monthToDate: number }[];
+    known: string[];
+    monthSpend: Record<string, number>;
+  };
 
 /** What is saved: the fixture's watch until the visitor saves one of their own. */
 let agentWatch: AgentWatch | null = null;
@@ -477,10 +484,11 @@ function agentWatchKnown(saved: { agent: string }[]): string[] {
 
 function agentWatchView() {
   const saved = savedWatch();
-  // A budget's figure is the engine's for the fixture's own month; one the visitor adds in the
-  // demo has none (the fixture holds no second series to work one from), so it reads $0, as an
-  // agent with no spend this month does.
-  const monthToDate = new Map(fixtureWatch().budgets.map((b) => [b.agent, b.monthToDate]));
+  // A budget reads its agent's spend for the calendar month, as the engine summed it for every
+  // agent that has any (a Map, so an agent named like an Object property is no special case):
+  // a budget the visitor adds on an agent with spend reads that spend, and one on an agent
+  // with none reads $0, as in the app.
+  const monthToDate = new Map(Object.entries(fixtureWatch().monthSpend));
   // The same sum the real app makes: the fastest priced, non-idle running pace,
   // a dollar figure an hour (the last ten minutes carried over an hour).
   const paces = AGENTS.map((a) => a.pace as { priced: boolean; idleSecs: number; tokens10m: number; cost10m: number } | null)

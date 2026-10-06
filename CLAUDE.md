@@ -469,8 +469,9 @@ Rules take the clock as a parameter (`evaluate_at`) so windows are tested exactl
   `spend::agent_spend_month_at`, the per-day agent spend the scan already keeps.
 - **Runaway rule** (same file): a running session whose ten-minute pace, carried over an hour,
   passes the user's dollar figure, or that has been open longer than the user's minutes and is still
-  working. **There are no default figures**: nothing is computed, shown or fired until the user sets
-  one, and the pace hint under the Settings field is the user's own. One notification per
+  working. **There are no default figures**: no budget row, no runaway check and no notification
+  exists until the user sets one; the one thing shown before that is the pace hint under the
+  Settings field, the user's own fastest live pace. One notification per
   running agent per day, marked per host process so two sessions of one tool alert separately. **The
   app tells; it never ends, pauses or edits an agent.** Both rules show as unscored "learn" findings
   whose titles carry a count only, and `agent_watch.json` is read by neither `seat.rs` nor the local

@@ -116,11 +116,16 @@ directory with upstream Pane would let the two apps overwrite each other.
   config folder: the agent names you chose, each one's monthly dollar budget,
   and the rule's two figures (a dollar pace per hour, and minutes open).
   Never a path, a prompt or a credential. A name you chose may match a client,
-  so the file stays on your machine: it is never sent anywhere, and a custom
-  agent's name reaches neither the seat report nor the `/v1/agents` feed (a
-  test, `a_custom_agent_name_never_reaches_the_seat_report_or_the_feed`,
-  plants one and checks both). Nothing is computed, shown or notified for a
-  figure you have not set.
+  so the file stays on your machine: it is never sent anywhere, and nothing in
+  it reaches the seat report or the local API's feeds (a test,
+  `nothing_in_the_watch_reaches_the_seat_report_or_the_feed`, plants a
+  budget name, a budget and both figures in a watch and checks that none of
+  them appears in either). The `/v1/agents` feed is a separate matter: while
+  `apiFeeds` is on, on loopback, it lists every agent with spend in the last
+  30 days by name, custom agents included, as it has since 0.1.2. Until you set
+  a figure there is no budget row, no runaway check and no notification; the
+  one thing shown before that is a hint under the pace setting, the pace of
+  your fastest session running now.
 - **Alerts already given.** `alert_marks.json`, also in the app's own config
   folder, remembers which alerts have fired so that a restart does not repeat
   one: for a client budget the client's name and the month, for the weekly
@@ -178,8 +183,10 @@ overlays can read your usage.
   `/v1/subscriptions` and `/v1/agents`. Work areas are your folder names and
   clients are your customers', so while that switch is off those paths return
   **404 rather than an empty result**: nothing is published at all.
-  `/v1/agents` adds each running agent's tool, pace, area and client; its
-  working folder, process id and session id never reach that feed at all.
+  `/v1/agents` lists each agent with spend in the last 30 days by name, custom
+  agents included, and each running agent's tool, pace, area and client; a
+  running agent's working folder, process id and session id never reach that
+  feed at all.
 
 Details: [local-http-api.md](local-http-api.md).
 

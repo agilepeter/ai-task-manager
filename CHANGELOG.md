@@ -22,17 +22,17 @@ the 31st.
   Notifications watch the sessions running now: a spend per hour (the cost of
   a session's last ten minutes, carried over an hour) and how long a session
   can stay open and still working. Either one gets you one notification per
-  running agent per day. Under the spend setting the app shows what your own
-  fastest session running now is spending, when there is one, so there is
-  something to go by. Nothing is set by default, and nothing is computed or
-  shown until you set it. On a flat-rate plan the figures are API-equivalent
-  value, not a charge, as everywhere else here. The app only tells you: it
-  never stops, pauses or edits an agent. A budget that has been passed and a
-  session past your figure are also listed under Worth a look in the Agents
-  view, and as unscored rows in the Audit, which open the Agents view. The
-  figures are kept in `agent_watch.json` on your machine and never reach the
-  seat report or the local API ([docs/privacy.md](docs/privacy.md) says
-  exactly what).
+  running agent per day. Nothing is set by default: no budget row, no runaway
+  check and no notification exists until you set a figure. The one thing
+  shown before that is a hint under the spend setting, what your own fastest
+  session running now is spending, when there is one, so there is something
+  to go by. On a flat-rate plan the figures are API-equivalent value, not a
+  charge, as everywhere else here. The app only tells you: it never stops,
+  pauses or edits an agent. A budget that has been passed and a session past
+  your figure are also listed under Worth a look in the Agents view, and as
+  unscored rows in the Audit, which open the Agents view. The figures are
+  kept in `agent_watch.json` on your machine and never reach the seat report
+  or the local API ([docs/privacy.md](docs/privacy.md) says exactly what).
 - **Time spent at the limit.** A provider's page says how often each limit
   reached 100 percent in the last 30 days and for how long in all, one line
   per limit, most time first, for example "Weekly: fully used 3 times in the
@@ -72,9 +72,9 @@ the 31st.
 - **A client's month to date was short on the 31st.** It was cut out of a
   30-day series, so on the 31st of a month with 31 days the 1st fell one day
   outside it: the figure was short by whatever the 1st had spent, and a
-  budget the month had really crossed could go unreported, with the month
-  ending the next day. That is seven months a year, one day each. The scan now
-  adds up the calendar month itself, so the figure is whole on every day.
+  budget the month had really crossed could go unreported on the month's last
+  day. That is seven months a year, one day each. The scan now adds up the
+  calendar month itself, so the figure is whole on every day.
 - **A server's 30-day call figure could be another server's.** Claude Code
   logs a call to a server whose name ends in punctuation, such as `foo!`,
   under the shorter name `foo`, so a configured server called `foo` was shown

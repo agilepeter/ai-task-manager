@@ -3640,6 +3640,11 @@
    "statusline-setup",
    "workflow-subagent"
   ],
+  "monthSpend": {
+   "Explore": 0.8463,
+   "deploy-checker": 1.6929,
+   "general-purpose": 14.7362
+  },
   "watch": {
    "budgets": [
     {

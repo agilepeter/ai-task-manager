@@ -3,8 +3,8 @@
 // scripts/make-demo-fixture.py into src/demo-fixture.json). Held here, against that committed
 // fixture itself: the saved budgets, the engine's calendar-month figure beside each, and the
 // names a budget may take all come from it; and what a visitor does in the demo still behaves as
-// it does in the app -- a saved budget keeps its figure, one with none reads $0, a name that is
-// not offered is refused.
+// it does in the app -- a budget added on an agent with spend this month reads that spend, one
+// on an agent with none reads $0, a name that is not offered is refused.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -22,7 +22,7 @@ test("the demo's budgets are the engine's answer for the fictional machine", asy
   const { handle } = await freshDemo();
   const view = handle("get_agent_watch");
   assert.deepEqual(view.watch, engine.watch, "what is saved");
-  assert.deepEqual(view.budgets, engine.budgets, "each budget against the calendar month, as the engine summed it");
+  assert.deepEqual(view.budgets, engine.budgets, "each budget against the calendar month, as the engine summed it: the same figure its monthSpend holds");
   assert.deepEqual(view.known, engine.known, "the names a budget may take");
   assert.ok(view.budgets.some((b) => b.monthToDate >= b.monthlyBudget) && view.budgets.some((b) => b.monthToDate < b.monthlyBudget));
   // The live rule is unset, so nothing runs away; the hint is the demo's own running agent's pace.
@@ -33,20 +33,13 @@ test("the demo's budgets are the engine's answer for the fictional machine", asy
   assert.equal(handle("get_agent_watch").watch.budgets.length, engine.watch.budgets.length);
 });
 
-test("a budget saved in the demo keeps its figure, and one the fixture has none for reads zero", async () => {
+test("a budget saved in the demo keeps its figure, and what it was saved with reads back", async () => {
   const { handle } = await freshDemo();
   const [first] = engine.watch.budgets;
-  const other = engine.known.find((n) => !engine.watch.budgets.some((b) => b.agent === n));
-  assert.ok(other, "the fixture offers a name with no budget, or this test has nothing to add");
-
   const saved = handle("set_agent_watch", {
-    watch: { budgets: [{ agent: first.agent, monthlyBudget: 99 }, { agent: other, monthlyBudget: 7 }], live: { hourlyPaceUsd: 3, maxMinutes: 90 } },
+    watch: { budgets: [{ agent: first.agent, monthlyBudget: 99 }], live: { hourlyPaceUsd: 3, maxMinutes: 90 } },
   });
-  const figureOf = (agent) => engine.budgets.find((b) => b.agent === agent)?.monthToDate ?? 0;
-  assert.deepEqual(saved.budgets, [
-    { agent: first.agent, monthToDate: figureOf(first.agent), monthlyBudget: 99 },
-    { agent: other, monthToDate: 0, monthlyBudget: 7 },
-  ]);
+  assert.deepEqual(saved.budgets, [{ agent: first.agent, monthToDate: engine.monthSpend[first.agent], monthlyBudget: 99 }]);
   assert.deepEqual(saved.watch.live, { hourlyPaceUsd: 3, maxMinutes: 90 });
   assert.deepEqual(handle("get_agent_watch"), saved, "a later read says what the save said");
   assert.equal(engine.watch.budgets.find((b) => b.agent === first.agent).monthlyBudget, 10, "the fixture itself is never written to");
@@ -55,6 +48,31 @@ test("a budget saved in the demo keeps its figure, and one the fixture has none 
   const cleared = handle("set_agent_watch", { watch: {} });
   assert.deepEqual([cleared.budgets, cleared.watch.live], [[], { hourlyPaceUsd: null, maxMinutes: null }]);
   assert.deepEqual(cleared.known, engine.known);
+});
+
+test("a budget added in the demo reads its agent's spend this month, and zero when the agent has none", async () => {
+  const { handle } = await freshDemo();
+  const budgeted = new Set(engine.watch.budgets.map((b) => b.agent));
+  // An agent the engine knows spend for this month that has no budget yet, and one it knows no spend for.
+  const withSpend = Object.keys(engine.monthSpend).find((name) => !budgeted.has(name));
+  const withoutSpend = engine.known.find((name) => !budgeted.has(name) && !Object.hasOwn(engine.monthSpend, name));
+  assert.ok(withSpend && engine.monthSpend[withSpend] > 0, "the fixture has an agent with spend and no budget, or this test has nothing to add");
+  assert.ok(withoutSpend, "the fixture offers an agent with no spend, or this test has nothing to add");
+
+  const [first] = engine.watch.budgets;
+  const view = handle("set_agent_watch", {
+    watch: { budgets: [{ agent: first.agent, monthlyBudget: 50 }, { agent: withSpend, monthlyBudget: 1 }, { agent: withoutSpend, monthlyBudget: 2 }] },
+  });
+  assert.deepEqual(view.budgets, [
+    { agent: first.agent, monthToDate: engine.monthSpend[first.agent], monthlyBudget: 50 },
+    { agent: withSpend, monthToDate: engine.monthSpend[withSpend], monthlyBudget: 1 },
+    { agent: withoutSpend, monthToDate: 0, monthlyBudget: 2 },
+  ]);
+  // The figure is the same one the agent shows in Your agents when its whole 30 days fall in the
+  // month, as they do for this fixture: a budget never reads $0 beside an agent that shows spend.
+  const shown = fixture.agentSpend.find((row) => row.name === withSpend);
+  assert.ok(shown, "the agent with month spend is listed in the agents' 30-day spend");
+  assert.ok(Math.abs(view.budgets[1].monthToDate - shown.cost) < 1e-6, `${withSpend}: ${view.budgets[1].monthToDate} beside ${shown.cost}`);
 });
 
 test("the demo refuses what the app refuses", async () => {
