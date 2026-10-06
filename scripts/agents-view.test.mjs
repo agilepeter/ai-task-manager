@@ -1549,7 +1549,7 @@ test("a failed changeLiveRule puts the dropdown back", async () => {
     const result = await changeLiveRule("hourlyPaceUsd", "50");
     assert.equal(result.outcome, "rejected", "a throw must come back as a result, not as an unhandled rejection");
     assert.equal(result.show, null, "the select is put back to what is saved (nothing usable here, so blank)");
-    assert.equal(result.error, "Could not save the agent budgets.", "what was thrown is not shown: the user gets a sentence in their own language");
+    assert.equal(result.error, "Could not save. Your agent budgets and alert figures are unchanged.", "what was thrown is not shown: the user gets a sentence in their own language");
     assert.equal(agentWatchState().saving, false);
   } finally {
     delete globalThis.document;

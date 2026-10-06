@@ -267,16 +267,16 @@ mod tests {
         let found = opportunities(&[lt("claude", "Weekly", FINDING_AT_MS)]);
         assert_eq!(found.len(), 1);
         assert_eq!((found[0].id.as_str(), found[0].kind.as_str()), ("limit-time", "learn"));
-        assert_eq!(found[0].title, "1 limit spent two hours or more at 100% in the last 30 days");
+        assert_eq!(found[0].title, "1 limit was fully used for two hours or more in the last 30 days");
         // The count is the number of limits at or over, and the detail is the longest one.
         let rows = [lt("claude", "Weekly", 3 * HOUR), lt("codex", "Session", 5 * HOUR + 10 * MIN), lt("claude", "Session", HOUR)];
         let found = opportunities(&rows);
         assert_eq!(found.len(), 1, "at most one finding");
         assert_eq!(found[0].title_msg.count, Some(2));
-        assert_eq!(found[0].title, "2 limits spent two hours or more at 100% in the last 30 days");
+        assert_eq!(found[0].title, "2 limits were fully used for two hours or more in the last 30 days");
         assert_eq!(
             found[0].detail,
-            "Over the last 30 days, the limit that sat at 100% longest spent 5h 10m there, 2 times, and 2h 35m at a stretch. While a limit is at 100%, that tool cannot be used on your plan. Each provider's page shows which limit and when."
+            "Over the last 30 days, the limit that stayed fully used longest was that way for 5h 10m (2 times); its longest stretch was 2h 35m. While a limit is fully used, that tool cannot be used on your plan. Each provider's page shows which limit and when."
         );
     }
 
@@ -315,7 +315,7 @@ mod tests {
                     if *locale != "en" {
                         // The durations inside differ by language even when the sentence
                         // around them has fallen back to English, so test the fixed words.
-                        assert!(!text.contains("While a limit is at 100%"), "{locale} detail still reads in English: {text}");
+                        assert!(!text.contains("While a limit is fully used"), "{locale} detail still reads in English: {text}");
                         assert_ne!(i18n::render(locale, &title_msg), i18n::render("en", &title_msg), "{locale} title still reads in English");
                     }
                     let title = i18n::render(locale, &title_msg);

@@ -49,9 +49,9 @@ test("the limit time line shows only when a limit was reached", async () => {
   const html = limitTimeSection([row("Session", 1, 40), row("Weekly", 3, 130), row("Opus weekly", 2, 1620)]);
   const lines = [...html.matchAll(/<p>(.*?)<\/p>/g)].map((m) => m[1]);
   assert.deepEqual(lines, [
-    "Opus weekly: at 100% 2 times in the last 30 days, 1d 3h in all",
-    "Weekly: at 100% 3 times in the last 30 days, 2h 10m in all",
-    "Session: at 100% 1 time in the last 30 days, 40m in all",
+    "Opus weekly: fully used 2 times in the last 30 days, 1d 3h in all",
+    "Weekly: fully used 3 times in the last 30 days, 2h 10m in all",
+    "Session: fully used 1 time in the last 30 days, 40m in all",
   ], "most time first, the count through the plural machinery, the length through the time.* keys");
 
   // Another language words and orders it itself; no English unit survives.
@@ -80,7 +80,7 @@ test("a limit reached with no counted time shows no duration", async () => {
   const { limitTimeSection, setActiveLocale } = await loadDetailModule();
   setActiveLocale("en");
   const lines = (rows) => [...limitTimeSection(rows).matchAll(/<p>(.*?)<\/p>/g)].map((m) => m[1]);
-  assert.deepEqual(lines([row("Weekly", 1, 0)]), ["Weekly: at 100% 1 time in the last 30 days"]);
-  assert.deepEqual(lines([{ ...row("Weekly", 2, 0), totalMs: 59_999 }]), ["Weekly: at 100% 2 times in the last 30 days"]);
-  assert.deepEqual(lines([row("Weekly", 1, 1)]), ["Weekly: at 100% 1 time in the last 30 days, 1m in all"], "a whole minute is shown");
+  assert.deepEqual(lines([row("Weekly", 1, 0)]), ["Weekly: fully used 1 time in the last 30 days"]);
+  assert.deepEqual(lines([{ ...row("Weekly", 2, 0), totalMs: 59_999 }]), ["Weekly: fully used 2 times in the last 30 days"]);
+  assert.deepEqual(lines([row("Weekly", 1, 1)]), ["Weekly: fully used 1 time in the last 30 days, 1m in all"], "a whole minute is shown");
 });

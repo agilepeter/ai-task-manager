@@ -98,7 +98,7 @@ const WHERE: Record<string, "inventory" | "ledger" | "usage" | "agents"> = {
   "cache-read-share": "usage", "subagent-share": "usage",
   "mcp-context-heavy": "inventory", "mcp-unused": "inventory", "guardrail-removed": "inventory", "setup-changed": "inventory",
   // The Agents view holds the monthly budgets and the running agents; a limit
-  // that sat at 100% is read off the provider's own card, which Usage lists.
+  // that was fully used is read off the provider's own card, which Usage lists.
   "agent-over-budget": "agents", "agent-runaway": "agents", "limit-time": "usage",
 };
 
