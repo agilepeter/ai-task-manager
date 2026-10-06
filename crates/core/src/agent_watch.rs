@@ -22,7 +22,7 @@ use crate::alerts::Alert;
 use crate::i18n::Msg;
 use crate::inventory::Opportunity;
 use crate::procs::RunningAgent;
-use crate::spend::{AgentSpend, LivePace};
+use crate::spend::{month_key, AgentSpend, LivePace};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -304,7 +304,7 @@ pub fn currently_over(rows: &[BudgetRow]) -> Vec<BudgetRow> {
 /// updated in place, so each agent alerts once a calendar month; marks from
 /// earlier months are dropped, as `clients::over_budget` does.
 pub fn over_budget(rows: &[BudgetRow], today: NaiveDate, fired: &mut Vec<String>) -> Vec<BudgetRow> {
-    let month = today.format("%Y-%m").to_string();
+    let month = month_key(today);
     fired.retain(|m| m.ends_with(&format!("|{month}")));
     let mut out = Vec::new();
     for row in rows {
@@ -604,6 +604,17 @@ mod tests {
         let daily = [(day("2027-01-31"), 7.0), (day("2027-02-01"), 1.0), (day("2027-02-28"), 1.0)];
         let rows = crate::spend::month_spend_from_daily("Explore", &daily, day("2027-02-28"));
         assert!((rows[0].cost - 2.0).abs() < 1e-9, "got {}", rows[0].cost);
+    }
+
+    #[test]
+    fn a_budget_marks_its_month_with_the_shared_key() {
+        // The mark names the month the way the client budgets and the month figures do, two
+        // digits and all: a single-digit month is where a spelling of its own would show.
+        let w = Watch { budgets: vec![budget("reviewer", 10.0)], live: LiveRule::default() };
+        let rows = budget_rows(&[spend_row("reviewer", 12.0)], &w);
+        let mut fired = Vec::new();
+        assert_eq!(over_budget(&rows, day("2027-03-05"), &mut fired).len(), 1);
+        assert_eq!(fired, ["reviewer|2027-03"]);
     }
 
     #[test]

@@ -197,7 +197,8 @@ function glob(pattern: string, text: string): boolean {
   return new RegExp(`^${p.split("*").map((x) => x.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`).test(t);
 }
 
-/** "YYYY-MM" in the viewer's local time: how the engine labels the month a figure is for. */
+/** "YYYY-MM" in the viewer's local time: how the engine labels the month a figure is for.
+ *  Mirrors `month_key` in crates/core/src/spend.rs, the one spelling the engine uses. */
 function monthLabel(ms: number): string {
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -217,17 +218,17 @@ function clientRollup(areas: any[]) {
       row[k].tokens += a[k].tokens;
     }
     const figure = a.month_to_date;
-    if (figure && typeof figure.cost === "number") {
-      // The engine's own figure, summed from every day it read: the 30-slot series
-      // below is a day short on the 31st of a 31-day month. It counts only for the
-      // month it is for. One for another month is zero here, as in the engine: its
-      // scan ended before this month began, so it holds none of this month's spend.
-      // (A fixture with figures in it is frozen at one month, so in every other
-      // month it reads zero until it is regenerated.)
-      if (figure.month === thisMonth) row.monthToDate += figure.cost;
+    if (figure && typeof figure.cost === "number" && figure.month === thisMonth) {
+      // The engine's own figure for this month, summed from every day it read: the
+      // 30-slot series below is a day short on the 31st of a 31-day month.
+      row.monthToDate += figure.cost;
     } else {
-      // An area with no figure at all (the committed fixture predates the field):
-      // cut the month out of the series.
+      // No figure for this month: cut the month out of the series, as for a fixture
+      // with no figure at all. The app counts a figure for another month as zero,
+      // because a stale scan holds none of this month's spend. The demo has no scan:
+      // its fixture is frozen at one month and its series is anchored to the viewer's
+      // today, so a label from another month says nothing about this one, and zeroing
+      // on it would show "$0 of $600" beside bars of hundreds.
       const daily: number[] = a.daily_cost ?? [];
       daily.forEach((c, i) => {
         const d = new Date(now() - (daily.length - 1 - i) * 24 * HOUR);

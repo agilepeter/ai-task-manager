@@ -23,9 +23,16 @@ use crate::pricing;
 use crate::providers;
 
 pub const TREND_DAYS: usize = 30;
+/// How old, in days, a log file may be and still be read by the scan: a file not
+/// written within this long is not walked at all. The calendar month to date is
+/// summed from what the scan read, so this is what keeps the 1st of a 31-day
+/// month in reach on the 31st.
+const LOG_HORIZON_DAYS: u64 = 31;
 // The "no tool calls in the last N days" claim is read from the 30-day call sums
 // (`mcp_usage_30d`), so its window has to fit inside them.
 const _: () = assert!(crate::mcp_usage::UNUSED_WINDOW_DAYS <= TREND_DAYS as i64);
+// A log written on the 1st of a 31-day month is up to 31 days old on the 31st.
+const _: () = assert!(LOG_HORIZON_DAYS >= 31);
 
 /// Parses `AITM_TODAY`'s raw value as an ISO `YYYY-MM-DD` date -- the one
 /// shape scripts/make-demo-fixture.py ever writes. Kept separate from the
@@ -181,7 +188,9 @@ pub struct AreaSpend {
     /// month `today` falls in, through `today`. Summed from the scan's own
     /// per-day map in the same pass as `daily_cost`, so it is complete on the
     /// 31st of a 31-day month, when the 1st is 30 days back and one day past
-    /// the series.
+    /// the series. That depends on the scan reading every log written in the
+    /// last `LOG_HORIZON_DAYS` days (31), which keeps the 1st of a 31-day
+    /// month in reach on the 31st.
     ///
     /// The figure carries the month it is for because it is fixed at scan
     /// time and read later: a scan that ends just before midnight on the 1st
@@ -191,15 +200,16 @@ pub struct AreaSpend {
     /// only when that month is `today`'s, and counts a figure for any other
     /// month as zero: the usual one is an earlier month's, from a scan that
     /// ended before this month began and so holds none of its spend. `Some`
-    /// for every area a scan makes; `None` only for one that did not come
-    /// from a scan (an older frontend handing back a shape from before this
-    /// field existed), which the rollup answers by cutting the month out of
-    /// `daily_cost`, never as zero.
+    /// for every area a scan makes. `None` only for an area built by hand (a
+    /// test) or read from the demo's committed fixture, which predates the
+    /// field: the UI ships inside the binary and keeps its areas in memory
+    /// only, so a real frontend never hands one back without it. The rollup
+    /// answers `None` by cutting the month out of `daily_cost`, never as zero.
     ///
     /// An area with no spend in the last `TREND_DAYS` days is not listed at
-    /// all, so an area used on the 1st and idle since is missing from the
-    /// month. A log Claude Code has already deleted cannot be counted,
-    /// whichever window is used.
+    /// all, so on the 31st of a 31-day month an area used only on the 1st is
+    /// missing from the month. A log Claude Code has already deleted cannot be
+    /// counted, whichever window is used.
     #[serde(default)]
     pub month_to_date: Option<MonthSpend>,
 }
@@ -926,10 +936,11 @@ fn oversized_log(path: &Path, size: u64) {
     );
 }
 
-/// All .jsonl files under `root` modified in the last 31 days, and whether the
-/// walk saw everything it was meant to: `false` when it skipped something that
-/// could have been a log (see `recent_jsonl_files_within`). Most callers only
-/// want the files and ignore the answer.
+/// All .jsonl files under `root` modified in the last `LOG_HORIZON_DAYS` days,
+/// and whether the walk saw everything it was meant to: `false` when it
+/// skipped something that could have been a log (see
+/// `recent_jsonl_files_within`). Most callers only want the files and ignore
+/// the answer.
 ///
 /// Symlinks and junctions are followed throughout: directories are resolved
 /// through links when recursing, and the recency check below reads the
@@ -948,10 +959,10 @@ fn recent_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) -> bool {
 /// walk stopped at the directory cap, did not go below `MAX_SCAN_DEPTH`, could
 /// not list a directory or stat an entry, or skipped a file over
 /// `MAX_LOG_FILE_BYTES`: any of those can hide a log, and a count taken from
-/// the logs is then not known to be complete. A file older than 31 days is
-/// out of the scan by design and is not a skip.
+/// the logs is then not known to be complete. A file older than
+/// `LOG_HORIZON_DAYS` days is out of the scan by design and is not a skip.
 fn recent_jsonl_files_within(root: &Path, out: &mut Vec<PathBuf>, max_dirs: usize) -> bool {
-    let cutoff = SystemTime::now() - Duration::from_secs(31 * 86_400);
+    let cutoff = SystemTime::now() - Duration::from_secs(LOG_HORIZON_DAYS * 86_400);
     // Canonical paths of link targets already entered. Cycles and aliases can
     // only form through links, so plain directories skip the canonicalize —
     // on Windows it opens a real handle per directory (plus an antivirus
@@ -3257,12 +3268,21 @@ fn first_of_month(today: i32) -> i32 {
     NaiveDate::from_num_days_from_ce_opt(today).map_or(today, |d| today - d.day0() as i32)
 }
 
-/// The `"YYYY-MM"` of the month `today` (a CE day number) falls in: the label a
-/// month figure carries, spelled the way `clients::over_budget` spells a month.
-/// A `today` that is no real date gets a label no month has, so a figure made
-/// for it is never taken for any month's.
+/// How a calendar month is named wherever one is compared or remembered:
+/// `"YYYY-MM"`, the month `date` falls in. It is the label on a month figure,
+/// what `clients::rollup` matches that label against, and the month of every
+/// budget's "already alerted" mark. There is one spelling on purpose: a label
+/// that differs by a byte from the date it is compared with reads as another
+/// month, and a figure for another month counts as zero.
+pub fn month_key(date: NaiveDate) -> String {
+    date.format("%Y-%m").to_string()
+}
+
+/// The label a month figure carries: the `month_key` of the month `today` (a CE
+/// day number) falls in. A `today` that is no real date gets a label no month
+/// has, so a figure made for it is never taken for any month's.
 fn month_label(today: i32) -> String {
-    NaiveDate::from_num_days_from_ce_opt(today).map_or_else(String::new, |d| d.format("%Y-%m").to_string())
+    NaiveDate::from_num_days_from_ce_opt(today).map_or_else(String::new, month_key)
 }
 
 /// For each key of a day map: its today / yesterday / last-30-days windows,
@@ -3272,8 +3292,9 @@ fn month_label(today: i32) -> String {
 /// The month is summed from the map, never cut out of the 30 slots: on the
 /// 31st of a 31-day month the 1st is 30 days back, one past the oldest slot.
 /// The map has every day of every log file the scan read (those written in the
-/// last 31 days), so the 1st is in it. As in every other window, a day after
-/// `today` (a log written when the clock ran ahead) is not counted.
+/// last `LOG_HORIZON_DAYS` days), so the 1st is in it. As in every other
+/// window, a day after `today` (a log written when the clock ran ahead) is not
+/// counted.
 fn windows_by_key(days: DayMap, today: i32) -> HashMap<String, ([Window; 3], Vec<f64>, f64)> {
     let month_start = first_of_month(today);
     let mut out: HashMap<String, ([Window; 3], Vec<f64>, f64)> = HashMap::new();
@@ -7365,6 +7386,94 @@ mod tests {
         assert_eq!(wire["month_to_date"], json!({ "month": "2026-10", "cost": 4.0 }));
         let back: AreaSpend = serde_json::from_value(wire).unwrap();
         assert_eq!(back.month_to_date, areas[0].month_to_date);
+    }
+
+    #[test]
+    fn first_of_month_and_month_label_follow_the_calendar() {
+        // A day, the first of its month, and the month's key: a year end, a non-leap and a
+        // leap February, the start of March, and the last day of a 31-day month.
+        let cases = [
+            (date(2026, 12, 31), date(2026, 12, 1), "2026-12"),
+            (date(2027, 1, 1), date(2027, 1, 1), "2027-01"),
+            (date(2027, 2, 28), date(2027, 2, 1), "2027-02"),
+            (date(2028, 2, 29), date(2028, 2, 1), "2028-02"),
+            (date(2028, 3, 1), date(2028, 3, 1), "2028-03"),
+            (date(2026, 10, 31), date(2026, 10, 1), "2026-10"),
+        ];
+        for (day, first, key) in cases {
+            let ce = day.num_days_from_ce();
+            assert_eq!(first_of_month(ce), first.num_days_from_ce(), "{day}: the first of its month");
+            assert_eq!(month_key(day), key, "{day}");
+            assert_eq!(month_label(ce), key, "{day}: the scan labels a figure with the key");
+        }
+
+        // A day number that is no date can only be a bug upstream, never the clock: no panic,
+        // a month of one day, and a label no month has.
+        for not_a_date in [i32::MAX, i32::MIN] {
+            assert_eq!(first_of_month(not_a_date), not_a_date);
+            assert_eq!(month_label(not_a_date), "");
+        }
+    }
+
+    #[test]
+    fn the_two_month_windows_start_on_the_same_day() {
+        // "This month so far" is defined twice: the client months' `first_of_month`, and the
+        // agent budgets' `today.day()` days back. A client's month and an agent's must start
+        // on the same day wherever the calendar is awkward.
+        for (today, first) in [
+            (date(2026, 12, 31), date(2026, 12, 1)),
+            (date(2027, 1, 1), date(2027, 1, 1)),
+            (date(2027, 2, 28), date(2027, 2, 1)),
+            (date(2028, 2, 29), date(2028, 2, 1)),
+            (date(2028, 3, 1), date(2028, 3, 1)),
+        ] {
+            assert_eq!(first_of_month(today.num_days_from_ce()), first.num_days_from_ce(), "{today}: the client month");
+            // The agent month counts spend on its first day, and not on the day before it.
+            let on_first = month_spend_from_daily("Explore", &[(first, 1.0)], today);
+            assert_eq!(on_first.len(), 1, "{today}: the agent month includes {first}");
+            let before = month_spend_from_daily("Explore", &[(days_before(first, 1), 1.0)], today);
+            assert!(before.is_empty(), "{today}: and not the day before it");
+        }
+    }
+
+    #[test]
+    fn an_area_used_only_on_the_first_is_unlisted_only_on_the_thirty_first_of_a_long_month() {
+        // The limit the docs and the CSV footer state: an area is listed only if it spent in
+        // the last `TREND_DAYS` days, and the 1st is inside them on every day of a month but
+        // the 31st of a 31-day month, when it is 30 days back.
+        for (today, listed) in [
+            (date(2026, 10, 2), true),
+            (date(2026, 10, 15), true),
+            (date(2026, 10, 29), true),
+            (date(2026, 10, 30), true),
+            (date(2026, 10, 31), false),
+            (date(2026, 9, 30), true), // the last day of a 30-day month
+            (date(2027, 2, 28), true),
+        ] {
+            let first = date(today.year(), today.month(), 1);
+            let areas = scanned_areas(&[("acme-portal", first, 5.0)], today);
+            assert_eq!(!areas.is_empty(), listed, "{today}: an area used only on {first}");
+        }
+    }
+
+    #[test]
+    fn a_log_from_the_first_is_still_read_on_the_thirty_first() {
+        // The month to date is summed from the logs the scan reads, and on the 31st of a 31-day
+        // month a log written at the very start of the 1st is a little under 31 days old. So a
+        // log a little younger than the horizon is read, and one a little older is not.
+        let dir = std::env::temp_dir().join(format!("aitm-horizon-{}", providers::unique_stamp()));
+        fs::create_dir_all(&dir).unwrap();
+        let (young, old) = (dir.join("young.jsonl"), dir.join("old.jsonl"));
+        fs::write(&young, "{}\n").unwrap();
+        fs::write(&old, "{}\n").unwrap();
+        let now_ms = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+        let horizon_ms = LOG_HORIZON_DAYS as i64 * 86_400_000;
+        set_mtime(&young, now_ms - horizon_ms + 3_600_000);
+        set_mtime(&old, now_ms - horizon_ms - 3_600_000);
+        let mut files = Vec::new();
+        recent_jsonl_files(&dir, &mut files);
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(files, [young], "read: the log just under the horizon; not read: the one just over it");
     }
 
     #[test]

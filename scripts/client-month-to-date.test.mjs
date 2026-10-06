@@ -2,17 +2,23 @@
 // from the whole per-day map: a 30-slot daily series is a day short on the 31st of a
 // 31-day month, so the frontend must never rebuild it from `daily_cost` when the scan
 // has already given the figure. The figure is `{ month: "YYYY-MM", cost }`: it is a
-// number fixed at scan time, so it says which month it is for, and it is used only
-// while that is the current month; one for another month counts as zero, because its
-// scan ended before this month began. Two places in the frontend handle it:
+// number fixed at scan time, so it says which month it is for. The app uses it only
+// while that is the current month and counts one for another month as zero, because a
+// scan from an earlier month holds none of this month's spend. Two places in the
+// frontend handle it:
 //
-//  - the detail page hands the areas it received straight back to the `client_rollup`
-//    and `export_clients_csv` commands, and a copy rebuilt field by field would drop
-//    `month_to_date` and send the backend down its fallback;
-//  - the browser demo's stand-in for `client_rollup` (src/demo/mock.ts) does what the
-//    backend does: it adds the figure up when it is for the current month, counts one for
-//    another month as zero, and cuts its own month out of the series only for an area
-//    with no figure at all (the committed fixture predates the field).
+//  - the detail page hands the areas it received straight back to the backend, and a
+//    copy rebuilt field by field would drop `month_to_date` and send the backend down
+//    its fallback. Only the `client_rollup` path is driven here (`loadClients`); the
+//    export button calls `export_clients_csv` with the same `allAreas(sp)`, so what is
+//    held is the one function both callers share;
+//  - the browser demo's stand-in for `client_rollup` (src/demo/mock.ts) uses the figure
+//    when it is for the current month and otherwise cuts its own month out of the series,
+//    as it does for an area with no figure (the committed fixture predates the field).
+//    It differs from the app on purpose: the app has a scan that can be stale, the demo
+//    has none, its fixture is frozen at one month and its series is anchored to the
+//    viewer's today, so a label from another month says nothing about this one, and
+//    zeroing on it would show "$0 of $600" beside bars of hundreds.
 //
 // Same combined-module technique as scripts/detail-focus.test.mjs.
 import assert from "node:assert/strict";
@@ -91,20 +97,19 @@ test("the demo rollup uses the month figure the scan computed", async (t) => {
   assert.equal(missing["Northwind"].monthToDate, 15);
   assert.equal(missing["Acme Co"].monthToDate, 15);
 
-  // A figure for another month counts as zero: its scan ended before this month began, so
-  // it holds none of this month's spend, and a cut of the series (15) would book that
-  // scan's last day to the new month. Neither September's 999 nor the cut is used, and a
-  // later month's figure reads the same.
+  // A figure for another month is not this month's, however it got here, and the demo reads
+  // its series instead, as for an area with no figure: 15 each, 30 for the two. Neither
+  // September's 999 nor November's 5 is used, and nothing is zeroed on a label (the app
+  // would count both as zero; see the header for why the demo does not).
   const other = rows([
     area("acme-portal", { month_to_date: { month: "2026-09", cost: 999 } }),
     area("acme-portal/web", { month_to_date: { month: "2026-11", cost: 5 } }),
   ]);
-  assert.equal(other["Acme Co"].monthToDate, 0);
+  assert.equal(other["Acme Co"].monthToDate, 30);
 
-  // Only an area with no figure at all takes the cut; a bare number, the shape of an older
-  // build, is not a figure either.
-  const older = rows([area("northwind-api", { month_to_date: 999 })]);
-  assert.equal(older["Northwind"].monthToDate, 15);
+  // A value that is not a figure at all, a bare number say, takes the cut too.
+  const bare = rows([area("northwind-api", { month_to_date: 999 })]);
+  assert.equal(bare["Northwind"].monthToDate, 15);
 
   // The engine writes the month as two digits, and a single-digit month must still match.
   setClock(t, 2026, 3, 5);

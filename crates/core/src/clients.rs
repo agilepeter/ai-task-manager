@@ -4,7 +4,7 @@
 //! Rules are the user's own, kept in `clients.json` beside the ledger. They
 //! never leave the machine, and neither do the area names they match.
 
-use crate::spend::{AreaSpend, Window, TREND_DAYS};
+use crate::spend::{month_key, AreaSpend, Window, TREND_DAYS};
 use chrono::{Datelike, Days, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -139,12 +139,12 @@ fn month_to_date_from_series(daily: &[f64], today: NaiveDate) -> f64 {
 /// this month's spend, and a cut of its series would read that scan's last day
 /// as today's and book yesterday's spend to the new month. Only an area with
 /// no figure at all takes that cut (see `AreaSpend::month_to_date`). A work
-/// area with no spend in the last `TREND_DAYS` days is not in `areas`, so its
-/// earlier spend this month is not in the month to date.
+/// area with no spend in the last `TREND_DAYS` days is not in `areas`, so on
+/// the 31st of a 31-day month its spend on the 1st is not in the month to date.
 pub fn rollup(areas: &[AreaSpend], rules: &[ClientRule], today: NaiveDate) -> Vec<ClientSpend> {
-    // The same spelling `over_budget` marks its months with, and the scan labels
-    // its figures with.
-    let this_month = today.format("%Y-%m").to_string();
+    // The one spelling of a month: the scan labels its figures with it, and
+    // `over_budget` marks its months with it.
+    let this_month = month_key(today);
     let mut out: Vec<ClientSpend> = Vec::new();
     let mut sorted: Vec<&AreaSpend> = areas.iter().collect();
     sorted.sort_by(|a, b| b.last30.cost.total_cmp(&a.last30.cost));
@@ -219,7 +219,7 @@ pub fn over_budget(
     today: NaiveDate,
     fired: &mut Vec<String>,
 ) -> Vec<(String, f64, f64)> {
-    let month = today.format("%Y-%m").to_string();
+    let month = month_key(today);
     // Marks from earlier months are done with.
     fired.retain(|m| m.ends_with(&format!("|{month}")));
     let mut out = Vec::new();
@@ -266,7 +266,7 @@ pub fn csv(rows: &[ClientSpend], today: NaiveDate) -> String {
     out.push_str(&format!(
         "\r\n{}\r\n",
         cell(&format!(
-            "Generated {today}. From local Claude Code logs, priced at API rates: on a flat-rate plan this is equivalent value, not a charge. Month to date is summed from the scanned days of this calendar month; a work area with no spend in the last {TREND_DAYS} days is not listed, so its earlier spend this month is not in the figure."
+            "Generated {today}. From local Claude Code logs, priced at API rates: on a flat-rate plan this is equivalent value, not a charge. Month to date is summed from the scanned days of this calendar month; on the 31st of a 31-day month a work area with no spend in the last {TREND_DAYS} days is not listed, so its spend on the 1st is not in the figure."
         ))
     ));
     out
@@ -442,18 +442,20 @@ mod tests {
 
     #[test]
     fn an_area_without_the_field_takes_the_old_cut() {
-        // An area as a frontend from before `month_to_date` existed hands it back: no such
-        // key at all. It still loads, and its month is cut out of the daily series
-        // (September 1-3 here), never read as zero.
+        // An area with no `month_to_date` key at all, as one built by hand or read from the
+        // demo's committed fixture (made before the field existed) has: it still loads, and its
+        // month is cut out of the daily series (September 1-3 here), never read as zero. A real
+        // frontend never hands one back: the UI ships inside the binary and keeps its areas in
+        // memory only, so the arm is for hand-built areas and that fixture.
         let window = serde_json::json!({ "cost": 0.0, "tokens": 0.0, "cache_read": 0.0, "models": [] });
         let mut daily = vec![0.0; TREND_DAYS - 4];
         daily.extend([40.0, 10.0, 20.0, 5.0]); // Aug 31, then Sep 1, 2 and 3 (today)
-        let older = serde_json::json!({
+        let no_figure = serde_json::json!({
             "area": "site/acme-portal",
             "today": window, "yesterday": window, "last30": window,
             "daily_cost": daily,
         });
-        let area: AreaSpend = serde_json::from_value(older).expect("an older shape still loads");
+        let area: AreaSpend = serde_json::from_value(no_figure).expect("a shape with no figure still loads");
         assert_eq!(area.month_to_date, None);
 
         let today = NaiveDate::from_ymd_opt(2026, 9, 3).unwrap();
@@ -476,9 +478,11 @@ mod tests {
         assert!(out.starts_with("Client,Month to date (USD)"));
         assert!(out.contains("Unassigned,1.00,12.50,125,1.00,'=evil\r\n"), "{out}");
         assert!(out.contains("equivalent value, not a charge"));
-        // The footer says what the month figure is, and names the one thing it leaves out.
+        // The footer says what the month figure is, and names the one thing it leaves out, and
+        // when: an area with no spend in the last 30 days is unlisted every day, but only on the
+        // 31st of a 31-day month can that cost it spend of this month.
         let limit = format!(
-            "Month to date is summed from the scanned days of this calendar month; a work area with no spend in the last {TREND_DAYS} days is not listed, so its earlier spend this month is not in the figure."
+            "Month to date is summed from the scanned days of this calendar month; on the 31st of a 31-day month a work area with no spend in the last {TREND_DAYS} days is not listed, so its spend on the 1st is not in the figure."
         );
         assert!(out.contains(&limit), "{out}");
         assert!(!out.contains("partial once a month runs longer"), "the old claim, false since the scan sums the month: {out}");

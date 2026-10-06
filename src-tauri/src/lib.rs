@@ -361,10 +361,16 @@ struct ClientView {
 
 /// Work areas rolled up to the user's clients. The frontend already holds
 /// the areas from the spend scan, so they are passed in rather than rescanned.
+///
+/// The date is the scan's own (`spend::today_naive_date`, which honours the
+/// `AITM_TODAY` override), not the clock read directly: the scan labels each
+/// area's month figure with the month of that date, and the rollup uses a
+/// figure only when its label is the month of the date it is given, so the two
+/// must read the same date. Every caller of `clients::rollup` here does.
 #[tauri::command]
 fn client_rollup(areas: Vec<spend::AreaSpend>) -> ClientView {
     let rules = clients::load_from(&clients::path());
-    let rows = clients::rollup(&areas, &rules, chrono::Local::now().date_naive());
+    let rows = clients::rollup(&areas, &rules, spend::today_naive_date());
     ClientView { rules, rows }
 }
 
@@ -378,7 +384,7 @@ fn save_clients(rules: Vec<clients::ClientRule>) -> Result<Vec<clients::ClientRu
 #[tauri::command]
 fn export_clients_csv(app: tauri::AppHandle, areas: Vec<spend::AreaSpend>) -> Result<String, String> {
     let cfg = config_with_defaults(load_config());
-    let today = chrono::Local::now().date_naive();
+    let today = spend::today_naive_date(); // the scan's date, as in `client_rollup`
     let rules = clients::load_from(&clients::path());
     let body = clients::csv(&clients::rollup(&areas, &rules, today), today);
     let dir = app
@@ -2992,7 +2998,7 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
     let running_agents = {
         let cfg = config_with_defaults(load_config());
         let on = cfg.get("apiFeeds").and_then(Value::as_bool).unwrap_or(false);
-        let today = chrono::Local::now().date_naive();
+        let today = spend::today_naive_date(); // the scan's date, as in `client_rollup`
         let areas: Vec<spend::AreaSpend> = result
             .iter()
             .flat_map(|p| p.projects.iter())
@@ -3037,7 +3043,9 @@ async fn fetch_spend(app: tauri::AppHandle) -> Vec<spend::ProviderSpend> {
         use tauri_plugin_notification::NotificationExt;
         let cfg = config_with_defaults(load_config());
         let now = chrono::Local::now();
-        let today = now.date_naive();
+        // The scan's date, as in `client_rollup`: the client budgets below roll up
+        // and mark their month by it. `now` stays the clock, for the hour.
+        let today = spend::today_naive_date();
         let marks_path = providers::config_dir().join("alert_marks.json");
         let mut marks: Value = std::fs::read_to_string(&marks_path)
             .ok()
