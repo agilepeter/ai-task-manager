@@ -802,7 +802,7 @@
   "finding.agent-runaway.detail": "Em execução agora e acima de uma marca que você definiu: {names}. Um valor em dólares é um ritmo por hora, calculado a partir do custo dos últimos 10 minutos. Uma duração como 2:10 indica há quanto tempo o agente está aberto, em horas e minutos, e só conta enquanto ele ainda está trabalhando. O app apenas avisa; nunca interrompe um agente.",
   "finding.limit-time.title.one": "{count} limite ficou esgotado por duas horas ou mais nos últimos 30 dias",
   "finding.limit-time.title.other": "{count} limites ficaram esgotados por duas horas ou mais nos últimos 30 dias",
-  "finding.limit-time.detail": "Nos últimos 30 dias, o limite que ficou esgotado por mais tempo permaneceu assim por {total} ({times}); o trecho mais longo durou {longest}. A página de cada provedor mostra qual limite e quando.",
+  "finding.limit-time.detail": "Nos últimos 30 dias, o limite que ficou esgotado por mais tempo permaneceu assim por {total} ({times}); o período contínuo mais longo durou {longest}. A página de cada provedor mostra qual limite e quando.",
   "check.tools.info.title.one": "{count} ferramenta de IA encontrada",
   "check.tools.info.title.other": "{count} ferramentas de IA encontradas",
   "check.tools.info.detail": "Nenhuma das ferramentas de IA que este app conhece foi encontrada.",

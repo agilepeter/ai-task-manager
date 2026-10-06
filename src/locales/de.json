@@ -802,7 +802,7 @@
   "finding.agent-runaway.detail": "Aktuell laufende Agenten über einer von Ihnen gesetzten Marke: {names}. Ein Dollarbetrag ist ein Tempo pro Stunde, berechnet aus den Kosten der letzten 10 Minuten. Eine Zeitangabe wie 2:10 gibt an, wie lange der Agent schon offen ist, in Stunden und Minuten, und zählt nur, solange er noch arbeitet. Die App meldet sich nur; sie beendet nie einen Agenten.",
   "finding.limit-time.title.one": "{count} Limit war in den letzten 30 Tagen zwei Stunden oder länger aufgebraucht",
   "finding.limit-time.title.other": "{count} Limits waren in den letzten 30 Tagen zwei Stunden oder länger aufgebraucht",
-  "finding.limit-time.detail": "In den letzten 30 Tagen war das Limit, das am längsten aufgebraucht blieb, für insgesamt {total} ({times}) aufgebraucht; die längste Phase am Stück dauerte {longest}. Die Seite jedes Anbieters zeigt, welches Limit und wann.",
+  "finding.limit-time.detail": "In den letzten 30 Tagen war das Limit, das am längsten aufgebraucht blieb, für insgesamt {total} ({times}) aufgebraucht; die längste Phase am Stück dauerte {longest}. Die Seite jedes Anbieters zeigt, welches Limit betroffen war und wann.",
   "check.tools.info.title.one": "1 KI-Tool gefunden",
   "check.tools.info.title.other": "{count} KI-Tools gefunden",
   "check.tools.info.detail": "Keines der dieser App bekannten KI-Tools wurde gefunden.",
