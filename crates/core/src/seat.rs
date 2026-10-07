@@ -622,6 +622,7 @@ mod tests {
         assert_eq!(r.spend[0].provider, "claude", "the account hash is dropped");
         assert_eq!(r.spend[0].last30, 120.0);
         assert_eq!(r.findings[0].title, "30% of spend has no work area");
+        assert_eq!(r.agent_version, crate::VERSION, "the report carries this crate's version, which the app's own is held equal to");
     }
 
     #[test]

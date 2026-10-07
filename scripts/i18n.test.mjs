@@ -478,7 +478,8 @@ test("the text written in index.html beside every data-i18n key is that key's En
   // whose end tag is missing (legal HTML) would otherwise be dropped from the stack unseen when
   // its parent closes, and its fallback never compared.
   const elements = found.filter((f) => f.kind === "text" || f.kind === "text-with-children").length;
-  const written = (html.match(/\sdata-i18n="/g) ?? []).length;
+  // Counted with the comments cut out, so a comment that quotes the attribute is not an element.
+  const written = (html.replace(/<!--[\s\S]*?-->/g, "").match(/\sdata-i18n="/g) ?? []).length;
   assert.equal(elements, written, `index.html has ${written} data-i18n elements but the walker closed ${elements}: an element is missing its end tag`);
   const drift = staticFallbackDrift(html, dicts.en).filter((d) => d.kind === "text");
   assert.deepEqual(drift.map(describeDrift), [], `index.html text that no longer matches en.json (change the markup, not the locale file):\n${drift.map(describeDrift).join("\n")}`);

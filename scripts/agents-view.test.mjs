@@ -1462,6 +1462,7 @@ test("Reset all settings clears the live rule and repaints its dropdowns, and to
   assert.ok(reset, "resetAllSettings() moved in src/main.ts");
   const clear = reset.indexOf("await clearLiveRule()");
   assert.ok(clear !== -1, "resetAllSettings() must clear the live rule");
+  assert.match(reset, /await clearLiveRule\(\)\.catch\(/, "best effort, like the steps before it: a rejected clear must not stop the reset short of closing Settings");
   assert.ok(clear > reset.indexOf("patchConfig("), "after the config patch, which does not reach it");
   assert.ok(clear < reset.indexOf("syncSettingsControls()"), "before the controls are painted from what is saved");
   assert.ok(!/set_agent_watch|saveAgentWatch|saveAgentLive|budgetPayload/.test(reset), "the reset writes the watch only through clearLiveRule(), which keeps the budgets: they are the user's data, not a setting");
