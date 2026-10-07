@@ -62,6 +62,16 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
   changelog page and its twelve screenshots show 0.1.5. `docs/promo.png` was retaken for the
   first time since 0.1.0.
 
+- **v0.1.6 was published on 2026-10-06** (00:33 UTC on the 7th) from tag `v0.1.6` (commit
+  f19e53b, run 37551680867) by the `publish` job, after CI passed on the same commit. Budgets per
+  agent with a runaway rule, time at the limit, and client budgets that count the whole month on
+  the 31st; the unused-server finding built for this release was held back and is not announced.
+  Checked afterwards: the three installers and the update feed answer, the feed names 0.1.6 with
+  all seven platform entries signed, and the product page, its demo, its changelog page and its
+  twelve screenshots show 0.1.6; `docs/promo.png` was retaken. First release whose user-agent and
+  seat report carry the app's version: `crates/core/Cargo.toml` is now a third manifest to bump,
+  and a test holds it equal to the app's.
+
 ## Not yet on, and why
 
 1. **Update checks are opt-in and off by default.** A Settings toggle (`updateChecks`) turns them
