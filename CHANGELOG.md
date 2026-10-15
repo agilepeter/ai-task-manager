@@ -6,6 +6,19 @@ numbering at 0.1.0, so the numbers here do not continue upstream's. Pane's own
 release history is kept verbatim in
 [docs/upstream-changelog.md](docs/upstream-changelog.md).
 
+## Unreleased
+
+### Fixed
+
+- **On macOS 27, clicking the menu bar icon opened the Quit menu instead of
+  the panel.** macOS 27 stopped delivering clicks to a status item that has a
+  menu attached, so every click, left or right, opened the one-item menu and
+  the panel never showed. The tray library the app shipped with (tray-icon
+  0.24) kept the menu attached for the life of the icon. The lockfile now
+  carries Tauri 2.12.4 with tray-icon 0.25.1, which attaches the menu only
+  while it is being shown, so a left click reaches the app again and toggles
+  the panel as before. No app code changed. Reported in #1.
+
 ## 0.1.6 — 2026-10-06
 
 Budgets for agents and time spent at the limit, both in all nine languages,
