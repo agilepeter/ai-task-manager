@@ -72,6 +72,16 @@ Where distribution stands, and what each remaining step needs. Checked 2026-09-2
   seat report carry the app's version: `crates/core/Cargo.toml` is now a third manifest to bump,
   and a test holds it equal to the app's.
 
+- **v0.1.7 was published on 2026-10-15** (13:39 UTC) from tag `v0.1.7` (commit 009928b, run
+  38742713193) by the `publish` job, after CI passed on the same commit (run 38741831415) and on
+  the bump commit under it (run 38739154840). The macOS 27 tray fix from PR #2 (issue #1, the first
+  outside report): tauri 2.12.4 with tray-icon 0.25.1, the Windows-only `webview2-com` /
+  `windows-core` pins held equal to wry's, and `ci.yml` now also runs on pull requests. Checked
+  afterwards: the three installers and the update feed answer, the feed names 0.1.7 with all seven
+  platform entries signed, and the product page, its demo, its changelog page and its twelve
+  screenshots show 0.1.7; `docs/promo.png` was retaken. Not verified on a macOS 27 machine; the
+  reporter was asked to confirm.
+
 ## Not yet on, and why
 
 1. **Update checks are opt-in and off by default.** A Settings toggle (`updateChecks`) turns them
