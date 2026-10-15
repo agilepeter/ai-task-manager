@@ -40,5 +40,9 @@ aitm-core = { path = "../crates/core", features = ["test-support"] }
 
 # Windows-only: WebView2 memory hints.
 [target.'cfg(windows)'.dependencies]
-webview2-com = "0.38"
-windows-core = "0.61"
+# Held equal to the versions wry uses (tauri-runtime-wry -> wry -> webview2-com), because
+# set_webview_memory_level casts the ICoreWebView2 that wry hands back: with two
+# webview2-com / windows-core versions in the tree, `cast` is a method of the wrong trait
+# and the Windows build fails. tauri 2.12 (wry 0.57) is on webview2-com 0.39 / windows-core 0.62.
+webview2-com = "0.39"
+windows-core = "0.62"
