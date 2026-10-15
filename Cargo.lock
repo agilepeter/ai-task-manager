@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ai-task-manager"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "aitm-core",
  "arboard",
@@ -63,7 +63,7 @@ dependencies = [
 
 [[package]]
 name = "aitm-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64 0.22.1",
  "chrono",

@@ -21,6 +21,20 @@ on:
       - "package-lock.json"
       - "tsconfig.json"
       - "vite.config.ts"
+  pull_request:
+    paths:
+      - "crates/**"
+      - "src-tauri/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ci.yml"
+      - "src/**"
+      - "scripts/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "vite.config.ts"
   workflow_dispatch:
 
 concurrency:

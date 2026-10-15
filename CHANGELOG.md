@@ -6,7 +6,7 @@ numbering at 0.1.0, so the numbers here do not continue upstream's. Pane's own
 release history is kept verbatim in
 [docs/upstream-changelog.md](docs/upstream-changelog.md).
 
-## Unreleased
+## 0.1.7 — 2026-10-15
 
 ### Fixed
 
