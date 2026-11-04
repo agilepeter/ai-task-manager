@@ -510,6 +510,14 @@ Rust tests: `cargo test --workspace` from the repo root; read the total off the 
 summary line rather than off this file, which will not track it going forward.
 Frontend tests: `npm test` (`node --test scripts/*.test.mjs`), also run by CI; same.
 
+**Dependency advisories.** Dependabot security updates are enabled (2026-11-04), so a
+patch-level RustSec or npm advisory arrives as a pull request; merge it when CI is green.
+The weekly Audit workflow (`.github/workflows/audit.yml`, Mondays 09:23 UTC) is the
+backstop. Dependabot cannot bump a transitive crate whose parent must also move (the
+2026-11-04 case: `zip` 4 to 9 arrived only via
+`cargo update -p tauri-plugin-updater --precise 2.14.1`), so that class is fixed by hand
+with `--precise`.
+
 ## Tests share process-wide state: serialize, never assume order
 
 Several app tests mutate global caches (`last_ok()`, `fail_state()`). `SnapCacheGuard` holds
