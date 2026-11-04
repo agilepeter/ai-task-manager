@@ -6,6 +6,21 @@ numbering at 0.1.0, so the numbers here do not continue upstream's. Pane's own
 release history is kept verbatim in
 [docs/upstream-changelog.md](docs/upstream-changelog.md).
 
+## 0.1.8 — 2026-11-04
+
+### Fixed
+
+- **Fifteen dependency security advisories cleared; no app code changed.** The
+  TLS stack every provider call runs on (rustls 0.23.46, rustls-webpki
+  0.103.16, webpki-roots 1.0.11) no longer accepts certificates chained
+  through intermediates that the root program has distrusted, and three
+  lower-severity rustls issues are closed with it. The Windows updater's
+  archive library moves from zip 4 to zip 9 (tauri-plugin-updater 2.14.1),
+  closing symlink and permission bugs in update extraction; update checks are
+  off by default, so that path only runs for people who turned them on. The
+  QUIC advisories in the same batch do not touch this app, which never
+  speaks QUIC.
+
 ## 0.1.7 — 2026-10-15
 
 ### Fixed
