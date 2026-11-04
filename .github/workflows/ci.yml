@@ -124,8 +124,20 @@ jobs:
       # second job just to lint.
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Explicit bash (not the Windows default pwsh) so the pipe runs under pipefail
+      # and nextest's exit code survives `tee`. A test that passes only on retry is
+      # still a pass to nextest, so surface it as an annotation instead of a buried line.
       - name: Tests
-        run: cargo nextest run --workspace --locked --profile ci
+        shell: bash
+        run: |
+          cargo nextest run --workspace --locked --profile ci 2>&1 | tee nextest.log
+          if grep -q "FLAKY" nextest.log; then echo "::warning title=Flaky tests::$(grep FLAKY nextest.log | head -5 | tr '\n' ' ')"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nextest-junit
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: ignore
       # nextest does not run doctests; this keeps a future one from being skipped.
       - name: Doc tests
         run: cargo test --doc --workspace --locked

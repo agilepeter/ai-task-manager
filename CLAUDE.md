@@ -516,6 +516,12 @@ CPU load.
 Gatekeeper assessment per test process. The workspace also sets packed `split-debuginfo`
 in `Cargo.toml`, so `target/debug/deps` never fills with `*.rcgu.o` object files that
 AppKit's main-bundle lookup would scan on every test process.
+A FLAKY line in nextest output is a real intermittent bug and gets investigated like a
+failure, never left to ride (CI annotates it as a warning). An exported `RUSTFLAGS`
+environment variable replaces the rustflags from `.cargo/config.toml` entirely, so with it
+set the signing flag silently stops applying and test processes get slow again. Packed
+split-debuginfo only prevents new `*.rcgu.o` files; a `deps/` directory that is already
+crowded needs one `cargo clean`.
 Frontend tests: `npm test` (`node --test scripts/*.test.mjs`), also run by CI; same.
 
 **Dependency advisories.** Dependabot security updates are enabled (2026-11-04), so a
