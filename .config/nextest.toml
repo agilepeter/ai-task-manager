@@ -1,0 +1,14 @@
+# Each test runs in its own process, so process-global state (the billing
+# semaphore in providers/onenewapi/snapshot.rs, the snapshot caches) cannot
+# couple tests the way it does under `cargo test`'s in-process threads.
+[profile.default]
+# A pass on retry is reported as FLAKY and counts as a pass: flakes show up
+# in the log as evidence without blocking the run.
+retries = 1
+slow-timeout = { period = "60s", terminate-after = 2 }
+
+[profile.ci]
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"

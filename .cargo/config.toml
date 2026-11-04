@@ -1,0 +1,5 @@
+[target.x86_64-apple-darwin]
+# Intel macOS does not ad-hoc sign at link time (Apple Silicon does), and macOS assesses an
+# unsigned binary for several seconds on every exec. nextest execs each test binary once per
+# test, so without this a local run takes half an hour instead of a minute.
+rustflags = ["-C", "link-arg=-Wl,-adhoc_codesign"]

@@ -1,3 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["crates/core", "crates/agent", "crates/collector", "src-tauri"]
+
+[profile.dev]
+# macOS's default "unpacked" leaves a *.rcgu.o per codegen unit in target/debug/deps forever;
+# AppKit's main-bundle lookup enumerates that directory on every process start, so a crowded
+# deps/ costs seconds per test process. "packed" folds debug info into one .dSYM per binary.
+split-debuginfo = "packed"

@@ -506,8 +506,16 @@ would let this app and upstream Pane overwrite each other.
 Needs Rust (rustup, official installer: Homebrew has no bottle for Intel macOS 26 and
 builds LLVM from source) and Node. `npm install`, then `npm run tauri dev`.
 Local API for checking real numbers: `curl http://127.0.0.1:6736/v1/usage`.
-Rust tests: `cargo test --workspace` from the repo root; read the total off the run's own
-summary line rather than off this file, which will not track it going forward.
+Rust tests: `cargo nextest run --workspace` from the repo root (doctests, which nextest
+skips: `cargo test --doc --workspace`); read the total off the run's own summary line rather
+than off this file, which will not track it going forward. nextest runs each test in its own
+process, because `cargo test` shares one process per binary and a process-global such as the
+billing semaphore in `onenewapi/snapshot.rs` let tests starve each other's mock servers under
+CPU load.
+`.cargo/config.toml` ad-hoc signs binaries at link time on Intel Macs so they do not pay a
+Gatekeeper assessment per test process. The workspace also sets packed `split-debuginfo`
+in `Cargo.toml`, so `target/debug/deps` never fills with `*.rcgu.o` object files that
+AppKit's main-bundle lookup would scan on every test process.
 Frontend tests: `npm test` (`node --test scripts/*.test.mjs`), also run by CI; same.
 
 **Dependency advisories.** Dependabot security updates are enabled (2026-11-04), so a
@@ -525,6 +533,8 @@ a lock for its lifetime so tests sharing an id cannot overlap; use it for any ne
 touches those caches. Name temp paths with `providers::unique_stamp()`, never the clock alone
 (macOS reports whole microseconds). A test that fails 1 run in 10 is a real bug: run the
 suite 20 to 30 times before calling a concurrency fix done.
+nextest runs each test in its own process, so these in-process guards protect `cargo test`
+and IDE runs only.
 
 ## CI
 
